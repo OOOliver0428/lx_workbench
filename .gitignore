@@ -1,0 +1,32 @@
+# macOS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Runtime databases and backups
+*.db
+*.db-shm
+*.db-wal
+backups/
+outputs/
+
+# Local Codex metadata
+.agents/
+.codex/
+
+# Separate prototype and internal source materials
+.dockerignore
+solution_warroom/
+解决方案团队作战台-*.md
+解决方案部门周报-20*.md

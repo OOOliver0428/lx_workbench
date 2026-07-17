@@ -1,0 +1,1663 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>解决方案部门 · 项目周报</title>
+  <style>
+    :root {
+      --ink: #0d2138;
+      --text: #263f5c;
+      --muted: #657a94;
+      --blue: #1677ff;
+      --cyan: #16c6d5;
+      --purple: #6b5cff;
+      --pink: #e94f9b;
+      --line: #d7e7f5;
+      --pale: #eef8ff;
+      --soft: #f6fbff;
+      --white: #fff;
+      --shadow: 0 12px 34px rgba(39, 106, 166, .09);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 1180px;
+      color: var(--text);
+      font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 96% 2%, rgba(22, 198, 213, .12), transparent 21%),
+        radial-gradient(circle at 84% 100%, rgba(107, 92, 255, .08), transparent 24%),
+        linear-gradient(rgba(22,119,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22,119,255,.025) 1px, transparent 1px),
+        linear-gradient(140deg, #f8fcff 0%, #eef8ff 55%, #f8fbff 100%);
+      background-size: auto, auto, 24px 24px, 24px 24px, auto;
+    }
+
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .app-shell {
+      width: min(1400px, calc(100vw - 32px));
+      min-height: 800px;
+      margin: 0 auto;
+      padding: 18px 24px 22px;
+      position: relative;
+    }
+
+    .topbar {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid rgba(215, 231, 245, .95);
+      background: rgba(255,255,255,.87);
+      backdrop-filter: blur(14px);
+      border-radius: 18px;
+      padding: 0 18px;
+      box-shadow: 0 8px 28px rgba(63, 118, 163, .07);
+    }
+
+    .brand { display: flex; align-items: center; gap: 15px; min-width: 300px; }
+    .brand-logo {
+      width: 112px;
+      height: 44px;
+      object-fit: contain;
+      object-position: left center;
+      flex: 0 0 auto;
+    }
+    .brand-divider { width: 1px; height: 25px; background: var(--line); }
+    .brand-title { font-weight: 700; font-size: 16px; color: var(--ink); letter-spacing: .02em; }
+
+    .topnav { display: flex; align-items: center; gap: 6px; padding: 4px; background: var(--soft); border-radius: 12px; }
+    .nav-btn {
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      border-radius: 9px;
+      padding: 8px 17px;
+      font-size: 13px;
+      transition: .18s ease;
+    }
+    .nav-btn.active { background: #fff; color: var(--blue); box-shadow: 0 3px 12px rgba(27, 91, 146, .11); font-weight: 650; }
+
+    .week-wrap { min-width: 300px; display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+    .week-select {
+      min-width: 190px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 8px 12px;
+      outline: none;
+    }
+
+    .headline {
+      height: 102px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 4px 0;
+    }
+    .eyebrow { color: var(--blue); font-size: 12px; font-weight: 700; letter-spacing: .08em; margin-bottom: 7px; }
+    h1 { margin: 0; color: var(--ink); font-size: 28px; letter-spacing: -.02em; line-height: 1.2; }
+    .subtitle { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+    .headline-actions { display: flex; align-items: center; gap: 10px; }
+    .ghost-btn, .primary-btn {
+      height: 38px;
+      padding: 0 15px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .ghost-btn { background: rgba(255,255,255,.78); color: var(--text); }
+    .primary-btn { border-color: var(--blue); background: linear-gradient(135deg, #2488ff, #116be7); color: #fff; box-shadow: 0 8px 20px rgba(22,119,255,.2); }
+    .icon { width: 16px; height: 16px; display: block; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+    .metric-card {
+      height: 92px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.91);
+      border-radius: 17px;
+      box-shadow: var(--shadow);
+      padding: 15px 17px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric-card::after { content: ""; position: absolute; width: 76px; height: 76px; border-radius: 50%; right: -31px; top: -36px; background: var(--glow, rgba(22,119,255,.12)); }
+    .metric-icon { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; color: var(--accent); background: var(--icon-bg); flex: 0 0 auto; }
+    .metric-icon svg { width: 21px; height: 21px; }
+    .metric-label { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .metric-row { display: flex; align-items: baseline; gap: 7px; }
+    .metric-value { color: var(--ink); font-size: 24px; line-height: 1; font-weight: 760; }
+    .metric-note { color: var(--accent); font-size: 11px; font-weight: 650; }
+
+    .content-grid { display: grid; grid-template-columns: minmax(0, 2.12fr) minmax(330px, .88fr); gap: 14px; }
+    .panel {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.92);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .project-panel { height: 484px; }
+    .panel-head { height: 67px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e8f1f8; }
+    .panel-title { font-size: 16px; color: var(--ink); font-weight: 730; margin: 0; }
+    .panel-desc { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .panel-tools { display: flex; align-items: center; gap: 8px; }
+    .search-box { height: 34px; width: 185px; padding: 0 10px; display: flex; align-items: center; gap: 7px; background: var(--soft); border: 1px solid #e1edf7; border-radius: 9px; }
+    .search-box svg { width: 15px; color: #7890aa; flex: 0 0 auto; }
+    .search-box input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 12px; }
+    .filter-select { height: 34px; border: 1px solid #e1edf7; background: #fff; color: var(--text); border-radius: 9px; padding: 0 9px; font-size: 12px; outline: none; }
+
+    .project-table-head {
+      height: 34px;
+      display: grid;
+      grid-template-columns: 2.15fr 3.5fr 1.05fr 1.25fr;
+      align-items: center;
+      padding: 0 18px;
+      color: #7188a1;
+      background: #f7fbff;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .project-list { height: 382px; overflow: auto; padding: 0 9px 10px; scrollbar-width: thin; scrollbar-color: #c9deef transparent; }
+    .project-row {
+      min-height: 92px;
+      display: grid;
+      grid-template-columns: 2.15fr 3.5fr 1.05fr 1.25fr;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 9px;
+      border-bottom: 1px solid #edf3f8;
+      border-radius: 12px;
+      transition: .18s ease;
+    }
+    .project-row:hover { background: #f5faff; transform: translateY(-1px); }
+    .project-name-wrap { min-width: 0; display: flex; gap: 10px; align-items: center; }
+    .project-dot { width: 9px; height: 39px; border-radius: 99px; background: var(--project-color); flex: 0 0 auto; box-shadow: 0 0 0 4px color-mix(in srgb, var(--project-color) 11%, transparent); }
+    .project-name { color: var(--ink); font-size: 13px; font-weight: 710; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .project-meta { margin-top: 6px; display: flex; gap: 5px; }
+    .tag { display: inline-block; color: var(--tag-color, #3574a9); background: var(--tag-bg, #eef7ff); border-radius: 5px; padding: 3px 6px; font-size: 9px; line-height: 1; white-space: nowrap; }
+    .work-text { min-width: 0; }
+    .work-main { color: var(--text); font-size: 12px; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .work-result { color: var(--muted); font-size: 10px; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .status-cell { display: flex; align-items: center; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 999px; color: var(--status-color); background: var(--status-bg); font-size: 10px; font-weight: 650; white-space: nowrap; }
+    .status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent); }
+    .people { display: flex; align-items: center; }
+    .avatar { width: 28px; height: 28px; margin-left: -6px; border: 2px solid white; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 10px; font-weight: 700; background: var(--avatar-bg); box-shadow: 0 2px 6px rgba(30,80,120,.12); }
+    .avatar:first-child { margin-left: 0; }
+    .more-avatar { background: #edf4fa; color: #5c7590; }
+
+    .right-stack { height: 484px; display: grid; grid-template-rows: 278px 192px; gap: 14px; }
+    .people-panel, .focus-panel { padding: 16px; }
+    .mini-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 13px; }
+    .mini-head .panel-title { font-size: 15px; }
+    .mini-link { border: 0; background: transparent; color: var(--blue); font-size: 11px; padding: 2px 0; }
+    .contributor-list { display: grid; gap: 7px; }
+    .contributor { display: grid; grid-template-columns: 30px 64px 1fr 54px; gap: 8px; align-items: center; }
+    .person-avatar { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; background: var(--avatar-bg); }
+    .person-name { color: var(--ink); font-size: 12px; font-weight: 650; }
+    .person-role { color: var(--muted); font-size: 9px; margin-top: 2px; }
+    .contrib-track { height: 7px; border-radius: 99px; background: #edf3f7; overflow: hidden; }
+    .contrib-bar { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #1677ff, #36a8ff); }
+    .contrib-count { text-align: right; color: var(--ink); font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .contrib-count span { color: var(--muted); font-size: 9px; font-weight: 500; }
+
+    .focus-banner { border-radius: 13px; padding: 12px 13px; background: linear-gradient(122deg, #1178f5 0%, #1f91f5 55%, #20becd 100%); color: #fff; position: relative; overflow: hidden; }
+    .focus-banner::after { content: ""; position: absolute; width: 116px; height: 116px; border-radius: 50%; border: 25px solid rgba(255,255,255,.08); right: -39px; top: -52px; }
+    .focus-kicker { font-size: 10px; opacity: .8; margin-bottom: 5px; }
+    .focus-title { font-size: 13px; font-weight: 700; line-height: 1.42; max-width: 89%; }
+    .focus-points { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
+    .focus-point { min-width: 0; display: flex; gap: 7px; align-items: center; color: var(--text); background: var(--soft); border: 1px solid #e6f0f8; border-radius: 9px; padding: 8px; font-size: 10px; }
+    .focus-point i { width: 7px; height: 7px; border-radius: 50%; background: var(--point); box-shadow: 0 0 0 3px color-mix(in srgb, var(--point) 12%, transparent); flex: 0 0 auto; }
+    .focus-point span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .empty-state { height: 100%; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+    .page-no { position: absolute; right: 28px; bottom: 5px; color: #7990a7; font-size: 10px; }
+
+    .drawer-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(10,35,58,.22); backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: .2s ease; }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+    .drawer { position: absolute; top: 16px; bottom: 16px; right: 16px; width: 430px; overflow: auto; background: #fff; border-radius: 20px; box-shadow: 0 25px 70px rgba(8,34,60,.23); padding: 22px; transform: translateX(25px); transition: .2s ease; scrollbar-width: thin; scrollbar-color: #c9deef transparent; }
+    .drawer-backdrop.open .drawer { transform: translateX(0); }
+    .drawer-close { float: right; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); color: var(--muted); }
+    .drawer-kicker { color: var(--blue); font-size: 11px; font-weight: 700; margin: 12px 0 8px; }
+    .drawer h2 { margin: 0; color: var(--ink); font-size: 23px; }
+    .drawer-section { margin-top: 22px; }
+    .drawer-section h3 { color: var(--ink); font-size: 13px; margin: 0 0 10px; }
+    .drawer-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 9px; }
+    .drawer-list li { position: relative; padding-left: 15px; font-size: 12px; line-height: 1.55; color: var(--text); }
+    .drawer-list li::before { content: ""; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+    .drawer-people { display: flex; flex-wrap: wrap; gap: 8px; }
+    .person-chip { display: flex; align-items: center; gap: 7px; padding: 6px 9px 6px 6px; background: var(--soft); border: 1px solid #e3eef7; border-radius: 10px; font-size: 11px; color: var(--text); }
+    .person-chip .avatar { margin: 0; width: 25px; height: 25px; }
+    .person-delivery-list { display: grid; gap: 9px; }
+    .person-delivery-card { padding: 11px; border: 1px solid #deebf5; border-radius: 12px; background: linear-gradient(145deg, #fff, #f6fbff); }
+    .person-delivery-head { display: flex; align-items: center; gap: 8px; }
+    .person-delivery-head strong { color: var(--ink); font-size: 12px; }
+    .person-delivery-hours { margin-left: auto; padding: 4px 7px; border-radius: 999px; color: var(--blue); background: #eaf4ff; font-size: 10px; font-weight: 700; }
+    .person-delivery-line { margin-top: 7px; color: var(--text); font-size: 10px; line-height: 1.55; }
+    .person-delivery-line b { color: #55718d; font-weight: 650; }
+
+    .report-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: rgba(10,35,58,.28); backdrop-filter: blur(4px); opacity: 0; pointer-events: none; transition: .2s ease; }
+    .report-backdrop.open { opacity: 1; pointer-events: auto; }
+    .report-modal { width: 1040px; height: 690px; background: #fff; border: 1px solid rgba(215,231,245,.95); border-radius: 22px; box-shadow: 0 28px 80px rgba(8,34,60,.25); overflow: hidden; transform: translateY(14px) scale(.99); transition: .2s ease; }
+    .report-backdrop.open .report-modal { transform: translateY(0) scale(1); }
+    .report-modal-head { height: 74px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid #e4eef7; background: linear-gradient(120deg, #f8fcff, #eef8ff); }
+    .report-modal-title { margin: 0; color: var(--ink); font-size: 19px; }
+    .report-modal-subtitle { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .report-head-actions { display: flex; align-items: center; gap: 9px; }
+    .settings-link { height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--blue); font-size: 11px; font-weight: 650; }
+    .report-close { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--muted); font-size: 19px; }
+    .report-modal-body { height: 616px; display: grid; grid-template-columns: 1fr 1.12fr; }
+    .entry-form-wrap { padding: 20px 22px; border-right: 1px solid #e5eef6; overflow: auto; }
+    .entry-list-wrap { padding: 20px 22px; background: #fbfdff; overflow: hidden; }
+    .section-kicker { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .05em; margin-bottom: 6px; }
+    .section-heading { color: var(--ink); font-size: 16px; font-weight: 720; margin: 0 0 15px; }
+    .entry-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 13px; padding: 4px; border-radius: 11px; background: #eef5fb; }
+    .entry-mode-btn { height: 33px; border: 0; border-radius: 8px; color: #607a94; background: transparent; font-size: 11px; font-weight: 650; }
+    .entry-mode-btn.active { color: var(--blue); background: #fff; box-shadow: 0 3px 10px rgba(29,94,149,.1); }
+    .entry-mode-panel[hidden] { display: none; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-field { display: grid; gap: 6px; }
+    .form-field.full { grid-column: 1 / -1; }
+    .form-field label { color: #526b85; font-size: 11px; font-weight: 650; }
+    .form-control { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--text); padding: 9px 11px; outline: none; font-size: 12px; transition: .16s ease; }
+    .form-control:focus { border-color: #80b9f7; box-shadow: 0 0 0 3px rgba(22,119,255,.09); }
+    textarea.form-control { resize: none; line-height: 1.55; }
+    .summary-input { height: 88px; }
+    .raw-report-input { height: 226px; font-size: 13px; }
+    .single-summary-input { height: 78px; }
+    .single-output-input { height: 62px; }
+    .compact-input { height: 62px; }
+    .form-hint { color: #8295aa; font-size: 10px; line-height: 1.45; }
+    .form-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 14px; }
+    .small-btn { height: 36px; border-radius: 9px; padding: 0 14px; border: 1px solid var(--line); background: #fff; color: var(--text); font-size: 12px; font-weight: 650; }
+    .small-btn.primary { border-color: var(--blue); background: var(--blue); color: #fff; box-shadow: 0 7px 16px rgba(22,119,255,.17); }
+    .entry-list-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 11px; }
+    .entry-count { color: var(--blue); background: #eaf4ff; border-radius: 999px; padding: 5px 9px; font-size: 10px; font-weight: 650; }
+    .personal-list { height: 222px; display: grid; align-content: start; gap: 8px; overflow: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #c9deef transparent; }
+    .personal-item { display: grid; grid-template-columns: 34px 1fr 24px; gap: 9px; align-items: start; padding: 10px; background: #fff; border: 1px solid #e2edf6; border-radius: 12px; }
+    .personal-item .person-avatar { width: 34px; height: 34px; }
+    .personal-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .personal-name { color: var(--ink); font-size: 12px; font-weight: 700; }
+    .personal-project { max-width: 170px; color: #4a6d8c; background: #eef7ff; border-radius: 5px; padding: 3px 6px; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .personal-summary { color: var(--text); font-size: 10px; line-height: 1.48; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .personal-detail { display: flex; align-items: center; gap: 7px; margin-top: 6px; color: #66809a; font-size: 9px; }
+    .personal-detail span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hours-pill { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; color: #1677ff; background: #eaf4ff; font-weight: 700; }
+    .project-people-summary { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .project-hours-total { color: var(--blue); font-size: 9px; font-weight: 700; white-space: nowrap; }
+    .delete-entry { width: 24px; height: 24px; border: 0; border-radius: 7px; background: #f5f8fb; color: #91a2b4; font-size: 14px; }
+    .no-entry { height: 100%; min-height: 116px; display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 11px; border: 1px dashed #d7e7f5; border-radius: 12px; background: rgba(255,255,255,.72); }
+    .summary-head { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; margin-bottom: 8px; }
+    .summary-head h3 { margin: 0; color: var(--ink); font-size: 13px; }
+    .summary-output { height: 210px; overflow: auto; white-space: pre-wrap; color: var(--text); background: linear-gradient(145deg, #fff, #f4faff); border: 1px solid #dcebf6; border-radius: 13px; padding: 12px 13px; font-size: 11px; line-height: 1.65; scrollbar-width: thin; scrollbar-color: #c9deef transparent; }
+    .summary-placeholder { color: #8799ac; }
+    .toast { position: fixed; z-index: 50; left: 50%; bottom: 32px; transform: translate(-50%, 16px); padding: 10px 16px; border-radius: 10px; background: rgba(13,33,56,.93); color: #fff; font-size: 12px; opacity: 0; pointer-events: none; transition: .2s ease; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    .settings-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(10,35,58,.34); backdrop-filter: blur(5px); opacity: 0; pointer-events: none; transition: .2s ease; }
+    .settings-backdrop.open { opacity: 1; pointer-events: auto; }
+    .settings-modal { width: 1030px; height: 740px; background: #fff; border-radius: 22px; border: 1px solid var(--line); box-shadow: 0 30px 90px rgba(8,34,60,.28); overflow: hidden; transform: translateY(12px); transition: .2s ease; }
+    .settings-backdrop.open .settings-modal { transform: translateY(0); }
+    .settings-body { height: 666px; display: grid; grid-template-columns: .82fr 1.18fr; }
+    .settings-section { padding: 20px; overflow: hidden; }
+    .settings-section + .settings-section { border-left: 1px solid #e4eef7; background: #fbfdff; }
+    .settings-form { display: grid; gap: 9px; margin-bottom: 14px; padding: 12px; border: 1px solid #e0ebf5; border-radius: 13px; background: #f7fbff; }
+    .settings-form.two-col { grid-template-columns: 1fr 1fr; }
+    .settings-form .full { grid-column: 1 / -1; }
+    .settings-actions { display: flex; justify-content: flex-end; gap: 7px; }
+    .settings-list { height: 382px; overflow: auto; display: grid; align-content: start; gap: 7px; padding-right: 4px; scrollbar-width: thin; scrollbar-color: #c9deef transparent; }
+    .settings-item { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 10px 11px; border: 1px solid #e1ecf5; border-radius: 11px; background: #fff; }
+    .settings-item-title { color: var(--ink); font-size: 12px; font-weight: 700; }
+    .settings-item-sub { margin-top: 4px; color: var(--muted); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-actions { display: flex; gap: 5px; }
+    .icon-btn { height: 28px; padding: 0 8px; border: 1px solid #dde9f3; border-radius: 7px; background: #f7fbff; color: #5c7590; font-size: 10px; }
+    .icon-btn.danger { color: #c34e78; background: #fff5f8; border-color: #f4dbe5; }
+    .classification-note { margin: 9px 0 13px; padding: 9px 10px; border-radius: 10px; background: #eef8ff; color: #52718f; font-size: 10px; line-height: 1.5; }
+    .category-tag { display: inline-block; color: #6657c9; background: #f0edff; border-radius: 5px; padding: 3px 6px; font-size: 9px; }
+
+    .transfer-backdrop { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 24px; background: rgba(10,35,58,.32); backdrop-filter: blur(5px); opacity: 0; pointer-events: none; transition: .2s ease; }
+    .transfer-backdrop.open { opacity: 1; pointer-events: auto; }
+    .transfer-modal { width: 820px; min-height: 540px; background: #fff; border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 30px 90px rgba(8,34,60,.28); overflow: hidden; transform: translateY(12px); transition: .2s ease; }
+    .transfer-backdrop.open .transfer-modal { transform: translateY(0); }
+    .transfer-body { padding: 22px; }
+    .transfer-intro { margin: 0 0 16px; padding: 11px 13px; border-radius: 11px; background: #eef8ff; color: #52718f; font-size: 11px; line-height: 1.6; }
+    .transfer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .transfer-card { min-height: 300px; padding: 17px; border: 1px solid #dce9f4; border-radius: 15px; background: linear-gradient(145deg, #fff, #f7fbff); }
+    .transfer-step { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: linear-gradient(135deg, #1677ff, #36a8ff); font-size: 12px; font-weight: 750; }
+    .transfer-card h3 { margin: 11px 0 6px; color: var(--ink); font-size: 15px; }
+    .transfer-card p { min-height: 48px; margin: 0 0 13px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+    .transfer-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 14px; }
+    .transfer-stat { padding: 8px 9px; border-radius: 9px; background: #f1f7fc; color: #5f7690; font-size: 10px; }
+    .transfer-stat b { display: block; margin-bottom: 2px; color: var(--ink); font-size: 14px; }
+    .transfer-action { width: 100%; height: 38px; border: 1px solid var(--blue); border-radius: 10px; background: var(--blue); color: #fff; font-size: 12px; font-weight: 700; }
+    .transfer-action.secondary { color: var(--blue); background: #fff; }
+    .transfer-action:disabled { cursor: not-allowed; opacity: .46; }
+    .import-preview { min-height: 72px; margin: 10px 0; padding: 9px 10px; border: 1px dashed #c9deef; border-radius: 9px; color: #71869c; background: rgba(255,255,255,.7); font-size: 10px; line-height: 1.55; }
+    .transfer-footnote { margin-top: 14px; color: #8395a8; font-size: 9px; text-align: center; }
+
+    @media (max-height: 820px) {
+      .app-shell { padding-top: 12px; padding-bottom: 12px; }
+      .headline { height: 92px; }
+      .metric-card { height: 86px; }
+      .project-panel, .right-stack { height: 472px; }
+      .right-stack { grid-template-rows: 270px 188px; }
+      .project-list { height: 370px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="lanxin-logo-blue-horizontal.png" alt="蓝信" />
+        <span class="brand-divider"></span>
+        <span class="brand-title">解决方案部门周报</span>
+      </div>
+      <nav class="topnav" aria-label="页面导航">
+        <button class="nav-btn active" data-action="overview">本周总览</button>
+        <button class="nav-btn" data-action="reports">个人周报</button>
+        <button class="nav-btn" data-action="transfer">数据迁移</button>
+      </nav>
+      <div class="week-wrap">
+        <select id="weekSelect" class="week-select" aria-label="选择周次"></select>
+      </div>
+    </header>
+
+    <section class="headline">
+      <div>
+        <div class="eyebrow">解决方案部 · 周度项目驾驶舱</div>
+        <h1>项目进展与人员投入，一屏看清</h1>
+        <p id="weekSummary" class="subtitle"></p>
+      </div>
+      <div class="headline-actions">
+        <button class="ghost-btn" id="copyBtn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+          复制部门摘要
+        </button>
+        <button class="primary-btn" id="reportEntryBtn">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/><path d="m14 6 3 3"/></svg>
+          录入个人周报
+        </button>
+      </div>
+    </section>
+
+    <section id="metricGrid" class="metric-grid"></section>
+
+    <section class="content-grid">
+      <section class="panel project-panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">项目推进清单</h2>
+            <div class="panel-desc">按项目归纳本周动作、阶段进度与核心参与人</div>
+          </div>
+          <div class="panel-tools">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+              <input id="searchInput" placeholder="搜索项目或事项" />
+            </label>
+            <select id="statusFilter" class="filter-select" aria-label="状态筛选">
+              <option value="all">全部状态</option>
+              <option value="重点推进">重点推进</option>
+              <option value="稳步推进">稳步推进</option>
+              <option value="待协调">待协调</option>
+            </select>
+          </div>
+        </div>
+        <div class="project-table-head">
+          <span>项目 / 阶段</span><span>本周主要事项与交付</span><span>当前状态</span><span>人员 / 工时</span>
+        </div>
+        <div id="projectList" class="project-list"></div>
+      </section>
+
+      <aside class="right-stack">
+        <section class="panel people-panel">
+          <div class="mini-head">
+            <div>
+              <h2 class="panel-title">本周参与热度</h2>
+            <div class="panel-desc">按个人填报工时与事项贡献呈现</div>
+            </div>
+            <button class="mini-link" id="peopleBtn">查看全部 →</button>
+          </div>
+          <div id="contributorList" class="contributor-list"></div>
+        </section>
+
+        <section class="panel focus-panel">
+          <div id="focusBanner" class="focus-banner"></div>
+          <div id="focusPoints" class="focus-points"></div>
+        </section>
+      </aside>
+    </section>
+    <span class="page-no">01 · 本周总览</span>
+  </main>
+
+  <div id="drawerBackdrop" class="drawer-backdrop" aria-hidden="true">
+    <aside class="drawer" role="dialog" aria-modal="true">
+      <button id="drawerClose" class="drawer-close" aria-label="关闭">×</button>
+      <div id="drawerContent"></div>
+    </aside>
+  </div>
+
+  <div id="reportBackdrop" class="report-backdrop" aria-hidden="true">
+    <section class="report-modal" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
+      <header class="report-modal-head">
+        <div>
+          <h2 id="reportModalTitle" class="report-modal-title">个人周报录入与部门汇总</h2>
+          <div id="reportWeekLabel" class="report-modal-subtitle"></div>
+        </div>
+        <div class="report-head-actions">
+          <button id="openSettingsBtn" class="settings-link">基础数据设置</button>
+          <button id="reportClose" class="report-close" aria-label="关闭个人周报">×</button>
+        </div>
+      </header>
+      <div class="report-modal-body">
+        <div class="entry-form-wrap">
+          <div class="section-kicker">个人填报</div>
+          <h3 class="section-heading">填写个人周报</h3>
+          <div class="form-field" style="margin-bottom:12px">
+            <label for="reportPerson">人员姓名</label>
+            <input id="reportPerson" class="form-control" list="peopleOptions" placeholder="输入或选择姓名" required />
+            <datalist id="peopleOptions"></datalist>
+          </div>
+          <div class="entry-mode-tabs" role="tablist" aria-label="个人周报填报方式">
+            <button type="button" id="bulkModeBtn" class="entry-mode-btn active" role="tab" aria-selected="true" data-entry-mode="bulk">整段粘贴</button>
+            <button type="button" id="singleModeBtn" class="entry-mode-btn" role="tab" aria-selected="false" data-entry-mode="single">逐项目填报</button>
+          </div>
+          <form id="personalReportForm" class="entry-mode-panel" data-mode-panel="bulk">
+            <div class="form-grid">
+              <div class="form-field full">
+                <label for="reportSummary">完整个人周报</label>
+                <textarea id="reportSummary" class="form-control raw-report-input" placeholder="1、完成华东政务项目总体方案评审｜交付物：总体方案 V3、评审问题清单｜工时：8小时&#10;2、完成央企智能办公场景演示｜交付物：演示环境、客户反馈纪要｜工时：4.5小时&#10;3、整理制造行业方案模板｜交付物：行业方案模板 V2｜工时：6小时" required></textarea>
+                <span class="form-hint">每行格式：工作事项｜交付物：具体成果｜工时：小时数。支持 1、2、3……或项目符号，交付物和工时均为必填。</span>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="clearReportBtn" class="small-btn">清空</button>
+              <button type="submit" class="small-btn primary">自动整理并保存</button>
+            </div>
+          </form>
+          <form id="singleProjectReportForm" class="entry-mode-panel" data-mode-panel="single" hidden>
+            <div class="form-grid">
+              <div class="form-field full">
+                <label for="singleProjectInput">项目名称</label>
+                <select id="singleProjectInput" class="form-control" required></select>
+              </div>
+              <div class="form-field full">
+                <label for="singleSummaryInput">本周工作事项</label>
+                <textarea id="singleSummaryInput" class="form-control single-summary-input" placeholder="填写本周围绕该项目完成的主要工作" required></textarea>
+              </div>
+              <div class="form-field full">
+                <label for="singleOutputInput">输出交付物</label>
+                <textarea id="singleOutputInput" class="form-control single-output-input" placeholder="例如：总体方案 V3、评审问题清单" required></textarea>
+              </div>
+              <div class="form-field full">
+                <label for="singleHoursInput">投入工时（小时）</label>
+                <input id="singleHoursInput" class="form-control" type="number" min="0.5" max="168" step="0.5" placeholder="例如：8" required />
+                <span class="form-hint">保存后可继续选择下一个项目录入，人员姓名会保留。</span>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="clearSingleProjectBtn" class="small-btn">清空项目内容</button>
+              <button type="submit" class="small-btn primary">保存该项目周报</button>
+            </div>
+          </form>
+        </div>
+        <div class="entry-list-wrap">
+          <div class="entry-list-head">
+            <div>
+              <div class="section-kicker">部门汇总</div>
+              <h3 class="section-heading" style="margin-bottom:0">本周已录入</h3>
+            </div>
+            <span id="entryCount" class="entry-count">0 人 · 0 条</span>
+          </div>
+          <div id="personalReportList" class="personal-list"></div>
+          <div class="summary-head">
+            <h3>部门周报摘要</h3>
+            <div style="display:flex;gap:7px">
+              <button id="copyGeneratedBtn" class="small-btn">复制</button>
+              <button id="generateSummaryBtn" class="small-btn primary">生成部门摘要</button>
+            </div>
+          </div>
+          <div id="departmentSummary" class="summary-output summary-placeholder">录入个人周报后，系统会按项目、人员、交付物和工时自动汇总。</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true">
+    <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <header class="report-modal-head">
+        <div>
+          <h2 id="settingsTitle" class="report-modal-title">基础数据设置</h2>
+          <div class="report-modal-subtitle">维护真实人员和项目信息，项目关键词用于自动识别个人周报内容</div>
+        </div>
+        <button id="settingsClose" class="report-close" aria-label="关闭基础数据设置">×</button>
+      </header>
+      <div class="settings-body">
+        <section class="settings-section">
+          <div class="section-kicker">人员信息</div>
+          <h3 class="section-heading">部门成员</h3>
+          <form id="peopleForm" class="settings-form two-col">
+            <input id="personEditId" type="hidden" />
+            <div class="form-field"><label for="personNameInput">姓名</label><input id="personNameInput" class="form-control" placeholder="例如：张涛" required /></div>
+            <div class="form-field"><label for="personRoleInput">角色</label><input id="personRoleInput" class="form-control" placeholder="例如：解决方案架构师" /></div>
+            <div class="settings-actions full"><button type="button" id="cancelPersonEdit" class="small-btn">清空</button><button type="submit" class="small-btn primary">保存人员</button></div>
+          </form>
+          <div id="peopleSettingsList" class="settings-list"></div>
+        </section>
+        <section class="settings-section">
+          <div class="section-kicker">项目信息</div>
+          <h3 class="section-heading">项目与识别关键词</h3>
+          <div class="classification-note">例如项目“华东某省政务协同项目”，可填写关键词“华东政务、某省政务、政务协同”。个人周报中出现任意关键词时，会自动归入该项目。</div>
+          <form id="projectForm" class="settings-form two-col">
+            <input id="projectEditId" type="hidden" />
+            <div class="form-field"><label for="projectNameInput">项目名称</label><input id="projectNameInput" class="form-control" placeholder="输入真实项目名称" required /></div>
+            <div class="form-field"><label for="projectTypeInput">项目类型</label><input id="projectTypeInput" class="form-control" placeholder="政务 / 央企 / 内部" /></div>
+            <div class="form-field"><label for="projectStageInput">当前阶段</label><input id="projectStageInput" class="form-control" placeholder="需求调研 / 方案确认" /></div>
+            <div class="form-field"><label for="projectStatusInput">当前状态</label><select id="projectStatusInput" class="form-control"><option>重点推进</option><option>稳步推进</option><option>待协调</option></select></div>
+            <div class="form-field full"><label for="projectKeywordsInput">识别关键词</label><input id="projectKeywordsInput" class="form-control" placeholder="多个关键词用逗号隔开" /></div>
+            <div class="settings-actions full"><button type="button" id="cancelProjectEdit" class="small-btn">清空</button><button type="submit" class="small-btn primary">保存项目</button></div>
+          </form>
+          <div id="projectSettingsList" class="settings-list" style="height:254px"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div id="transferBackdrop" class="transfer-backdrop" aria-hidden="true">
+    <section class="transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transferTitle">
+      <header class="report-modal-head">
+        <div>
+          <h2 id="transferTitle" class="report-modal-title">周报数据迁移</h2>
+          <div class="report-modal-subtitle">通过数据文件在不同设备之间迁移完整周报</div>
+        </div>
+        <button id="transferClose" class="report-close" aria-label="关闭数据迁移">×</button>
+      </header>
+      <div class="transfer-body">
+        <p class="transfer-intro">共享网页的数据已统一保存在本地 SQLite 数据库中。这里用于导出备份，或将以前从浏览器导出的 JSON 数据合并到共享数据库。</p>
+        <div class="transfer-grid">
+          <section class="transfer-card">
+            <span class="transfer-step">1</span>
+            <h3>导出共享数据备份</h3>
+            <p>包含所有周次、个人周报、部门摘要、人员、项目和每周快照。</p>
+            <div id="exportStats" class="transfer-stats"></div>
+            <button id="exportDataBtn" class="transfer-action">导出周报数据文件</button>
+          </section>
+          <section class="transfer-card">
+            <span class="transfer-step">2</span>
+            <h3>导入历史数据</h3>
+            <p>导入采用合并方式；同一周次的数据以导入文件为准，其他已有周次继续保留。</p>
+            <input id="importFileInput" type="file" accept="application/json,.json" hidden />
+            <button id="chooseImportBtn" class="transfer-action secondary">选择周报数据文件</button>
+            <div id="importPreview" class="import-preview">尚未选择数据文件</div>
+            <button id="applyImportBtn" class="transfer-action" disabled>合并并导入数据</button>
+          </section>
+        </div>
+        <div class="transfer-footnote">备份文件支持重复导入且不会产生重复事项。服务运行时每周日 23:50 自动汇总、每周一 00:10 自动备份。</div>
+      </div>
+    </section>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    (async function bootstrap() {
+    const API_ORIGIN = location.protocol === 'file:' ? 'http://127.0.0.1:8787' : '';
+    const cloneJson = value => JSON.parse(JSON.stringify(value));
+    let sharedDatabaseConnected = false;
+    let sharedStorage = {};
+    let lastPersistedStorage = {};
+    const pendingRemoteWrites = new Map();
+    const FILE_MIGRATION_MARKER = 'solutionFileOriginMigration20260715';
+    const BUSINESS_STORAGE_KEYS = [
+      'solutionWeeklyReportsV1',
+      'solutionDepartmentSummariesV1',
+      'solutionManagedPeopleV1',
+      'solutionManagedProjectsV1',
+      'solutionWeeklySnapshotsV1',
+      'solutionProjectTemplateRecovery20260711'
+    ];
+    let shouldMigrateFileCache = false;
+
+    async function loadSharedStorage() {
+      try {
+        const response = await fetch(`${API_ORIGIN}/api/state`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        sharedStorage = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+        lastPersistedStorage = cloneJson(sharedStorage);
+        sharedDatabaseConnected = true;
+      } catch {
+        sharedStorage = {};
+        lastPersistedStorage = {};
+        sharedDatabaseConnected = false;
+      }
+    }
+
+    function persistRemoteKey(key, serializedValue) {
+      if (!sharedDatabaseConnected) return;
+      const previous = pendingRemoteWrites.get(key) || Promise.resolve();
+      const request = previous.catch(() => {}).then(async () => {
+        const response = await fetch(`${API_ORIGIN}/api/state/${encodeURIComponent(key)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: `{"value":${serializedValue}}`
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        lastPersistedStorage[key] = JSON.parse(serializedValue);
+      }).catch(() => {
+        sharedDatabaseConnected = false;
+        showToast('共享数据库暂时无法连接，数据已保留在本机缓存');
+        throw new Error('shared database write failed');
+      });
+      pendingRemoteWrites.set(key, request);
+      const cleanup = () => {
+        if (pendingRemoteWrites.get(key) === request) pendingRemoteWrites.delete(key);
+      };
+      request.then(cleanup, cleanup);
+      request.catch(() => {});
+      return request;
+    }
+
+    async function flushRemoteWrites() {
+      while (pendingRemoteWrites.size) {
+        await Promise.all([...pendingRemoteWrites.values()]);
+      }
+    }
+
+    await loadSharedStorage();
+    if (location.protocol === 'file:' && sharedDatabaseConnected && !sharedStorage[FILE_MIGRATION_MARKER]) {
+      try { shouldMigrateFileCache = BUSINESS_STORAGE_KEYS.some(key => localStorage.getItem(key) !== null); }
+      catch { shouldMigrateFileCache = false; }
+    }
+
+    const weeks = {
+      "2026-W28": {
+        label: "2026 年第 28 周 · 07/06—07/12",
+        summary: "围绕重点客户交付、方案标准化与售前协同推进，本周共覆盖 6 个项目。",
+        metrics: [
+          ["在跟项目", "6", "较上周 +1", "project"],
+          ["本周事项", "18", "已完成 15", "task"],
+          ["重点交付", "3", "均按计划推进", "deliver"],
+          ["参与人员", "12", "核心成员 5", "people"]
+        ],
+        focus: "核心客户项目进入方案确认与阶段性交付窗口",
+        points: ["完成 2 场客户汇报", "沉淀 3 项标准资产"],
+        projects: [
+          { name: "华东某省政务协同项目", stage: "方案确认", type: "政务", status: "重点推进", color: "#1677ff", work: "完成总体方案 V3 评审，补充信创适配与安全边界说明", result: "输出：总体方案 V3、需求澄清清单、汇报材料", people: ["张涛", "李敏", "王睿"], todos: ["完成总体方案 V3 内部评审并根据反馈修订", "与客户确认信创环境、终端适配和安全管理边界", "配合销售完成阶段性方案汇报"] },
+          { name: "央企智能办公试点", stage: "POC 验证", type: "央企", status: "重点推进", color: "#16a5d9", work: "完成知识问答与公文辅助场景联调，整理试点验收口径", result: "输出：场景测试记录、POC 周报、问题跟踪表", people: ["李敏", "陈晨", "周凯", "赵琳"], todos: ["完成知识问答场景准确率抽测", "梳理公文辅助场景的验收指标", "同步产品侧跟进 4 项体验问题"] },
+          { name: "西南能源集团蓝信升级", stage: "深化设计", type: "能源", status: "稳步推进", color: "#6b5cff", work: "梳理组织、消息与应用集成现状，形成深化设计目录", result: "输出：调研纪要、系统边界图、设计目录", people: ["王睿", "周凯"], todos: ["完成现状系统接口清单整理", "形成深化设计初稿目录", "确认下一轮业务访谈对象"] },
+          { name: "华北金融客户私有化项目", stage: "技术交流", type: "金融", status: "待协调", color: "#e94f9b", work: "完成部署架构初稿，待客户明确双中心容灾指标", result: "待协调：网络域划分、容灾 RTO/RPO 指标", people: ["张涛", "赵琳"], todos: ["补充双中心部署架构初稿", "向客户发出待确认问题清单", "联合研发评估国产数据库兼容性"] },
+          { name: "制造行业标准方案建设", stage: "资产沉淀", type: "内部", status: "稳步推进", color: "#16b987", work: "完成场景地图和价值主张重构，补充 2 个标杆案例", result: "输出：行业方案 V2、场景地图、案例素材", people: ["陈晨", "李敏", "刘畅"], todos: ["重构制造行业核心业务场景地图", "补充智能办公与一线协作价值主张", "完成标杆案例素材结构化"] },
+          { name: "售前能力资料库治理", stage: "持续运营", type: "内部", status: "稳步推进", color: "#f29d38", work: "完成 23 份材料归档和标签校准，清理 7 份过期版本", result: "输出：资料索引、版本规则、待补充资产清单", people: ["刘畅", "陈晨"], todos: ["整理本周新增方案与案例资料", "统一行业、产品和客户三级标签", "下线过期版本并补充替代资料链接"] }
+        ],
+        contributors: [
+          { name: "李敏", role: "方案架构", count: 7, score: 96, color: "#1677ff" },
+          { name: "张涛", role: "解决方案", count: 6, score: 85, color: "#6b5cff" },
+          { name: "陈晨", role: "行业方案", count: 5, score: 72, color: "#16b987" },
+          { name: "王睿", role: "技术顾问", count: 4, score: 61, color: "#e98a32" },
+          { name: "周凯", role: "交付协同", count: 4, score: 55, color: "#e94f9b" }
+        ]
+      }
+    };
+
+    const iconMap = {
+      project: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M8 5V3h8v2M8 11h8M8 15h5"/></svg>',
+      task: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 9 1.5 1.5L12 8M14 9h3M8 15h9"/></svg>',
+      deliver: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 15v4h14v-4"/></svg>',
+      people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="8" r="3"/><path d="M3 19c.6-4 2.6-6 6-6s5.4 2 6 6M16 7.5a2.5 2.5 0 0 1 0 5M16.5 14c2.6.4 4.1 2.1 4.5 5"/></svg>'
+    };
+
+    const metricStyles = [
+      ["#1677ff", "#eaf4ff", "rgba(22,119,255,.13)"], ["#16b987", "#e9fbf4", "rgba(22,185,135,.13)"],
+      ["#6b5cff", "#f0edff", "rgba(107,92,255,.13)"], ["#e98a32", "#fff5e9", "rgba(233,138,50,.13)"]
+    ];
+
+    const avatarColors = ["#1677ff", "#6b5cff", "#16b987", "#e98a32", "#e94f9b", "#16a5d9"];
+    const initials = name => name.slice(-2);
+    const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+    const colorFor = name => avatarColors[[...name].reduce((sum, c) => sum + c.charCodeAt(0), 0) % avatarColors.length];
+    function normalizeHours(value) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 10) / 10 : 0;
+    }
+    function formatHours(value) {
+      const hours = normalizeHours(value);
+      return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+    }
+    const uniqueText = values => [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
+
+    const weekSelect = document.querySelector('#weekSelect');
+    const pad2 = value => String(value).padStart(2, '0');
+    function getCurrentIsoWeek(date = new Date()) {
+      const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const day = utcDate.getUTCDay() || 7;
+      utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+      const year = utcDate.getUTCFullYear();
+      const yearStart = new Date(Date.UTC(year, 0, 1));
+      const week = Math.ceil((((utcDate - yearStart) / 86400000) + 1) / 7);
+      return { year, week, key: `${year}-W${pad2(week)}` };
+    }
+    function getWeekDates(year, week) {
+      const january4 = new Date(Date.UTC(year, 0, 4));
+      const january4Day = january4.getUTCDay() || 7;
+      const start = new Date(january4);
+      start.setUTCDate(january4.getUTCDate() - january4Day + 1 + (week - 1) * 7);
+      const end = new Date(start);
+      end.setUTCDate(start.getUTCDate() + 6);
+      return { start, end };
+    }
+    function ensureWeek(key) {
+      if (weeks[key]) return;
+      const match = key.match(/^(\d{4})-W(\d{2})$/);
+      if (!match) return;
+      const year = Number(match[1]);
+      const week = Number(match[2]);
+      const { start, end } = getWeekDates(year, week);
+      const formatDate = value => `${pad2(value.getUTCMonth() + 1)}/${pad2(value.getUTCDate())}`;
+      weeks[key] = {
+        label: `${year} 年第 ${week} 周 · ${formatDate(start)}—${formatDate(end)}`,
+        summary: '本周尚未录入个人周报。', metrics: [], focus: '等待成员提交本周个人周报', points: [], projects: [], contributors: []
+      };
+    }
+    function syncWeekWithSystemDate() {
+      const liveWeek = getCurrentIsoWeek();
+      ensureWeek(liveWeek.key);
+      ensureWeeklySnapshot(liveWeek.key);
+      if (![...weekSelect.options].some(option => option.value === liveWeek.key)) {
+        weekSelect.insertAdjacentHTML('afterbegin', `<option value="${liveWeek.key}">${weeks[liveWeek.key].label}</option>`);
+      }
+      const changed = weekSelect.value !== liveWeek.key;
+      weekSelect.value = liveWeek.key;
+      return changed;
+    }
+    const currentWeek = getCurrentIsoWeek();
+    ensureWeek(currentWeek.key);
+
+    const defaultPersonalReports = [
+      { id: "demo-1", week: "2026-W28", person: "张涛", project: "华东某省政务协同项目", category: "客户项目", summary: "完成总体方案 V3 内部评审，补充信创适配和安全边界说明，并配合完成客户阶段汇报。", output: "总体方案 V3、需求澄清清单、客户汇报材料", hours: 8, next: "待客户确认信创环境与终端适配边界。" },
+      { id: "demo-2", week: "2026-W28", person: "李敏", project: "央企智能办公试点", category: "客户项目", summary: "完成知识问答和公文辅助场景联调，整理试点验收口径并跟进体验问题。", output: "场景测试记录、POC 周报、问题跟踪表", hours: 6.5, next: "下周完成准确率抽测并收敛验收指标。" },
+      { id: "demo-3", week: "2026-W28", person: "陈晨", project: "制造行业标准方案建设", category: "方案与资产", summary: "重构制造行业场景地图与价值主张，补充两个标杆案例并完成方案内部校审。", output: "行业方案 V2、场景地图、案例素材", hours: 7, next: "继续补充一线生产协同场景的客户证据。" }
+    ];
+    const readStorage = (key, fallback) => {
+      try {
+        if (shouldMigrateFileCache) {
+          const localValue = localStorage.getItem(key);
+          if (localValue !== null) return JSON.parse(localValue);
+        }
+        if (Object.prototype.hasOwnProperty.call(sharedStorage, key)) return cloneJson(sharedStorage[key]);
+        const value = localStorage.getItem(key);
+        return value ? JSON.parse(value) : cloneJson(fallback);
+      }
+      catch { return cloneJson(fallback); }
+    };
+    const writeStorage = (key, value) => {
+      const serializedValue = JSON.stringify(value);
+      try { localStorage.setItem(key, serializedValue); } catch {}
+      const currentSerializedValue = Object.prototype.hasOwnProperty.call(lastPersistedStorage, key) ? JSON.stringify(lastPersistedStorage[key]) : null;
+      if (currentSerializedValue === serializedValue) return;
+      sharedStorage[key] = cloneJson(value);
+      persistRemoteKey(key, serializedValue);
+    };
+    let personalReports = readStorage('solutionWeeklyReportsV1', defaultPersonalReports);
+    let departmentSummaries = readStorage('solutionDepartmentSummariesV1', {});
+    personalReports = personalReports.filter(item => item.week !== '2026-W27').map(item => ({ ...item, output: String(item.output || ''), hours: normalizeHours(item.hours) }));
+    delete departmentSummaries['2026-W27'];
+    writeStorage('solutionWeeklyReportsV1', personalReports);
+    writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+    [...new Set(['2026-W28', currentWeek.key, ...personalReports.map(item => item.week)])].filter(key => key !== '2026-W27').forEach(ensureWeek);
+    const roleMap = Object.fromEntries(weeks['2026-W28'].contributors.map(person => [person.name, person.role]));
+    const defaultManagedPeople = [...new Set(weeks['2026-W28'].projects.flatMap(project => project.people))].map((name, index) => ({ id: `person-${index + 1}`, name, role: roleMap[name] || '解决方案成员' }));
+    const keywordMap = {
+      '华东某省政务协同项目': '华东政务,某省政务,政务协同',
+      '央企智能办公试点': '央企办公,智能办公,办公试点,POC',
+      '西南能源集团蓝信升级': '西南能源,能源集团,蓝信升级',
+      '华北金融客户私有化项目': '华北金融,金融客户,私有化',
+      '制造行业标准方案建设': '制造行业,制造方案,行业标准方案',
+      '售前能力资料库治理': '资料库,售前资料,材料归档,资料治理'
+    };
+    const defaultManagedProjects = weeks['2026-W28'].projects.map((project, index) => ({ ...project, id: `project-${index + 1}`, keywords: keywordMap[project.name] || project.name }));
+    let managedPeople = readStorage('solutionManagedPeopleV1', defaultManagedPeople);
+    let managedProjects = readStorage('solutionManagedProjectsV1', defaultManagedProjects);
+
+    const recoveryMarker = readStorage('solutionProjectTemplateRecovery20260711', false);
+    if (!recoveryMarker) {
+      const existingProjectNames = new Set(managedProjects.map(project => project.name));
+      const missingTemplates = defaultManagedProjects.filter(template => !existingProjectNames.has(template.name));
+      if (missingTemplates.length) {
+        const recoveryTime = Date.now();
+        managedProjects = [...managedProjects, ...missingTemplates.map((template, index) => ({
+          ...template,
+          id: `recovered-${recoveryTime}-${index}`,
+          people: [...(template.people || [])],
+          todos: [...(template.todos || [])]
+        }))];
+        writeStorage('solutionManagedProjectsV1', managedProjects);
+        personalReports = personalReports.map(item => ({ ...item, ...classifyItem(item.summary || '') }));
+        writeStorage('solutionWeeklyReportsV1', personalReports);
+        departmentSummaries = {};
+        writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+      }
+      writeStorage('solutionProjectTemplateRecovery20260711', true);
+    }
+
+    const cloneData = value => JSON.parse(JSON.stringify(value));
+    let weeklySnapshots = readStorage('solutionWeeklySnapshotsV1', {});
+    delete weeklySnapshots['2026-W27'];
+    writeStorage('solutionWeeklySnapshotsV1', weeklySnapshots);
+    function ensureWeeklySnapshot(key) {
+      if (!weeklySnapshots[key]) {
+        weeklySnapshots[key] = { people: cloneData(managedPeople), projects: cloneData(managedProjects), savedAt: new Date().toISOString() };
+        writeStorage('solutionWeeklySnapshotsV1', weeklySnapshots);
+      }
+      return weeklySnapshots[key];
+    }
+    function saveWeeklySnapshot(key = weekSelect.value) {
+      weeklySnapshots[key] = { people: cloneData(managedPeople), projects: cloneData(managedProjects), savedAt: new Date().toISOString() };
+      ensureWeek(key);
+      writeStorage('solutionWeeklySnapshotsV1', weeklySnapshots);
+    }
+    function getWeeklySnapshot(key = weekSelect.value) {
+      return weeklySnapshots[key] || ensureWeeklySnapshot(key);
+    }
+    [...new Set(['2026-W28', currentWeek.key, ...personalReports.map(item => item.week)])].filter(key => key !== '2026-W27').forEach(ensureWeeklySnapshot);
+    Object.keys(weeklySnapshots).filter(key => key !== '2026-W27').forEach(ensureWeek);
+    weekSelect.innerHTML = '';
+    Object.keys(weeks).filter(key => key !== '2026-W27').sort((a, b) => b.localeCompare(a)).forEach(key => weekSelect.insertAdjacentHTML('beforeend', `<option value="${key}">${weeks[key].label}</option>`));
+
+    // 首次启动共享服务时，把原 file:// 页面所在浏览器中的旧数据迁入 SQLite。
+    // 已存在于服务器且没有变化的数据会被 writeStorage 自动跳过，不产生重复写入。
+    writeStorage('solutionWeeklyReportsV1', personalReports);
+    writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+    writeStorage('solutionManagedPeopleV1', managedPeople);
+    writeStorage('solutionManagedProjectsV1', managedProjects);
+    writeStorage('solutionWeeklySnapshotsV1', weeklySnapshots);
+    writeStorage('solutionProjectTemplateRecovery20260711', true);
+    if (shouldMigrateFileCache) writeStorage(FILE_MIGRATION_MARKER, true);
+
+    function invalidateDepartmentSummaries() {
+      departmentSummaries = {};
+      writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+    }
+
+    function reclassifyAllReports() {
+      personalReports = personalReports.map(item => ({ ...item, ...classifyItem(item.summary || '') }));
+      writeStorage('solutionWeeklyReportsV1', personalReports);
+      invalidateDepartmentSummaries();
+    }
+
+    function classifyItem(text) {
+      const normalized = text.replace(/\s+/g, '').toLowerCase();
+      const matched = managedProjects.find(project => {
+        const keys = [project.name, ...(project.keywords || '').split(/[,，、]/)].map(item => item.trim()).filter(item => item.length >= 2);
+        return keys.some(key => normalized.includes(key.replace(/\s+/g, '').toLowerCase()));
+      });
+      if (matched) return { project: matched.name, category: matched.type === '内部' ? '内部建设' : '客户项目' };
+      const rules = [
+        ['方案与资产', /方案|模板|案例|材料|资产|场景地图|知识库|资料库/],
+        ['售前支撑', /售前|交流|演示|投标|标书|答标|客户拜访|需求访谈/],
+        ['学习与培训', /培训|学习|课程|认证|分享|考试/],
+        ['内部协同', /周会|例会|会议|协同|评审|复盘|汇报|沟通|排期/]
+      ];
+      const category = rules.find(([, pattern]) => pattern.test(text))?.[0] || '其他事项';
+      return { project: category, category };
+    }
+
+    function parseHoursText(value, unit = '小时') {
+      const amount = Number(value);
+      if (!Number.isFinite(amount) || amount <= 0) return 0;
+      return normalizeHours(/人日|天/.test(unit) ? amount * 8 : amount);
+    }
+
+    function extractWeeklyDetails(text) {
+      const normalized = text.replace(/[，,]\s*(?=(?:交付物|产出|输出|工时|耗时)\s*[:：])/g, '｜');
+      const segments = normalized.split(/[|｜；;]/).map(item => item.trim()).filter(Boolean);
+      const summaryParts = [];
+      let output = '';
+      let hours = 0;
+      segments.forEach(segment => {
+        const outputMatch = segment.match(/^(?:交付物|产出|输出)\s*[:：]\s*(.+)$/i);
+        if (outputMatch) { output = outputMatch[1].trim(); return; }
+        const hoursMatch = segment.match(/^(?:工时|耗时)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(小时|人时|h|H|人日|天)?$/);
+        if (hoursMatch) { hours = parseHoursText(hoursMatch[1], hoursMatch[2] || '小时'); return; }
+        summaryParts.push(segment);
+      });
+      const summary = summaryParts.join('；').trim();
+      return { summary: summary || text.trim(), output, hours };
+    }
+
+    function parseWeeklyText(rawText) {
+      const prepared = rawText
+        .replace(/\r/g, '\n')
+        .replace(/(^|\s)(\d{1,2}[、.．)）])\s*/g, '$1\n$2')
+        .replace(/([。；;])\s*(?=\d{1,2}[、.．)）])/g, '$1\n')
+        .replace(/([。；;])\s*(?=[①②③④⑤⑥⑦⑧⑨⑩])/g, '$1\n');
+      const items = prepared.split(/\n+/).map(line => line.trim())
+        .map(line => line.replace(/^(?:\d{1,2}[、.．)）]|[一二三四五六七八九十]+[、.．)）]|[①②③④⑤⑥⑦⑧⑨⑩]|[-•])\s*/, '').trim())
+        .filter(line => line.length >= 2);
+      return items.map(text => {
+        const details = extractWeeklyDetails(text);
+        return { ...details, ...classifyItem(details.summary) };
+      });
+    }
+
+    function buildViewData() {
+      const base = weeks[weekSelect.value];
+      const reports = currentReports();
+      const snapshot = getWeeklySnapshot();
+      const weekProjects = snapshot.projects || [];
+      const weekPeople = snapshot.people || [];
+      const projectRows = weekProjects.map((project, index) => {
+        const items = reports.filter(item => item.project === project.name);
+        const reportPeople = [...new Set(items.map(item => item.person))];
+        const deliverables = uniqueText(items.map(item => item.output));
+        const totalHours = items.reduce((sum, item) => sum + normalizeHours(item.hours), 0);
+        const personHours = Object.fromEntries(reportPeople.map(name => [name, items.filter(item => item.person === name).reduce((sum, item) => sum + normalizeHours(item.hours), 0)]));
+        const personDetails = reportPeople.map(name => {
+          const personItems = items.filter(item => item.person === name);
+          return {
+            name,
+            hours: personHours[name],
+            summaries: uniqueText(personItems.map(item => item.summary)),
+            outputs: uniqueText(personItems.map(item => item.output))
+          };
+        });
+        return {
+          ...project,
+          color: project.color || avatarColors[index % avatarColors.length],
+          work: items.length ? items.map(item => item.summary).join('；') : '本周尚未录入相关个人周报',
+          result: items.length ? `交付物：${deliverables.join('、') || '待补充'} · 工时 ${formatHours(totalHours)} 小时` : '待个人周报补充',
+          people: reportPeople.length ? reportPeople : (project.people || []),
+          todos: items.length ? items.map(item => item.summary) : ['本周尚未录入具体事项'],
+          deliverables,
+          totalHours,
+          personHours,
+          personDetails
+        };
+      });
+      const submittedPeople = new Set(reports.map(item => item.person));
+      const counts = Object.fromEntries(weekPeople.map(person => [person.name, reports.filter(item => item.person === person.name).length]));
+      const hoursByPerson = Object.fromEntries(weekPeople.map(person => [person.name, reports.filter(item => item.person === person.name).reduce((sum, item) => sum + normalizeHours(item.hours), 0)]));
+      const maxHours = Math.max(1, ...Object.values(hoursByPerson));
+      const contributors = weekPeople.map((person, index) => ({ name: person.name, role: person.role || '解决方案成员', count: counts[person.name] || 0, hours: hoursByPerson[person.name] || 0, score: Math.max(8, Math.round((hoursByPerson[person.name] || 0) / maxHours * 100)), color: avatarColors[index % avatarColors.length] }))
+        .sort((a, b) => b.hours - a.hours || b.count - a.count).slice(0, 5);
+      const coveredProjects = new Set(reports.filter(item => weekProjects.some(project => project.name === item.project)).map(item => item.project)).size;
+      const deliverableCount = uniqueText(reports.map(item => item.output)).length;
+      const totalHours = reports.reduce((sum, item) => sum + normalizeHours(item.hours), 0);
+      return {
+        ...base,
+        summary: reports.length ? `本周已汇集 ${submittedPeople.size} 位成员的 ${reports.length} 条事项，形成 ${deliverableCount} 项交付物，累计投入 ${formatHours(totalHours)} 小时。` : '本周尚未录入个人周报。',
+        metrics: [
+          ['在跟项目', String(weekProjects.length), `${weekProjects.filter(project => project.status === '重点推进').length} 个重点推进`, 'project'],
+          ['个人事项', String(reports.length), '支持批量或逐项目录入', 'task'],
+          ['交付物', String(deliverableCount), `覆盖 ${coveredProjects} 个项目`, 'deliver'],
+          ['投入工时', formatHours(totalHours), `${submittedPeople.size} 人已提交`, 'people']
+        ],
+        projects: projectRows,
+        contributors,
+        focus: reports.length ? '个人周报已按项目与工作类别自动归并' : '等待成员提交本周个人周报',
+        points: [`形成 ${deliverableCount} 项交付物`, `累计投入 ${formatHours(totalHours)} 小时`]
+      };
+    }
+
+    function renderMetrics(data) {
+      document.querySelector('#metricGrid').innerHTML = data.metrics.map((item, index) => {
+        const [label, value, note, icon] = item;
+        const [accent, bg, glow] = metricStyles[index];
+        return `<article class="metric-card" style="--accent:${accent};--icon-bg:${bg};--glow:${glow}">
+          <div class="metric-icon">${iconMap[icon]}</div>
+          <div><div class="metric-label">${label}</div><div class="metric-row"><strong class="metric-value">${value}</strong><span class="metric-note">${note}</span></div></div>
+        </article>`;
+      }).join('');
+    }
+
+    function avatarMarkup(people, limit = 3) {
+      const visible = people.slice(0, limit).map(name => `<span class="avatar" title="${escapeHtml(name)}" style="--avatar-bg:${colorFor(name)}">${initials(name)}</span>`).join('');
+      const more = people.length > limit ? `<span class="avatar more-avatar">+${people.length - limit}</span>` : '';
+      return visible + more;
+    }
+
+    function renderProjects(data) {
+      const query = document.querySelector('#searchInput').value.trim().toLowerCase();
+      const status = document.querySelector('#statusFilter').value;
+      const list = data.projects.filter(project => {
+        const matchesQuery = !query || `${project.name}${project.work}${project.deliverables.join('')}${project.people.join('')}`.toLowerCase().includes(query);
+        return matchesQuery && (status === 'all' || project.status === status);
+      });
+      document.querySelector('#projectList').innerHTML = list.length ? list.map((project, index) => `<article class="project-row" data-project="${data.projects.indexOf(project)}" tabindex="0" role="button" aria-label="查看${escapeHtml(project.name)}详情">
+        <div class="project-name-wrap">
+          <span class="project-dot" style="--project-color:${project.color}"></span>
+          <div style="min-width:0"><div class="project-name">${escapeHtml(project.name)}</div><div class="project-meta"><span class="tag">${project.type}</span><span class="tag" style="--tag-color:${project.status === '待协调' ? '#c34e78' : '#59738c'};--tag-bg:${project.status === '待协调' ? '#fff0f5' : '#f0f6fb'}">${project.stage}</span></div></div>
+        </div>
+        <div class="work-text"><div class="work-main">${escapeHtml(project.work)}</div><div class="work-result">${escapeHtml(project.result)}</div></div>
+        <div class="status-cell"><span class="status-pill" style="--status-color:${project.status === '待协调' ? '#c34e78' : project.status === '重点推进' ? '#1677ff' : '#25846c'};--status-bg:${project.status === '待协调' ? '#fff0f5' : project.status === '重点推进' ? '#eaf4ff' : '#eaf9f4'}">${project.status}</span></div>
+        <div class="project-people-summary"><div class="people">${avatarMarkup(project.people)}</div><span class="project-hours-total">${project.totalHours ? `${formatHours(project.totalHours)}h` : '待填'}</span></div>
+      </article>`).join('') : '<div class="empty-state">没有匹配的项目，请调整筛选条件</div>';
+
+      document.querySelectorAll('.project-row').forEach(row => {
+        const open = () => openDrawer(data.projects[Number(row.dataset.project)]);
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', event => { if (event.key === 'Enter') open(); });
+      });
+    }
+
+    function renderContributors(data) {
+      document.querySelector('#contributorList').innerHTML = data.contributors.map(person => `<div class="contributor">
+        <span class="person-avatar" style="--avatar-bg:${person.color}">${initials(person.name)}</span>
+        <div><div class="person-name">${person.name}</div><div class="person-role">${person.role}</div></div>
+        <div class="contrib-track" title="${person.count} 条事项"><div class="contrib-bar" style="width:${person.score}%"></div></div>
+        <div class="contrib-count">${formatHours(person.hours)}<span> 小时</span></div>
+      </div>`).join('');
+    }
+
+    function renderFocus(data) {
+      document.querySelector('#focusBanner').innerHTML = `<div class="focus-kicker">本周关键判断</div><div class="focus-title">${data.focus}</div>`;
+      document.querySelector('#focusPoints').innerHTML = data.points.map((point, index) => `<div class="focus-point"><i style="--point:${index ? '#6b5cff' : '#16b987'}"></i><span>${point}</span></div>`).join('');
+    }
+
+    function render() {
+      const data = buildViewData();
+      document.querySelector('#weekSummary').textContent = data.summary;
+      renderMetrics(data);
+      renderProjects(data);
+      renderContributors(data);
+      renderFocus(data);
+    }
+
+    function openDrawer(project) {
+      const personDetails = project.personDetails || [];
+      const fallbackPeople = project.people || [];
+      const personCards = personDetails.length ? personDetails.map(person => `<article class="person-delivery-card">
+        <div class="person-delivery-head"><span class="avatar" style="--avatar-bg:${colorFor(person.name)}">${initials(person.name)}</span><strong>${escapeHtml(person.name)}</strong><span class="person-delivery-hours">${formatHours(person.hours)} 小时</span></div>
+        <div class="person-delivery-line"><b>交付物：</b>${escapeHtml(person.outputs.join('、') || '历史数据未填写')}</div>
+        <div class="person-delivery-line"><b>本周事项：</b>${escapeHtml(person.summaries.join('；') || '暂无')}</div>
+      </article>`).join('') : fallbackPeople.map(name => `<article class="person-delivery-card">
+        <div class="person-delivery-head"><span class="avatar" style="--avatar-bg:${colorFor(name)}">${initials(name)}</span><strong>${escapeHtml(name)}</strong><span class="person-delivery-hours">工时待填</span></div>
+        <div class="person-delivery-line"><b>交付物：</b>待个人周报补充</div>
+      </article>`).join('');
+      document.querySelector('#drawerContent').innerHTML = `
+        <div class="drawer-kicker">${project.type} · ${project.status}</div>
+        <h2>${escapeHtml(project.name)}</h2>
+        <div class="drawer-section"><h3>本周工作事项</h3><ul class="drawer-list">${project.todos.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
+        <div class="drawer-section"><h3>人员交付物与投入工时</h3><div class="person-delivery-list">${personCards || '<div class="no-entry" style="min-height:90px">本周暂无人员投入记录</div>'}</div></div>
+        <div class="drawer-section"><h3>项目阶段与状态</h3><div class="drawer-people"><span class="person-chip">当前阶段：${project.stage}</span><span class="status-pill" style="--status-color:${project.status === '待协调' ? '#c34e78' : project.status === '重点推进' ? '#1677ff' : '#25846c'};--status-bg:${project.status === '待协调' ? '#fff0f5' : project.status === '重点推进' ? '#eaf4ff' : '#eaf9f4'}">${project.status}</span></div></div>`;
+      const backdrop = document.querySelector('#drawerBackdrop');
+      backdrop.classList.add('open');
+      backdrop.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeDrawer() {
+      const backdrop = document.querySelector('#drawerBackdrop');
+      backdrop.classList.remove('open');
+      backdrop.setAttribute('aria-hidden', 'true');
+    }
+
+    function showToast(message) {
+      const toast = document.querySelector('#toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove('show'), 1500);
+    }
+
+    function currentReports() {
+      return personalReports.filter(item => item.week === weekSelect.value);
+    }
+
+    function clearReportForm() {
+      document.querySelector('#personalReportForm').reset();
+    }
+
+    function clearSingleProjectForm() {
+      document.querySelector('#singleProjectReportForm').reset();
+    }
+
+    let entryMode = 'bulk';
+    function setEntryMode(mode) {
+      entryMode = mode === 'single' ? 'single' : 'bulk';
+      document.querySelectorAll('[data-entry-mode]').forEach(button => {
+        const active = button.dataset.entryMode === entryMode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('[data-mode-panel]').forEach(panel => { panel.hidden = panel.dataset.modePanel !== entryMode; });
+    }
+
+    function ensureManagedPerson(person) {
+      if (managedPeople.some(item => item.name === person)) return;
+      managedPeople.push({ id: `person-${Date.now()}`, name: person, role: '解决方案成员' });
+      writeStorage('solutionManagedPeopleV1', managedPeople);
+      saveWeeklySnapshot();
+    }
+
+    function renderReportWorkspace() {
+      const data = weeks[weekSelect.value];
+      const entries = currentReports();
+      const weekPeople = getWeeklySnapshot().people || [];
+      const knownPeople = [...new Set([...weekPeople.map(person => person.name), ...entries.map(item => item.person)])].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      document.querySelector('#reportWeekLabel').textContent = `${data.label} · ${sharedDatabaseConnected ? '数据已保存至共享数据库' : '当前为本机缓存模式，请启动周报服务'}`;
+      document.querySelector('#peopleOptions').innerHTML = knownPeople.map(name => `<option value="${escapeHtml(name)}"></option>`).join('');
+      const projectSelect = document.querySelector('#singleProjectInput');
+      const selectedProject = projectSelect.value;
+      const weekProjects = getWeeklySnapshot().projects || [];
+      projectSelect.innerHTML = `<option value="">请选择项目</option>${weekProjects.map(project => `<option value="${escapeHtml(project.name)}">${escapeHtml(project.name)}</option>`).join('')}`;
+      if (weekProjects.some(project => project.name === selectedProject)) projectSelect.value = selectedProject;
+
+      const personCount = new Set(entries.map(item => item.person)).size;
+      const totalHours = entries.reduce((sum, item) => sum + normalizeHours(item.hours), 0);
+      document.querySelector('#entryCount').textContent = `${personCount} 人 · ${entries.length} 条 · ${formatHours(totalHours)} 小时`;
+      const list = document.querySelector('#personalReportList');
+      list.innerHTML = entries.length ? entries.map(item => `<article class="personal-item">
+        <span class="person-avatar" style="--avatar-bg:${colorFor(item.person)}">${initials(item.person)}</span>
+        <div style="min-width:0"><div class="personal-meta"><span class="personal-name">${escapeHtml(item.person)}</span><span class="personal-project">${escapeHtml(item.project)}</span><span class="category-tag">${escapeHtml(item.category || classifyItem(item.summary).category)}</span></div><div class="personal-summary">${escapeHtml(item.summary)}</div><div class="personal-detail"><span>交付物：${escapeHtml(item.output || '历史数据未填写')}</span><b class="hours-pill">${item.hours ? `${formatHours(item.hours)} 小时` : '工时未填'}</b></div></div>
+        <button class="delete-entry" data-entry-id="${item.id}" aria-label="删除${escapeHtml(item.person)}的周报">×</button>
+      </article>`).join('') : '<div class="no-entry">本周还没有个人周报<br>请从左侧开始录入</div>';
+      list.querySelectorAll('.delete-entry').forEach(button => button.addEventListener('click', () => {
+        personalReports = personalReports.filter(item => String(item.id) !== button.dataset.entryId);
+        writeStorage('solutionWeeklyReportsV1', personalReports);
+        delete departmentSummaries[weekSelect.value];
+        writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+        renderReportWorkspace();
+        showToast('已删除该条周报');
+      }));
+      const output = document.querySelector('#departmentSummary');
+      const saved = departmentSummaries[weekSelect.value];
+      output.textContent = saved || '录入个人周报后，系统会按项目、人员、交付物和工时自动汇总。';
+      output.classList.toggle('summary-placeholder', !saved);
+    }
+
+    function buildDepartmentSummary(entries = currentReports()) {
+      if (!entries.length) return '';
+      const data = weeks[weekSelect.value];
+      const people = new Set(entries.map(item => item.person));
+      const normalized = entries.map(item => ({ ...item, output: String(item.output || ''), hours: normalizeHours(item.hours), category: item.category || classifyItem(item.summary).category }));
+      const categoryOrder = ['客户项目', '方案与资产', '售前支撑', '内部建设', '内部协同', '学习与培训', '其他事项'];
+      const sections = categoryOrder.map(category => {
+        const categoryItems = normalized.filter(item => item.category === category);
+        if (!categoryItems.length) return '';
+        const groups = new Map();
+        categoryItems.forEach(item => {
+          if (!groups.has(item.project)) groups.set(item.project, []);
+          groups.get(item.project).push(item);
+        });
+        const lines = [...groups.entries()].map(([project, items], index) => {
+          const projectHours = items.reduce((sum, item) => sum + item.hours, 0);
+          const owners = [...new Set(items.map(item => item.person))];
+          const ownerLines = owners.map(owner => {
+            const ownerItems = items.filter(item => item.person === owner);
+            const summaries = uniqueText(ownerItems.map(item => item.summary)).join('；');
+            const deliverables = uniqueText(ownerItems.map(item => item.output)).join('、') || '历史数据未填写';
+            const hours = ownerItems.reduce((sum, item) => sum + item.hours, 0);
+            return `   - ${owner}（${formatHours(hours)} 小时）：${summaries}；交付物：${deliverables}`;
+          });
+          return `${index + 1}. ${project}（合计 ${formatHours(projectHours)} 小时）\n${ownerLines.join('\n')}`;
+        });
+        return `${category}\n${lines.join('\n')}`;
+      }).filter(Boolean);
+      const risks = normalized.filter(item => /待|风险|协调|阻塞|问题|下周/.test(item.summary)).map(item => `- ${item.person}：${item.summary}`);
+      const weekProjects = getWeeklySnapshot().projects || [];
+      const coveredProjects = new Set(normalized.filter(item => weekProjects.some(project => project.name === item.project)).map(item => item.project)).size;
+      const deliverableCount = uniqueText(normalized.map(item => item.output)).length;
+      const totalHours = normalized.reduce((sum, item) => sum + item.hours, 0);
+      return `${data.label}\n解决方案部门周报摘要\n\n本周共收到 ${people.size} 位成员的个人周报，自动拆分为 ${entries.length} 条事项，覆盖 ${coveredProjects} 个在跟项目，形成 ${deliverableCount} 项交付物，累计投入 ${formatHours(totalHours)} 小时。\n\n${sections.join('\n\n')}\n\n需关注事项\n${risks.length ? [...new Set(risks)].join('\n') : '- 暂未识别到明确的待协调或风险事项'}`;
+    }
+
+    function generateDepartmentSummary() {
+      const summary = buildDepartmentSummary();
+      if (!summary) { showToast('请先录入至少一条个人周报'); return ''; }
+      departmentSummaries[weekSelect.value] = summary;
+      writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+      const output = document.querySelector('#departmentSummary');
+      output.textContent = summary;
+      output.classList.remove('summary-placeholder');
+      showToast('部门摘要已生成');
+      return summary;
+    }
+
+    function resetPersonForm() {
+      document.querySelector('#peopleForm').reset();
+      document.querySelector('#personEditId').value = '';
+    }
+
+    function resetProjectForm() {
+      document.querySelector('#projectForm').reset();
+      document.querySelector('#projectEditId').value = '';
+      document.querySelector('#projectStatusInput').value = '重点推进';
+    }
+
+    function renderSettings() {
+      const peopleList = document.querySelector('#peopleSettingsList');
+      peopleList.innerHTML = managedPeople.length ? managedPeople.map(person => `<article class="settings-item">
+        <div style="min-width:0"><div class="settings-item-title">${escapeHtml(person.name)}</div><div class="settings-item-sub">${escapeHtml(person.role || '未设置角色')}</div></div>
+        <div class="item-actions"><button class="icon-btn edit-person" data-id="${person.id}">编辑</button><button class="icon-btn danger delete-person" data-id="${person.id}">删除</button></div>
+      </article>`).join('') : '<div class="no-entry">还没有人员信息</div>';
+      const projectList = document.querySelector('#projectSettingsList');
+      projectList.innerHTML = managedProjects.length ? managedProjects.map(project => `<article class="settings-item">
+        <div style="min-width:0"><div class="settings-item-title">${escapeHtml(project.name)}</div><div class="settings-item-sub">${escapeHtml(project.type || '未分类')} · ${escapeHtml(project.stage || '未设置阶段')} · 关键词：${escapeHtml(project.keywords || '未设置')}</div></div>
+        <div class="item-actions"><button class="icon-btn edit-project" data-id="${project.id}">编辑</button><button class="icon-btn danger delete-project" data-id="${project.id}">删除</button></div>
+      </article>`).join('') : '<div class="no-entry">还没有项目信息</div>';
+
+      peopleList.querySelectorAll('.edit-person').forEach(button => button.addEventListener('click', () => {
+        const person = managedPeople.find(item => String(item.id) === button.dataset.id);
+        if (!person) return;
+        document.querySelector('#personEditId').value = person.id;
+        document.querySelector('#personNameInput').value = person.name;
+        document.querySelector('#personRoleInput').value = person.role || '';
+      }));
+      peopleList.querySelectorAll('.delete-person').forEach(button => button.addEventListener('click', () => {
+        managedPeople = managedPeople.filter(item => String(item.id) !== button.dataset.id);
+        writeStorage('solutionManagedPeopleV1', managedPeople);
+        saveWeeklySnapshot();
+        invalidateDepartmentSummaries();
+        renderSettings(); render();
+        showToast('人员已删除');
+      }));
+      projectList.querySelectorAll('.edit-project').forEach(button => button.addEventListener('click', () => {
+        const project = managedProjects.find(item => String(item.id) === button.dataset.id);
+        if (!project) return;
+        document.querySelector('#projectEditId').value = project.id;
+        document.querySelector('#projectNameInput').value = project.name;
+        document.querySelector('#projectTypeInput').value = project.type || '';
+        document.querySelector('#projectStageInput').value = project.stage || '';
+        document.querySelector('#projectStatusInput').value = project.status || '重点推进';
+        document.querySelector('#projectKeywordsInput').value = project.keywords || '';
+      }));
+      projectList.querySelectorAll('.delete-project').forEach(button => button.addEventListener('click', () => {
+        managedProjects = managedProjects.filter(item => String(item.id) !== button.dataset.id);
+        writeStorage('solutionManagedProjectsV1', managedProjects);
+        saveWeeklySnapshot();
+        reclassifyAllReports();
+        renderSettings(); render();
+        showToast('项目已删除');
+      }));
+    }
+
+    function openSettings() {
+      renderSettings();
+      const backdrop = document.querySelector('#settingsBackdrop');
+      backdrop.classList.add('open');
+      backdrop.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeSettings() {
+      const backdrop = document.querySelector('#settingsBackdrop');
+      backdrop.classList.remove('open');
+      backdrop.setAttribute('aria-hidden', 'true');
+      renderReportWorkspace();
+      render();
+    }
+
+    function openReportModal() {
+      closeDrawer();
+      if (syncWeekWithSystemDate()) render();
+      renderReportWorkspace();
+      setEntryMode(entryMode);
+      const backdrop = document.querySelector('#reportBackdrop');
+      backdrop.classList.add('open');
+      backdrop.setAttribute('aria-hidden', 'false');
+      document.querySelectorAll('.nav-btn').forEach(item => item.classList.toggle('active', item.dataset.action === 'reports'));
+    }
+
+    function closeReportModal() {
+      const backdrop = document.querySelector('#reportBackdrop');
+      backdrop.classList.remove('open');
+      backdrop.setAttribute('aria-hidden', 'true');
+      document.querySelectorAll('.nav-btn').forEach(item => item.classList.toggle('active', item.dataset.action === 'overview'));
+    }
+
+    async function copyText(text) {
+      if (!text) { showToast('请先生成部门摘要'); return; }
+      try { await navigator.clipboard.writeText(text); }
+      catch {
+        const input = document.createElement('textarea');
+        input.value = text;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+      }
+      showToast('部门摘要已复制');
+    }
+
+    let pendingImportData = null;
+    function getArchiveStats(data = { personalReports, departmentSummaries, managedPeople, managedProjects, weeklySnapshots }) {
+      const weekKeys = new Set([
+        ...data.personalReports.map(item => item.week),
+        ...Object.keys(data.departmentSummaries),
+        ...Object.keys(data.weeklySnapshots)
+      ].filter(key => key && key !== '2026-W27'));
+      return { weeks: weekKeys.size, reports: data.personalReports.filter(item => item.week !== '2026-W27').length, people: data.managedPeople.length, projects: data.managedProjects.length };
+    }
+
+    function renderExportStats() {
+      const stats = getArchiveStats();
+      document.querySelector('#exportStats').innerHTML = `
+        <div class="transfer-stat"><b>${stats.weeks}</b>周历史数据</div>
+        <div class="transfer-stat"><b>${stats.reports}</b>条个人事项</div>
+        <div class="transfer-stat"><b>${stats.people}</b>位部门成员</div>
+        <div class="transfer-stat"><b>${stats.projects}</b>个项目</div>`;
+    }
+
+    function openTransferModal() {
+      closeDrawer();
+      closeSettings();
+      closeReportModal();
+      renderExportStats();
+      pendingImportData = null;
+      document.querySelector('#importFileInput').value = '';
+      document.querySelector('#importPreview').textContent = '尚未选择数据文件';
+      document.querySelector('#applyImportBtn').disabled = true;
+      const backdrop = document.querySelector('#transferBackdrop');
+      backdrop.classList.add('open');
+      backdrop.setAttribute('aria-hidden', 'false');
+      document.querySelectorAll('.nav-btn').forEach(item => item.classList.toggle('active', item.dataset.action === 'transfer'));
+    }
+
+    function closeTransferModal() {
+      const backdrop = document.querySelector('#transferBackdrop');
+      backdrop.classList.remove('open');
+      backdrop.setAttribute('aria-hidden', 'true');
+      document.querySelectorAll('.nav-btn').forEach(item => item.classList.toggle('active', item.dataset.action === 'overview'));
+    }
+
+    const archiveKeyMap = {
+      personalReports: 'solutionWeeklyReportsV1',
+      departmentSummaries: 'solutionDepartmentSummariesV1',
+      managedPeople: 'solutionManagedPeopleV1',
+      managedProjects: 'solutionManagedProjectsV1',
+      weeklySnapshots: 'solutionWeeklySnapshotsV1'
+    };
+
+    function currentArchiveData() {
+      return { personalReports, departmentSummaries, managedPeople, managedProjects, weeklySnapshots };
+    }
+
+    function archiveDataFromState(state) {
+      const fallback = currentArchiveData();
+      return Object.fromEntries(Object.entries(archiveKeyMap).map(([field, key]) => [field, Object.prototype.hasOwnProperty.call(state, key) ? cloneJson(state[key]) : cloneJson(fallback[field]) ]));
+    }
+
+    async function exportAllData() {
+      let exportData = currentArchiveData();
+      if (sharedDatabaseConnected) {
+        try {
+          await flushRemoteWrites();
+          const response = await fetch(`${API_ORIGIN}/api/state`, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          exportData = archiveDataFromState((await response.json()).data || {});
+        } catch {
+          showToast('数据库同步未完成，暂不能导出备份');
+          return;
+        }
+      }
+      const payload = {
+        schema: 'solution-department-weekly-report',
+        version: 2,
+        backupId: `backup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        exportedAt: new Date().toISOString(),
+        data: exportData
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const now = new Date();
+      link.href = url;
+      link.download = `解决方案部门周报数据_${getCurrentIsoWeek().key}_${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      renderExportStats();
+      showToast('周报数据文件已导出');
+    }
+
+    const isPlainObject = value => value && typeof value === 'object' && !Array.isArray(value);
+    function normalizeImportedReport(item, index) {
+      if (!isPlainObject(item) || !/^\d{4}-W\d{2}$/.test(String(item.week || '')) || !String(item.person || '').trim() || !String(item.summary || '').trim()) return null;
+      const normalized = {
+        ...item,
+        id: String(item.id || `import-${item.week}-${String(item.person).trim()}-${index}`),
+        week: String(item.week),
+        person: String(item.person).trim(),
+        project: String(item.project || item.category || '其他事项').trim(),
+        category: String(item.category || '其他事项').trim(),
+        summary: String(item.summary).trim(),
+        output: String(item.output || item.deliverable || '').trim(),
+        hours: normalizeHours(item.hours),
+        next: String(item.next || '')
+      };
+      return normalized;
+    }
+
+    function validateImportPayload(payload) {
+      if (!payload || payload.schema !== 'solution-department-weekly-report' || ![1, 2].includes(payload.version) || !isPlainObject(payload.data)) return null;
+      const data = payload.data;
+      if (!Array.isArray(data.personalReports) || !Array.isArray(data.managedPeople) || !Array.isArray(data.managedProjects) || !isPlainObject(data.departmentSummaries) || !isPlainObject(data.weeklySnapshots)) return null;
+      const normalizedReportResults = data.personalReports.map(normalizeImportedReport);
+      if (normalizedReportResults.some(item => !item)) return null;
+      const normalizedReports = normalizedReportResults.filter(item => item.week !== '2026-W27');
+      return {
+        backupVersion: payload.version,
+        backupId: String(payload.backupId || ''),
+        personalReports: normalizedReports,
+        departmentSummaries: { ...data.departmentSummaries },
+        managedPeople: data.managedPeople.filter(item => isPlainObject(item) && String(item.name || '').trim()).map(item => ({ ...item, name: String(item.name).trim() })),
+        managedProjects: data.managedProjects.filter(item => isPlainObject(item) && String(item.name || '').trim()).map(item => ({ ...item, name: String(item.name).trim() })),
+        weeklySnapshots: { ...data.weeklySnapshots }
+      };
+    }
+
+    function mergeByName(current, incoming) {
+      const merged = new Map(current.map(item => [item.name, item]));
+      incoming.forEach(item => { if (item?.name) merged.set(item.name, item); });
+      return [...merged.values()];
+    }
+
+    async function applyImportedData() {
+      if (!pendingImportData) return;
+      if (!sharedDatabaseConnected) { showToast('请先启动共享数据库服务再导入'); return; }
+      const incoming = pendingImportData;
+      const incomingWeeks = new Set([
+        ...incoming.personalReports.map(item => item.week),
+        ...Object.keys(incoming.departmentSummaries),
+        ...Object.keys(incoming.weeklySnapshots)
+      ].filter(key => key && key !== '2026-W27'));
+      const nextPersonalReports = [...personalReports.filter(item => !incomingWeeks.has(item.week) && item.week !== '2026-W27'), ...incoming.personalReports];
+      const nextDepartmentSummaries = { ...departmentSummaries };
+      const nextWeeklySnapshots = { ...weeklySnapshots };
+      incomingWeeks.forEach(key => { delete nextDepartmentSummaries[key]; delete nextWeeklySnapshots[key]; });
+      Object.assign(nextDepartmentSummaries, incoming.departmentSummaries);
+      Object.assign(nextWeeklySnapshots, incoming.weeklySnapshots);
+      delete nextDepartmentSummaries['2026-W27'];
+      delete nextWeeklySnapshots['2026-W27'];
+      const nextManagedPeople = mergeByName(managedPeople, incoming.managedPeople);
+      const nextManagedProjects = mergeByName(managedProjects, incoming.managedProjects);
+      const nextData = { personalReports: nextPersonalReports, departmentSummaries: nextDepartmentSummaries, managedPeople: nextManagedPeople, managedProjects: nextManagedProjects, weeklySnapshots: nextWeeklySnapshots };
+      const state = Object.fromEntries(Object.entries(archiveKeyMap).map(([field, key]) => [key, nextData[field]]));
+      showToast('正在校验并写入共享数据库');
+      try {
+        await flushRemoteWrites();
+        const response = await fetch(`${API_ORIGIN}/api/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch {
+        showToast('导入失败，数据库未发生改变');
+        return;
+      }
+      ({ personalReports, departmentSummaries, managedPeople, managedProjects, weeklySnapshots } = nextData);
+      Object.entries(state).forEach(([key, value]) => {
+        sharedStorage[key] = cloneJson(value);
+        lastPersistedStorage[key] = cloneJson(value);
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+      });
+      showToast('数据导入完成，可安全重复导入');
+      setTimeout(() => location.reload(), 350);
+    }
+
+    weekSelect.value = currentWeek.key;
+    weekSelect.addEventListener('change', () => { render(); if (document.querySelector('#reportBackdrop').classList.contains('open')) renderReportWorkspace(); });
+    window.addEventListener('focus', () => { if (syncWeekWithSystemDate()) render(); });
+    document.querySelector('#transferClose').addEventListener('click', closeTransferModal);
+    document.querySelector('#transferBackdrop').addEventListener('click', event => { if (event.target.id === 'transferBackdrop') closeTransferModal(); });
+    document.querySelector('#exportDataBtn').addEventListener('click', exportAllData);
+    document.querySelector('#chooseImportBtn').addEventListener('click', () => document.querySelector('#importFileInput').click());
+    document.querySelector('#importFileInput').addEventListener('change', async event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const payload = JSON.parse(await file.text());
+        const validated = validateImportPayload(payload);
+        if (!validated) throw new Error('invalid backup');
+        pendingImportData = validated;
+        const stats = getArchiveStats(validated);
+        document.querySelector('#importPreview').textContent = `已识别 V${validated.backupVersion} 备份：${stats.weeks} 周数据、${stats.reports} 条个人事项、${stats.people} 位人员、${stats.projects} 个项目。可重复导入，不会产生重复事项。`;
+        document.querySelector('#applyImportBtn').disabled = false;
+      } catch {
+        pendingImportData = null;
+        document.querySelector('#importPreview').textContent = '文件无法识别，请选择由本页面导出的 JSON 数据文件。';
+        document.querySelector('#applyImportBtn').disabled = true;
+      }
+    });
+    document.querySelector('#applyImportBtn').addEventListener('click', applyImportedData);
+    document.querySelector('#searchInput').addEventListener('input', render);
+    document.querySelector('#statusFilter').addEventListener('change', render);
+    document.querySelector('#drawerClose').addEventListener('click', closeDrawer);
+    document.querySelector('#drawerBackdrop').addEventListener('click', event => { if (event.target.id === 'drawerBackdrop') closeDrawer(); });
+    document.querySelector('#reportEntryBtn').addEventListener('click', openReportModal);
+    document.querySelector('#reportClose').addEventListener('click', closeReportModal);
+    document.querySelector('#reportBackdrop').addEventListener('click', event => { if (event.target.id === 'reportBackdrop') closeReportModal(); });
+    document.querySelector('#openSettingsBtn').addEventListener('click', openSettings);
+    document.querySelector('#settingsClose').addEventListener('click', closeSettings);
+    document.querySelector('#settingsBackdrop').addEventListener('click', event => { if (event.target.id === 'settingsBackdrop') closeSettings(); });
+    document.querySelectorAll('[data-entry-mode]').forEach(button => button.addEventListener('click', () => setEntryMode(button.dataset.entryMode)));
+    document.querySelector('#clearReportBtn').addEventListener('click', clearReportForm);
+    document.querySelector('#clearSingleProjectBtn').addEventListener('click', clearSingleProjectForm);
+    document.querySelector('#personalReportForm').addEventListener('submit', event => {
+      event.preventDefault();
+      const person = document.querySelector('#reportPerson').value.trim();
+      const rawText = document.querySelector('#reportSummary').value.trim();
+      if (!person || !rawText) { showToast('请填写姓名和完整个人周报'); return; }
+      const parsed = parseWeeklyText(rawText);
+      if (!parsed.length) { showToast('没有识别到可保存的周报事项'); return; }
+      const incompleteItems = parsed.map((item, index) => (!item.output || !item.hours ? index + 1 : null)).filter(Boolean);
+      if (incompleteItems.length) { showToast(`第 ${incompleteItems.join('、')} 条缺少交付物或工时`); return; }
+      ensureManagedPerson(person);
+      personalReports = personalReports.filter(item => !(item.week === weekSelect.value && item.person === person));
+      const createdAt = Date.now();
+      parsed.reverse().forEach((item, index) => personalReports.unshift({ id: `${createdAt}-${index}`, week: weekSelect.value, person, project: item.project, category: item.category, summary: item.summary, output: item.output, hours: item.hours, next: '' }));
+      writeStorage('solutionWeeklyReportsV1', personalReports);
+      delete departmentSummaries[weekSelect.value];
+      writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+      clearReportForm();
+      renderReportWorkspace();
+      render();
+      generateDepartmentSummary();
+      showToast(`已自动拆分并归类 ${parsed.length} 条事项`);
+    });
+    document.querySelector('#singleProjectReportForm').addEventListener('submit', event => {
+      event.preventDefault();
+      const person = document.querySelector('#reportPerson').value.trim();
+      const projectName = document.querySelector('#singleProjectInput').value;
+      const summary = document.querySelector('#singleSummaryInput').value.trim();
+      const output = document.querySelector('#singleOutputInput').value.trim();
+      const hours = normalizeHours(document.querySelector('#singleHoursInput').value);
+      if (!person) { showToast('请填写人员姓名'); return; }
+      if (!projectName || !summary || !output || !hours) { showToast('请完整填写项目、事项、交付物和工时'); return; }
+      ensureManagedPerson(person);
+      const project = (getWeeklySnapshot().projects || []).find(item => item.name === projectName) || managedProjects.find(item => item.name === projectName);
+      const category = project ? (project.type === '内部' ? '内部建设' : '客户项目') : classifyItem(summary).category;
+      personalReports.unshift({
+        id: `single-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        week: weekSelect.value,
+        person,
+        project: projectName,
+        category,
+        summary,
+        output,
+        hours,
+        next: ''
+      });
+      writeStorage('solutionWeeklyReportsV1', personalReports);
+      delete departmentSummaries[weekSelect.value];
+      writeStorage('solutionDepartmentSummariesV1', departmentSummaries);
+      clearSingleProjectForm();
+      renderReportWorkspace();
+      render();
+      generateDepartmentSummary();
+      showToast(`已保存 ${person} 的项目周报`);
+    });
+    document.querySelector('#cancelPersonEdit').addEventListener('click', resetPersonForm);
+    document.querySelector('#cancelProjectEdit').addEventListener('click', resetProjectForm);
+    document.querySelector('#peopleForm').addEventListener('submit', event => {
+      event.preventDefault();
+      const id = document.querySelector('#personEditId').value;
+      const name = document.querySelector('#personNameInput').value.trim();
+      const role = document.querySelector('#personRoleInput').value.trim() || '解决方案成员';
+      if (!name) return;
+      if (managedPeople.some(item => item.name === name && String(item.id) !== id)) { showToast('该人员已经存在'); return; }
+      if (id) {
+        const existing = managedPeople.find(item => String(item.id) === id);
+        const oldName = existing?.name;
+        managedPeople = managedPeople.map(item => String(item.id) === id ? { ...item, name, role } : item);
+        if (oldName && oldName !== name) personalReports = personalReports.map(item => item.person === oldName ? { ...item, person: name } : item);
+      } else managedPeople.push({ id: `person-${Date.now()}`, name, role });
+      writeStorage('solutionManagedPeopleV1', managedPeople);
+      writeStorage('solutionWeeklyReportsV1', personalReports);
+      saveWeeklySnapshot();
+      invalidateDepartmentSummaries();
+      resetPersonForm(); renderSettings(); render();
+      showToast('人员信息已保存');
+    });
+    document.querySelector('#projectForm').addEventListener('submit', event => {
+      event.preventDefault();
+      const id = document.querySelector('#projectEditId').value;
+      const name = document.querySelector('#projectNameInput').value.trim();
+      if (!name) return;
+      if (managedProjects.some(item => item.name === name && String(item.id) !== id)) { showToast('该项目已经存在'); return; }
+      const values = { name, type: document.querySelector('#projectTypeInput').value.trim() || '未分类', stage: document.querySelector('#projectStageInput').value.trim() || '待更新', status: document.querySelector('#projectStatusInput').value, keywords: document.querySelector('#projectKeywordsInput').value.trim() };
+      if (id) {
+        const existing = managedProjects.find(item => String(item.id) === id);
+        const oldName = existing?.name;
+        managedProjects = managedProjects.map(item => String(item.id) === id ? { ...item, ...values } : item);
+        if (oldName && oldName !== name) personalReports = personalReports.map(item => item.project === oldName ? { ...item, project: name } : item);
+      } else managedProjects.push({ id: `project-${Date.now()}`, ...values, color: avatarColors[managedProjects.length % avatarColors.length], people: [], todos: [], work: '', result: '' });
+      writeStorage('solutionManagedProjectsV1', managedProjects);
+      saveWeeklySnapshot();
+      reclassifyAllReports();
+      resetProjectForm(); renderSettings(); render();
+      showToast('项目信息已保存');
+    });
+    document.querySelector('#generateSummaryBtn').addEventListener('click', generateDepartmentSummary);
+    document.querySelector('#copyGeneratedBtn').addEventListener('click', () => copyText(departmentSummaries[weekSelect.value] || generateDepartmentSummary()));
+    document.querySelector('#peopleBtn').addEventListener('click', () => showToast('人员视图会按项目参与和事项贡献呈现'));
+    document.querySelectorAll('.nav-btn').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.nav-btn').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      if (button.dataset.action === 'reports') openReportModal();
+      if (button.dataset.action === 'transfer') openTransferModal();
+    }));
+    document.querySelector('#copyBtn').addEventListener('click', () => {
+      const summary = departmentSummaries[weekSelect.value] || buildDepartmentSummary();
+      if (!summary) { openReportModal(); showToast('请先录入并生成部门摘要'); return; }
+      if (!departmentSummaries[weekSelect.value]) { departmentSummaries[weekSelect.value] = summary; writeStorage('solutionDepartmentSummariesV1', departmentSummaries); }
+      copyText(summary);
+    });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeDrawer(); closeSettings(); closeReportModal(); closeTransferModal(); } });
+    render();
+    })();
+  </script>
+</body>
+</html>
