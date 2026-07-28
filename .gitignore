@@ -1,9 +1,19 @@
-# macOS and editor files
+# OS and editor files
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 
-# Python cache and local environments
+# Local tool state and recoverable archives
+.agents/
+.archive/
+.codex/
+.pytest_cache/
+.ruff_cache/
+.run/
+.uv-cache/
+
+# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -14,19 +24,17 @@ venv/
 .env.*
 !.env.example
 
-# Runtime databases and backups
+# Runtime data and backups
+/data/
 *.db
 *.db-shm
 *.db-wal
 backups/
 outputs/
+*.log
 
-# Local Codex metadata
-.agents/
-.codex/
+# Local design sources; production avatars live in frontend/public/avatars.
+/.static/
 
-# Separate prototype and internal source materials
-.dockerignore
-solution_warroom/
-解决方案团队作战台-*.md
-解决方案部门周报-20*.md
+# Out-of-scope local workspaces
+/solution_warroom/
