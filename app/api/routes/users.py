@@ -1,16 +1,27 @@
 import secrets
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
-from app.dependencies import get_current_user, get_db, require_admin
-from app.domain import DIRECT_LEADER_ROLES, can_be_direct_leader
+from app.dependencies import get_current_user, get_db, require_csrf
+from app.domain import DIRECT_LEADER_ROLES, can_be_direct_leader, is_super_admin
 from app.errors import AppError, ConflictError, NotFoundError
-from app.models import User, UserRole, utc_now
-from app.schemas import UserCreate, UserLeaderUpdate, UserOut, UserUpdate
+from app.identity import normalize_user_identifier
+from app.models import PermissionKey, User, UserRole, utc_now
+from app.schemas import (
+    PermissionDefinitionOut,
+    UserCreate,
+    UserLeaderUpdate,
+    UserOut,
+    UserPermissionsOut,
+    UserPermissionsUpdate,
+    UserUpdate,
+)
 from app.security import hash_password
+from app.services import permissions as permission_service
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -18,13 +29,42 @@ router = APIRouter(prefix="/users", tags=["users"])
 def _generate_login_name(db: Session) -> str:
     for _attempt in range(20):
         login_name = f"u{secrets.randbelow(100_000_000):08d}"
-        if not db.scalar(select(User.id).where(User.login_name == login_name)):
+        if not db.scalar(
+            select(User.id).where(
+                or_(
+                    User.login_name == login_name,
+                    User.display_name_key == login_name,
+                )
+            )
+        ):
             return login_name
     raise AppError(
         "LOGIN_NAME_GENERATION_FAILED",
         "暂时无法生成登录名，请重试",
         status_code=503,
     )
+
+
+def _assert_display_name_available(
+    db: Session,
+    display_name: str,
+    *,
+    exclude_user_id: str | None = None,
+) -> None:
+    display_name_key = normalize_user_identifier(display_name)
+    query = select(User.id).where(
+        or_(
+            User.display_name_key == display_name_key,
+            User.login_name == display_name_key,
+        )
+    )
+    if exclude_user_id:
+        query = query.where(User.id != exclude_user_id)
+    if db.scalar(query.limit(1)):
+        raise ConflictError(
+            "DISPLAY_NAME_ALREADY_EXISTS",
+            "显示名称已被使用，请换一个",
+        )
 
 
 def _get_assignable_leader(db: Session, leader_id: str) -> User:
@@ -62,25 +102,108 @@ def list_users(
     ]
 
 
+@router.get("/permissions/catalog", response_model=list[PermissionDefinitionOut])
+def permission_catalog(
+    actor: User = Depends(get_current_user),
+) -> list[PermissionDefinitionOut]:
+    permission_service.assert_permission_manager(actor)
+    return [
+        PermissionDefinitionOut(
+            key=definition.key.value,
+            group=definition.group,
+            group_label=definition.group_label,
+            label=definition.label,
+            description=definition.description,
+            system_admin_assignable=definition.system_admin_assignable,
+        )
+        for definition in permission_service.PERMISSION_CATALOG
+    ]
+
+
+@router.get("/{user_id}/permissions", response_model=UserPermissionsOut)
+def get_user_permissions(
+    user_id: str,
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPermissionsOut:
+    target = db.get(User, user_id)
+    if not target or target.role == UserRole.SUPER_ADMIN.value:
+        raise NotFoundError("USER_NOT_FOUND", "用户不存在")
+    permission_service.assert_permission_manager(actor)
+    if not is_super_admin(actor) and target.role not in {
+        UserRole.MEMBER.value,
+        UserRole.TEAM_LEADER.value,
+    }:
+        raise NotFoundError("USER_NOT_FOUND", "用户不存在")
+    assigned = permission_service.assigned_permission_keys(db, target.id)
+    return UserPermissionsOut(
+        user_id=target.id,
+        revision=target.revision,
+        assigned_permissions=[
+            key for key in permission_service.ALL_PERMISSION_KEYS if key in assigned
+        ],
+        effective_permissions=permission_service.effective_permission_keys(db, target),
+    )
+
+
+@router.put("/{user_id}/permissions", response_model=UserPermissionsOut)
+def update_user_permissions(
+    user_id: str,
+    payload: UserPermissionsUpdate,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> UserPermissionsOut:
+    target = db.get(User, user_id)
+    if not target or target.role == UserRole.SUPER_ADMIN.value:
+        raise NotFoundError("USER_NOT_FOUND", "用户不存在")
+    assigned = permission_service.replace_user_permissions(
+        db,
+        actor=actor,
+        target=target,
+        expected_revision=payload.revision,
+        requested_keys={permission.value for permission in payload.permissions},
+    )
+    return UserPermissionsOut(
+        user_id=target.id,
+        revision=target.revision,
+        assigned_permissions=assigned,
+        effective_permissions=permission_service.effective_permission_keys(db, target),
+    )
+
+
 @router.post("", response_model=UserOut, status_code=201)
 def create_user(
     payload: UserCreate,
-    actor: User = Depends(require_admin),
+    actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> UserOut:
+    permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     if payload.role == UserRole.SUPER_ADMIN:
         raise AppError("SUPER_ADMIN_API_FORBIDDEN", "超级管理员只能通过服务器命令创建")
+    if payload.role == UserRole.SYSTEM_ADMIN and not is_super_admin(actor):
+        raise AppError(
+            "SYSTEM_ADMIN_ROLE_FORBIDDEN",
+            "只有超级管理员可以创建系统管理员",
+            status_code=403,
+        )
+    _assert_display_name_available(db, payload.display_name)
     login_name = _generate_login_name(db)
     user = User(
         login_name=login_name,
-        display_name=payload.display_name.strip(),
+        display_name=payload.display_name,
         password_hash=hash_password(payload.password),
         role=payload.role.value,
         leader_id=None,
         must_change_password=True,
     )
     db.add(user)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as error:
+        raise ConflictError(
+            "DISPLAY_NAME_ALREADY_EXISTS",
+            "显示名称已被使用，请换一个",
+        ) from error
     record_audit(
         db,
         actor=actor,
@@ -101,11 +224,14 @@ def create_user(
 def update_user(
     user_id: str,
     payload: UserUpdate,
-    actor: User = Depends(require_admin),
+    actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> UserOut:
+    permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     user = db.get(User, user_id)
     if not user or user.role == UserRole.SUPER_ADMIN.value:
+        raise NotFoundError("USER_NOT_FOUND", "用户不存在")
+    if user.role == UserRole.SYSTEM_ADMIN.value and not is_super_admin(actor):
         raise NotFoundError("USER_NOT_FOUND", "用户不存在")
     if payload.revision != user.revision:
         raise ConflictError(
@@ -132,6 +258,15 @@ def update_user(
                 "SUPER_ADMIN_API_FORBIDDEN",
                 "超级管理员角色只能通过服务器命令管理",
             )
+        if (
+            payload.role == UserRole.SYSTEM_ADMIN
+            or user.role == UserRole.SYSTEM_ADMIN.value
+        ) and not is_super_admin(actor):
+            raise AppError(
+                "SYSTEM_ADMIN_ROLE_FORBIDDEN",
+                "只有超级管理员可以调整系统管理员角色",
+                status_code=403,
+            )
         if actor.id == user.id and payload.role.value != user.role:
             raise AppError(
                 "SELF_ROLE_CHANGE_FORBIDDEN",
@@ -148,7 +283,12 @@ def update_user(
             )
         user.role = payload.role.value
     if "display_name" in fields and payload.display_name:
-        user.display_name = payload.display_name.strip()
+        _assert_display_name_available(
+            db,
+            payload.display_name,
+            exclude_user_id=user.id,
+        )
+        user.display_name = payload.display_name
     if "leader_id" in fields:
         if payload.leader_id:
             leader = _get_assignable_leader(db, payload.leader_id)
@@ -159,6 +299,13 @@ def update_user(
 
     user.revision += 1
     user.updated_at = utc_now()
+    try:
+        db.flush()
+    except IntegrityError as error:
+        raise ConflictError(
+            "DISPLAY_NAME_ALREADY_EXISTS",
+            "显示名称已被使用，请换一个",
+        ) from error
     record_audit(
         db,
         actor=actor,
@@ -180,11 +327,14 @@ def update_user(
 def update_user_leader(
     user_id: str,
     payload: UserLeaderUpdate,
-    actor: User = Depends(require_admin),
+    actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> UserOut:
+    permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     user = db.get(User, user_id)
     if not user or user.role == UserRole.SUPER_ADMIN.value:
+        raise NotFoundError("USER_NOT_FOUND", "用户不存在")
+    if user.role == UserRole.SYSTEM_ADMIN.value and not is_super_admin(actor):
         raise NotFoundError("USER_NOT_FOUND", "用户不存在")
     if payload.revision != user.revision:
         raise ConflictError(

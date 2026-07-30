@@ -1,0 +1,8 @@
+[Unit]
+Description=Solution Workspace MVP
+Documentation=file:///etc/systemd/system/solution-workspace.target
+Wants=solution-workspace-backend.service solution-workspace-frontend.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

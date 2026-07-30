@@ -94,8 +94,8 @@ def test_admin_assigns_direct_leader_with_role_and_revision_guards(api: dict) ->
             "leader_id": None,
         },
     )
-    assert self_role_change.status_code == 400
-    assert self_role_change.json()["code"] == "SELF_ROLE_CHANGE_FORBIDDEN"
+    assert self_role_change.status_code == 404
+    assert self_role_change.json()["code"] == "USER_NOT_FOUND"
 
     leader = next(
         item for item in refreshed_users if item["id"] == api["users"]["leader"]
@@ -217,11 +217,9 @@ def test_weekly_report_scope_draft_submission_and_leader_visibility(
     submitted = first_submit.json()
     assert submitted["submission_version"] == 1
 
-    admin_csrf = login(client, "admin")
-    assert admin_csrf
-    inbox = client.get("/api/v1/weekly-reports/inbox")
-    assert inbox.status_code == 200
-    assert inbox.json()[0]["content"] == submitted["content"]
+    login(client, "admin")
+    assert client.get("/api/v1/weekly-reports").json() == []
+    assert client.get("/api/v1/weekly-reports/inbox").status_code == 404
 
     csrf = login(client, "member")
     edited_text = "# 本周周报\n\n人工编辑后的正式内容。"
@@ -234,7 +232,7 @@ def test_weekly_report_scope_draft_submission_and_leader_visibility(
     assert saved.json()["has_unsubmitted_changes"] is True
 
     login(client, "admin")
-    assert client.get("/api/v1/weekly-reports/inbox").json()[0]["content"] != edited_text
+    assert client.get("/api/v1/weekly-reports").json() == []
 
     csrf = login(client, "member")
     confirmation_required = client.post(
@@ -255,13 +253,15 @@ def test_weekly_report_scope_draft_submission_and_leader_visibility(
     assert overwritten.status_code == 200, overwritten.text
     assert overwritten.json()["submission_version"] == 2
 
-    login(client, "admin")
-    assert client.get("/api/v1/weekly-reports/inbox").json()[0]["content"] == edited_text
+    own_history = client.get("/api/v1/weekly-reports")
+    assert own_history.status_code == 200
+    assert own_history.json()[0]["content"] == edited_text
 
-    login(client, "leader")
-    assert client.get("/api/v1/weekly-reports/inbox").json() == []
-
-    login(client, "super_admin")
-    super_inbox = client.get("/api/v1/weekly-reports/inbox")
-    assert super_inbox.status_code == 200
-    assert super_inbox.json()[0]["content"] == edited_text
+    for other_login in ("admin", "leader", "super_admin"):
+        login(client, other_login)
+        other_history = client.get("/api/v1/weekly-reports")
+        assert other_history.status_code == 200
+        assert all(
+            report["author_id"] != api["users"]["member"]
+            for report in other_history.json()
+        )

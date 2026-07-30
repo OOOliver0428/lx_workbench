@@ -17,9 +17,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.identity import normalize_user_identifier
 
 
 def utc_now() -> datetime:
@@ -39,6 +42,26 @@ class UserRole(StrEnum):
     TEAM_LEADER = "team_leader"
     SYSTEM_ADMIN = "system_admin"
     SUPER_ADMIN = "super_admin"
+
+
+class PermissionKey(StrEnum):
+    DASHBOARD_OPPORTUNITY_VIEW = "dashboard.opportunity.view"
+    DASHBOARD_WORK_VIEW = "dashboard.work.view"
+    DASHBOARD_OVERVIEW_VIEW = "dashboard.overview.view"
+    DASHBOARD_TEAM_SUMMARY = "dashboard.team_summary.generate"
+    PROJECTS_VIEW = "projects.view"
+    PROJECTS_MANAGE = "projects.manage"
+    TASKS_VIEW = "tasks.view"
+    TASKS_MANAGE = "tasks.manage"
+    WORK_RECORDS_VIEW = "work_records.view"
+    WORK_RECORDS_MANAGE = "work_records.manage"
+    WEEKLY_REPORTS_VIEW = "weekly_reports.view"
+    WEEKLY_REPORTS_MANAGE = "weekly_reports.manage"
+    AI_USE = "ai.use"
+    USERS_MANAGE = "settings.users.manage"
+    TAGS_MANAGE = "settings.tags.manage"
+    AI_CONFIG_MANAGE = "settings.ai.manage"
+    AUDIT_VIEW = "settings.audit.view"
 
 
 class ProjectStatus(StrEnum):
@@ -70,6 +93,22 @@ class TaskPriority(StrEnum):
     P2 = "p2"
 
 
+class BusinessStage(StrEnum):
+    LEAD = "lead"
+    REQUIREMENT = "requirement"
+    SOLUTION_EXCHANGE = "solution_exchange"
+    SOLUTION_CONFIRM = "solution_confirm"
+    POC = "poc"
+    TENDER = "tender"
+    WON = "won"
+
+
+class AttentionStatus(StrEnum):
+    FOCUS = "focus"
+    STEADY = "steady"
+    COORDINATE = "coordinate"
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
@@ -93,10 +132,14 @@ class SoftDeleteMixin:
 
 class User(Base, TimestampMixin, RevisionMixin):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("uq_users_display_name_key", "display_name_key", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     login_name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_name_key: Mapped[str | None] = mapped_column(String(512))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default=UserRole.MEMBER.value)
     leader_id: Mapped[str | None] = mapped_column(
@@ -108,6 +151,43 @@ class User(Base, TimestampMixin, RevisionMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+@event.listens_for(User, "before_insert")
+@event.listens_for(User, "before_update")
+def _normalize_user_identity(
+    _mapper: object,
+    _connection: object,
+    user: User,
+) -> None:
+    user.login_name = normalize_user_identifier(user.login_name)
+    user.display_name = user.display_name.strip()
+    user.display_name_key = normalize_user_identifier(user.display_name)
+
+
+class UserPermission(Base, TimestampMixin):
+    __tablename__ = "user_permissions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    permission_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    granted_by: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "permission_key",
+            name="uq_user_permissions_user_key",
+        ),
+    )
 
 
 class AIProviderConfig(Base, TimestampMixin, RevisionMixin):
@@ -369,6 +449,90 @@ class TaskAssignmentHistory(Base):
     )
 
 
+class ProjectProgress(Base, TimestampMixin, RevisionMixin):
+    """Append-only weekly facts that drive the war-room project display."""
+
+    __tablename__ = "project_progress"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    week_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    business_stage: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=BusinessStage.LEAD.value,
+    )
+    attention_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=AttentionStatus.STEADY.value,
+    )
+    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    output_summary: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "progress_percent >= 0 AND progress_percent <= 100",
+            name="ck_project_progress_percent",
+        ),
+        Index(
+            "ix_project_progress_project_week_created",
+            "project_id",
+            "week_start",
+            "created_at",
+        ),
+    )
+
+
+class TaskRelation(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
+    """A named cross-project link between two task nodes in the graph."""
+
+    __tablename__ = "task_relations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    source_task_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    target_task_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    label: Mapped[str] = mapped_column(String(240), nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_task_id <> target_task_id",
+            name="ck_task_relations_distinct_tasks",
+        ),
+        UniqueConstraint(
+            "source_task_id",
+            "target_task_id",
+            name="uq_task_relations_pair",
+        ),
+    )
+
+
 class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     __tablename__ = "work_records"
 
@@ -442,6 +606,41 @@ class WeeklyReport(Base, TimestampMixin, RevisionMixin):
     @property
     def has_unsubmitted_changes(self) -> bool:
         return self.submitted_content is None or self.content != self.submitted_content
+
+
+class TeamWeeklySummary(Base, TimestampMixin, RevisionMixin):
+    __tablename__ = "team_weekly_summaries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    week_end: Mapped[date] = mapped_column(Date, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_by: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    forced: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    submitted_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_model: Mapped[str] = mapped_column(String(120), nullable=False)
+    generation_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    __table_args__ = (
+        CheckConstraint(
+            "week_end >= week_start",
+            name="ck_team_weekly_summaries_valid_week",
+        ),
+        CheckConstraint(
+            "submitted_count >= 0 AND expected_count >= submitted_count",
+            name="ck_team_weekly_summaries_counts",
+        ),
+        Index(
+            "ix_team_weekly_summaries_week_created",
+            "week_start",
+            "created_at",
+        ),
+    )
 
 
 class Deliverable(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):

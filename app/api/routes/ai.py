@@ -5,11 +5,9 @@ from app.audit import record_audit
 from app.dependencies import (
     get_current_user,
     get_db,
-    require_admin,
-    require_admin_read,
     require_csrf,
 )
-from app.models import AIProviderConfig, User
+from app.models import AIProviderConfig, PermissionKey, User
 from app.schemas import (
     AIChatOut,
     AIChatRequest,
@@ -21,6 +19,7 @@ from app.schemas import (
     AIStatusOut,
 )
 from app.services import ai as ai_service
+from app.services import permissions as permission_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -28,25 +27,38 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 @router.get("/status", response_model=AIStatusOut)
 def ai_status(
     request: Request,
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AIStatusOut:
+    permission_service.assert_any_permission(
+        db,
+        actor,
+        (
+            PermissionKey.AI_USE,
+            PermissionKey.AI_CONFIG_MANAGE,
+            PermissionKey.WEEKLY_REPORTS_MANAGE,
+            PermissionKey.DASHBOARD_TEAM_SUMMARY,
+        ),
+    )
     return ai_service.get_status(db, request.app.state.settings)
 
 
 @router.get("/providers", response_model=list[AIProviderOptionOut])
 def ai_providers(
-    _actor: User = Depends(require_admin_read),
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> list[AIProviderOptionOut]:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     return ai_service.list_providers()
 
 
 @router.get("/configuration", response_model=AIConfigurationOut)
 def ai_configuration(
     request: Request,
-    _actor: User = Depends(require_admin_read),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AIConfigurationOut:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     return ai_service.get_configuration(db, request.app.state.settings)
 
 
@@ -54,9 +66,10 @@ def ai_configuration(
 def test_ai_configuration(
     payload: AIConfigurationTestRequest,
     request: Request,
-    actor: User = Depends(require_admin),
+    actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> AIConfigurationTestOut:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     result = ai_service.test_configuration(request.app.state.settings, payload)
     record_audit(
         db,
@@ -78,9 +91,10 @@ def test_ai_configuration(
 def save_ai_configuration(
     payload: AIConfigurationSaveRequest,
     request: Request,
-    actor: User = Depends(require_admin),
+    actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> AIConfigurationOut:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     previous = db.get(AIProviderConfig, ai_service.PRIMARY_CONFIG_ID)
     before_data = (
         {
@@ -122,6 +136,7 @@ def ai_chat(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> AIChatOut:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_USE)
     result = ai_service.chat(db, request.app.state.settings, payload, actor)
     record_audit(
         db,

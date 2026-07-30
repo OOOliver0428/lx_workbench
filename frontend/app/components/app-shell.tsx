@@ -7,12 +7,14 @@ import type {
   AIChatResult,
   AIStatus,
   AuthContext,
+  PermissionKey,
   WeeklyReport,
 } from "../types";
 import { InlineNotice } from "./ui";
 import { AvatarImage } from "./avatar";
 
 export type WorkspaceView =
+  | "dashboard"
   | "projects"
   | "tasks"
   | "records"
@@ -26,23 +28,63 @@ const navigation: Array<{
   index: string;
   description: string;
 }> = [
-  { id: "projects", label: "项目", index: "01", description: "主数据与协作" },
-  { id: "tasks", label: "任务", index: "02", description: "推进与交付" },
-  { id: "records", label: "工作记录", index: "03", description: "个人工作沉淀" },
-  { id: "reports", label: "周报", index: "04", description: "生成、提交与审阅" },
+  { id: "dashboard", label: "作战台", index: "01", description: "进展、产出与节奏" },
+  { id: "projects", label: "项目", index: "02", description: "主数据与协作" },
+  { id: "tasks", label: "任务", index: "03", description: "推进与交付" },
+  { id: "records", label: "工作记录", index: "04", description: "个人工作沉淀" },
+  { id: "reports", label: "周报", index: "05", description: "生成、提交与审阅" },
   {
     id: "profile",
     label: "个人设置",
-    index: "05",
+    index: "06",
     description: "头像与密码",
   },
   {
     id: "admin",
     label: "系统设置",
-    index: "06",
+    index: "07",
     description: "用户、标签与模型",
   },
 ];
+
+const dashboardPermissions: PermissionKey[] = [
+  "dashboard.opportunity.view",
+  "dashboard.work.view",
+  "dashboard.overview.view",
+];
+
+const settingsPermissions: PermissionKey[] = [
+  "settings.users.manage",
+  "settings.tags.manage",
+  "settings.ai.manage",
+  "settings.audit.view",
+];
+
+export function canAccessWorkspaceView(
+  context: AuthContext,
+  view: WorkspaceView,
+) {
+  const permissions = context.permissions ?? [];
+  const has = (permission: PermissionKey) =>
+    permissions.includes(permission);
+  if (view === "profile") return true;
+  if (view === "dashboard") return dashboardPermissions.some(has);
+  if (view === "projects") return has("projects.view");
+  if (view === "tasks") return has("tasks.view");
+  if (view === "records") return has("work_records.view");
+  if (view === "reports") return has("weekly_reports.view");
+  return (
+    ["system_admin", "super_admin"].includes(context.user.role) ||
+    settingsPermissions.some(has)
+  );
+}
+
+export function defaultWorkspaceView(context: AuthContext): WorkspaceView {
+  return (
+    navigation.find((item) => canAccessWorkspaceView(context, item.id))?.id ??
+    "profile"
+  );
+}
 
 export function AppShell({
   context,
@@ -58,9 +100,14 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [aiOpen, setAiOpen] = useState(false);
-  const isAdmin = ["system_admin", "super_admin"].includes(context.user.role);
-  const visibleNavigation = navigation.filter(
-    (item) => item.id !== "admin" || isAdmin,
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const permissions = context.permissions ?? [];
+  const canUseAi = permissions.includes("ai.use");
+  const canManageWeeklyReports = permissions.includes(
+    "weekly_reports.manage",
+  );
+  const visibleNavigation = navigation.filter((item) =>
+    canAccessWorkspaceView(context, item.id),
   );
 
   function confirmLogout() {
@@ -70,26 +117,42 @@ export function AppShell({
   }
 
   return (
-    <div className="app-frame">
+    <div className={`app-frame${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="brand-lockup">
-          <span className="brand-symbol">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>
-            <strong>协作工作台</strong>
-            <small>赋能售前和解决方案</small>
-          </span>
+        <div className="sidebar-head">
+          <div className="brand-lockup">
+            <span className="brand-symbol">
+              <i />
+              <i />
+              <i />
+            </span>
+            <span>
+              <strong>协作工作台</strong>
+              <small>赋能售前和解决方案</small>
+            </span>
+          </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            aria-label={sidebarCollapsed ? "展开左侧导航栏" : "收起左侧导航栏"}
+            aria-pressed={sidebarCollapsed}
+            title={sidebarCollapsed ? "展开导航栏" : "收起导航栏"}
+          >
+            <span aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span>
+          </button>
         </div>
         <nav className="primary-nav" aria-label="主导航">
           <p className="nav-caption">工作空间</p>
           {visibleNavigation.map((item) => (
             <button
+              type="button"
               key={item.id}
               className={activeView === item.id ? "active" : ""}
               onClick={() => onViewChange(item.id)}
+              aria-current={activeView === item.id ? "page" : undefined}
+              aria-label={item.label}
+              title={`${item.label} · ${item.description}`}
             >
               <span className="nav-index">{item.index}</span>
               <span>
@@ -101,15 +164,22 @@ export function AppShell({
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className="ai-entry" onClick={() => setAiOpen(true)}>
-            <span className="ai-orbit" aria-hidden="true">
-              ✦
-            </span>
-            <span>
-              <strong>AI 助手</strong>
-              <small>项目与工作智能辅助</small>
-            </span>
-          </button>
+          {canUseAi || canManageWeeklyReports ? (
+            <button
+              type="button"
+              className="ai-entry"
+              onClick={() => setAiOpen(true)}
+              title="打开 AI 助手"
+            >
+              <span className="ai-orbit" aria-hidden="true">
+                ✦
+              </span>
+              <span>
+                <strong>AI 助手</strong>
+                <small>项目与工作智能辅助</small>
+              </span>
+            </button>
+          ) : null}
           <div className="account-summary">
             <button
               type="button"
@@ -140,7 +210,13 @@ export function AppShell({
         </div>
       </aside>
       <div className="workspace-main">{children}</div>
-      {aiOpen ? <AIDrawer onClose={() => setAiOpen(false)} /> : null}
+      {aiOpen ? (
+        <AIDrawer
+          canUseAi={canUseAi}
+          canManageWeeklyReports={canManageWeeklyReports}
+          onClose={() => setAiOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -156,7 +232,15 @@ function roleLabel(role: string) {
   );
 }
 
-function AIDrawer({ onClose }: { onClose: () => void }) {
+function AIDrawer({
+  canUseAi,
+  canManageWeeklyReports,
+  onClose,
+}: {
+  canUseAi: boolean;
+  canManageWeeklyReports: boolean;
+  onClose: () => void;
+}) {
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<
@@ -179,16 +263,23 @@ function AIDrawer({ onClose }: { onClose: () => void }) {
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    Promise.all([api.ai.status(), api.weeklyReports.current()])
+    Promise.all([
+      api.ai.status(),
+      canManageWeeklyReports
+        ? api.weeklyReports.current()
+        : Promise.resolve(null),
+    ])
       .then(([serviceStatus, current]) => {
         setStatus(serviceStatus);
-        setWeekStart(current.week_start);
-        setWeekEnd(current.week_end);
-        setWeeklyReport(current.report);
-        setReportContent(current.report?.content ?? "");
+        if (current) {
+          setWeekStart(current.week_start);
+          setWeekEnd(current.week_end);
+          setWeeklyReport(current.report);
+          setReportContent(current.report?.content ?? "");
+        }
       })
       .catch(() => setError("无法读取 AI 服务或本周周报状态"));
-  }, []);
+  }, [canManageWeeklyReports]);
 
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({
@@ -364,7 +455,7 @@ function AIDrawer({ onClose }: { onClose: () => void }) {
           </span>
         </div>
         <div className="ai-conversation">
-          {messages.length === 0 ? (
+          {canUseAi && messages.length === 0 ? (
             <div className="ai-welcome">
               <span>✦</span>
               <h3>从一个具体问题开始</h3>
@@ -385,6 +476,7 @@ function AIDrawer({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           ) : null}
+          {canManageWeeklyReports ? (
           <section className="weekly-report-card">
             <header>
               <div>
@@ -469,7 +561,8 @@ function AIDrawer({ onClose }: { onClose: () => void }) {
               </>
             )}
           </section>
-          {messages.length ? (
+          ) : null}
+          {canUseAi && messages.length ? (
             <section
               className="ai-chat-thread"
               aria-label="本次 AI 对话"
@@ -518,7 +611,7 @@ function AIDrawer({ onClose }: { onClose: () => void }) {
           {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
           <div ref={conversationEndRef} />
         </div>
-        <form className="ai-composer" onSubmit={submit}>
+        {canUseAi ? <form className="ai-composer" onSubmit={submit}>
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
@@ -547,7 +640,7 @@ function AIDrawer({ onClose }: { onClose: () => void }) {
               {submitting ? "思考中…" : "发送"}
             </button>
           </div>
-        </form>
+        </form> : null}
       </aside>
     </div>
   );

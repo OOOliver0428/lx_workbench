@@ -2,14 +2,15 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
-from app.models import User
+from app.models import PermissionKey, User
 from app.schemas import (
+    TeamWeeklySummaryOut,
     WeeklyReportCurrentOut,
     WeeklyReportDraftUpdate,
-    WeeklyReportInboxOut,
     WeeklyReportOut,
     WeeklyReportSubmit,
 )
+from app.services import permissions as permission_service
 from app.services import weekly_reports as report_service
 
 router = APIRouter(prefix="/weekly-reports", tags=["weekly-reports"])
@@ -20,6 +21,7 @@ def get_current_weekly_report(
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WeeklyReportCurrentOut:
+    permission_service.assert_permission(db, actor, PermissionKey.WEEKLY_REPORTS_VIEW)
     week_start, week_end = report_service.current_week_bounds()
     report = report_service.get_current_report(db, actor)
     return WeeklyReportCurrentOut(
@@ -34,18 +36,28 @@ def list_own_weekly_reports(
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[WeeklyReportOut]:
+    permission_service.assert_permission(db, actor, PermissionKey.WEEKLY_REPORTS_VIEW)
     return [
         report_service.report_out(report)
         for report in report_service.list_own_reports(db, actor)
     ]
 
 
-@router.get("/inbox", response_model=list[WeeklyReportInboxOut])
-def list_weekly_report_inbox(
+@router.get("/team-summaries", response_model=list[TeamWeeklySummaryOut])
+def list_team_weekly_summaries(
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[WeeklyReportInboxOut]:
-    return report_service.list_inbox(db, actor)
+) -> list[TeamWeeklySummaryOut]:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.DASHBOARD_TEAM_SUMMARY,
+        "当前账号没有查看团队周报的权限",
+    )
+    return [
+        TeamWeeklySummaryOut.model_validate(summary)
+        for summary in report_service.list_own_team_summaries(db, actor)
+    ]
 
 
 @router.post("/current/generate", response_model=WeeklyReportOut)
@@ -54,6 +66,11 @@ def generate_current_weekly_report(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> WeeklyReportOut:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.WEEKLY_REPORTS_MANAGE,
+    )
     report = report_service.generate_current_report(
         db,
         request.app.state.settings,
@@ -69,6 +86,11 @@ def save_weekly_report_draft(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> WeeklyReportOut:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.WEEKLY_REPORTS_MANAGE,
+    )
     report = report_service.get_report(db, report_id)
     return report_service.report_out(
         report_service.save_draft(db, report, payload, actor)
@@ -82,6 +104,11 @@ def submit_weekly_report(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> WeeklyReportOut:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.WEEKLY_REPORTS_MANAGE,
+    )
     report = report_service.get_report(db, report_id)
     return report_service.report_out(
         report_service.submit_report(db, report, payload, actor)

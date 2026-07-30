@@ -21,6 +21,7 @@ from app.models import (
     ProjectTagAssignment,
     Task,
     User,
+    UserRole,
     WorkRecord,
     utc_now,
 )
@@ -89,7 +90,11 @@ def get_project(db: Session, project_id: str, *, include_deleted: bool = False) 
 
 def ensure_user(db: Session, user_id: str) -> User:
     user = db.get(User, user_id)
-    if not user or not user.is_active:
+    if (
+        not user
+        or not user.is_active
+        or user.role == UserRole.SUPER_ADMIN.value
+    ):
         raise AppError("INVALID_USER", "用户不存在或已停用")
     return user
 

@@ -4,8 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
-from app.domain import is_admin, normalize_name
-from app.errors import ConflictError, NotFoundError, PermissionDeniedError
+from app.domain import normalize_name
+from app.errors import ConflictError, NotFoundError
 from app.models import ProjectTag, User, utc_now
 from app.schemas import ProjectTagCreate, ProjectTagUpdate
 from app.services.projects import assert_revision
@@ -26,8 +26,6 @@ def list_tags(db: Session, *, include_inactive: bool = False) -> list[ProjectTag
 
 
 def create_tag(db: Session, payload: ProjectTagCreate, actor: User) -> ProjectTag:
-    if not is_admin(actor):
-        raise PermissionDeniedError("只有系统管理员可以创建项目标签")
     normalized = normalize_name(payload.name)
     if db.scalar(select(ProjectTag.id).where(ProjectTag.normalized_name == normalized)):
         raise ConflictError("PROJECT_TAG_NAME_CONFLICT", "项目标签已经存在")
@@ -62,8 +60,6 @@ def update_tag(
     payload: ProjectTagUpdate,
     actor: User,
 ) -> ProjectTag:
-    if not is_admin(actor):
-        raise PermissionDeniedError("只有系统管理员可以修改项目标签")
     assert_revision(tag, payload.revision, entity_name="project_tag")
     before = {
         "name": tag.name,

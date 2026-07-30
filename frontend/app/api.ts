@@ -5,6 +5,7 @@ import type {
   AIProviderOption,
   AIStatus,
   ApiErrorBody,
+  AuditEvent,
   AuthContext,
   AvatarOption,
   DuplicateCandidate,
@@ -14,13 +15,19 @@ import type {
   Task,
   User,
   CurrentWeeklyReport,
+  Dashboard,
+  TeamWeeklySummary,
+  PermissionDefinition,
+  PermissionKey,
   WeeklyReport,
-  WeeklyReportInboxItem,
   WorkRecord,
+  UserPermissions,
 } from "./types";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8787";
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
+  /\/+$/,
+  "",
+);
 
 let csrfToken = "";
 let sessionInvalidatedHandler:
@@ -32,6 +39,17 @@ const SESSION_PROBE_PATHS = new Set([
   "/api/v1/auth/me",
   "/api/v1/auth/logout",
 ]);
+
+type AuthContextResponse = Omit<AuthContext, "permissions"> & {
+  permissions?: PermissionKey[];
+};
+
+function normalizeAuthContext(context: AuthContextResponse): AuthContext {
+  return {
+    ...context,
+    permissions: Array.isArray(context.permissions) ? context.permissions : [],
+  };
+}
 
 export class ApiClientError extends Error {
   status: number;
@@ -99,12 +117,17 @@ async function request<T>(
 
 export const api = {
   auth: {
-    login: (loginName: string, password: string) =>
-      request<AuthContext>("/api/v1/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ login_name: loginName, password }),
-      }),
-    me: () => request<AuthContext>("/api/v1/auth/me"),
+    login: async (loginIdentifier: string, password: string) =>
+      normalizeAuthContext(
+        await request<AuthContextResponse>("/api/v1/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ login_name: loginIdentifier, password }),
+        }),
+      ),
+    me: async () =>
+      normalizeAuthContext(
+        await request<AuthContextResponse>("/api/v1/auth/me"),
+      ),
     logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
     changePassword: (currentPassword: string, newPassword: string) =>
       request<void>("/api/v1/auth/change-password", {
@@ -117,6 +140,19 @@ export const api = {
   },
   users: {
     list: () => request<User[]>("/api/v1/users"),
+    permissionCatalog: () =>
+      request<PermissionDefinition[]>("/api/v1/users/permissions/catalog"),
+    permissions: (id: string) =>
+      request<UserPermissions>(`/api/v1/users/${id}/permissions`),
+    updatePermissions: (
+      id: string,
+      revision: number,
+      permissions: PermissionKey[],
+    ) =>
+      request<UserPermissions>(`/api/v1/users/${id}/permissions`, {
+        method: "PUT",
+        body: JSON.stringify({ revision, permissions }),
+      }),
     create: (payload: {
       display_name: string;
       password: string;
@@ -144,6 +180,9 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
+  },
+  audit: {
+    list: () => request<AuditEvent[]>("/api/v1/audit-events?limit=100"),
   },
   profile: {
     avatars: () => request<AvatarOption[]>("/api/v1/profile/avatars"),
@@ -219,6 +258,15 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    createRelation: (payload: {
+      source_task_id: string;
+      target_task_id: string;
+      label: string;
+    }) =>
+      request("/api/v1/tasks/relations", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
     transition: (
       id: string,
       payload: {
@@ -283,8 +331,8 @@ export const api = {
     current: () =>
       request<CurrentWeeklyReport>("/api/v1/weekly-reports/current"),
     list: () => request<WeeklyReport[]>("/api/v1/weekly-reports"),
-    inbox: () =>
-      request<WeeklyReportInboxItem[]>("/api/v1/weekly-reports/inbox"),
+    teamSummaries: () =>
+      request<TeamWeeklySummary[]>("/api/v1/weekly-reports/team-summaries"),
     generateCurrent: () =>
       request<WeeklyReport>("/api/v1/weekly-reports/current/generate", {
         method: "POST",
@@ -306,5 +354,40 @@ export const api = {
           overwrite_confirmed: overwriteConfirmed,
         }),
       }),
+  },
+  dashboard: {
+    get: (weekStart?: string) =>
+      request<Dashboard>(
+        `/api/v1/dashboard${
+          weekStart
+            ? `?week_start=${encodeURIComponent(weekStart)}`
+            : ""
+        }`,
+      ),
+    recordProgress: (
+      projectId: string,
+      payload: {
+        week_start: string;
+        business_stage: string;
+        attention_status: string;
+        progress_percent: number;
+        summary: string;
+        output_summary: string | null;
+      },
+    ) =>
+      request(`/api/v1/projects/${projectId}/progress`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    generateTeamSummary: (weekStart: string, force: boolean) =>
+      request<TeamWeeklySummary>(
+        `/api/v1/dashboard/team-summary?week_start=${encodeURIComponent(
+          weekStart,
+        )}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ force }),
+        },
+      ),
   },
 };

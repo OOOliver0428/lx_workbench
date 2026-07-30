@@ -13,6 +13,7 @@ from app.models import (
     Task,
     TaskCollaborator,
     User,
+    UserRole,
     WorkRecord,
 )
 from app.schemas import (
@@ -44,8 +45,13 @@ def project_summary(db: Session, project: Project) -> ProjectSummaryOut:
     db.flush()
     payload = ProjectSummaryOut.model_validate(project)
     owner = db.get(User, project.owner_id)
-    payload.owner_display_name = owner.display_name if owner else "未知用户"
-    payload.owner_avatar_key = owner.avatar_key if owner else None
+    owner_is_visible = bool(
+        owner and owner.role != UserRole.SUPER_ADMIN.value
+    )
+    payload.owner_display_name = (
+        owner.display_name if owner and owner_is_visible else "未知用户"
+    )
+    payload.owner_avatar_key = owner.avatar_key if owner and owner_is_visible else None
     payload.tags = project_tags(db, project.id)
     return payload
 
@@ -54,8 +60,13 @@ def project_detail(db: Session, project: Project) -> ProjectOut:
     db.flush()
     payload = ProjectOut.model_validate(project)
     owner = db.get(User, project.owner_id)
-    payload.owner_display_name = owner.display_name if owner else "未知用户"
-    payload.owner_avatar_key = owner.avatar_key if owner else None
+    owner_is_visible = bool(
+        owner and owner.role != UserRole.SUPER_ADMIN.value
+    )
+    payload.owner_display_name = (
+        owner.display_name if owner and owner_is_visible else "未知用户"
+    )
+    payload.owner_avatar_key = owner.avatar_key if owner and owner_is_visible else None
     payload.tags = project_tags(db, project.id)
     payload.aliases = [
         ProjectAliasOut.model_validate(row)
@@ -68,7 +79,10 @@ def project_detail(db: Session, project: Project) -> ProjectOut:
     member_rows = db.execute(
         select(ProjectMember, User.display_name, User.avatar_key)
         .join(User, User.id == ProjectMember.user_id)
-        .where(ProjectMember.project_id == project.id)
+        .where(
+            ProjectMember.project_id == project.id,
+            User.role != UserRole.SUPER_ADMIN.value,
+        )
         .order_by(ProjectMember.joined_at)
     ).all()
     payload.members = [
@@ -114,6 +128,8 @@ def work_record_out(db: Session, record: WorkRecord) -> WorkRecordOut:
     db.flush()
     payload = WorkRecordOut.model_validate(record)
     author = db.get(User, record.author_id)
+    project = db.get(Project, record.project_id) if record.project_id else None
+    task = db.get(Task, record.task_id) if record.task_id else None
     last_editor = (
         author
         if record.last_edited_by == record.author_id
@@ -121,6 +137,8 @@ def work_record_out(db: Session, record: WorkRecord) -> WorkRecordOut:
     )
     payload.author_display_name = author.display_name if author else "未知用户"
     payload.author_avatar_key = author.avatar_key if author else None
+    payload.project_name = project.name if project else None
+    payload.task_title = task.title if task else None
     payload.last_editor_display_name = (
         last_editor.display_name if last_editor else "未知用户"
     )

@@ -9,10 +9,9 @@ from app.audit import record_audit
 from app.config import Settings
 from app.domain import can_be_direct_leader
 from app.errors import AppError, ConflictError, NotFoundError, PermissionDeniedError
-from app.models import User, UserRole, WeeklyReport, utc_now
+from app.models import TeamWeeklySummary, User, WeeklyReport, utc_now
 from app.schemas import (
     WeeklyReportDraftUpdate,
-    WeeklyReportInboxOut,
     WeeklyReportOut,
     WeeklyReportSubmit,
 )
@@ -76,6 +75,23 @@ def list_own_reports(db: Session, actor: User) -> list[WeeklyReport]:
             select(WeeklyReport)
             .where(WeeklyReport.author_id == actor.id)
             .order_by(WeeklyReport.week_start.desc())
+            .limit(100)
+        ).all()
+    )
+
+
+def list_own_team_summaries(
+    db: Session,
+    actor: User,
+) -> list[TeamWeeklySummary]:
+    return list(
+        db.scalars(
+            select(TeamWeeklySummary)
+            .where(TeamWeeklySummary.generated_by == actor.id)
+            .order_by(
+                TeamWeeklySummary.week_start.desc(),
+                TeamWeeklySummary.created_at.desc(),
+            )
             .limit(100)
         ).all()
     )
@@ -211,44 +227,6 @@ def submit_report(
         },
     )
     return report
-
-
-def list_inbox(db: Session, actor: User) -> list[WeeklyReportInboxOut]:
-    if actor.role not in {
-        UserRole.TEAM_LEADER.value,
-        UserRole.SYSTEM_ADMIN.value,
-        UserRole.SUPER_ADMIN.value,
-    }:
-        raise PermissionDeniedError(
-            "仅团队负责人、系统管理员和超级管理员可以查看已提交周报"
-        )
-    query = (
-        select(WeeklyReport, User.display_name)
-        .join(User, User.id == WeeklyReport.author_id)
-        .where(
-            WeeklyReport.submitted_content.is_not(None),
-            WeeklyReport.submitted_at.is_not(None),
-        )
-    )
-    if actor.role != UserRole.SUPER_ADMIN.value:
-        query = query.where(WeeklyReport.submitted_to_id == actor.id)
-    rows = db.execute(
-        query.order_by(WeeklyReport.week_start.desc(), User.display_name).limit(500)
-    ).all()
-    return [
-        WeeklyReportInboxOut(
-            id=report.id,
-            author_id=report.author_id,
-            author_display_name=display_name,
-            week_start=report.week_start,
-            week_end=report.week_end,
-            content=report.submitted_content or "",
-            submitted_at=report.submitted_at,
-            submission_version=report.submission_version,
-        )
-        for report, display_name in rows
-        if report.submitted_at is not None
-    ]
 
 
 def _assert_revision(report: WeeklyReport, expected_revision: int) -> None:

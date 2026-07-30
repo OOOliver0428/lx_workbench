@@ -2,9 +2,19 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
-from app.models import User
-from app.schemas import TaskCreate, TaskOut, TaskReassign, TaskTransition, TaskUpdate
+from app.models import PermissionKey, User
+from app.schemas import (
+    TaskCreate,
+    TaskOut,
+    TaskReassign,
+    TaskRelationCreate,
+    TaskRelationOut,
+    TaskTransition,
+    TaskUpdate,
+)
 from app.serializers import task_out
+from app.services import dashboard as dashboard_service
+from app.services import permissions as permission_service
 from app.services import tasks as task_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -15,9 +25,10 @@ def list_tasks(
     project_id: str | None = None,
     owner_id: str | None = None,
     status: str | None = None,
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[TaskOut]:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_VIEW)
     return [
         task_out(db, task)
         for task in task_service.list_tasks(
@@ -35,15 +46,28 @@ def create_task(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> TaskOut:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
     return task_out(db, task_service.create_task(db, payload, actor))
+
+
+@router.post("/relations", response_model=TaskRelationOut, status_code=201)
+def create_task_relation(
+    payload: TaskRelationCreate,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> TaskRelationOut:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
+    relation = dashboard_service.create_task_relation(db, payload, actor)
+    return TaskRelationOut.model_validate(relation)
 
 
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(
     task_id: str,
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TaskOut:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_VIEW)
     return task_out(db, task_service.get_task(db, task_id))
 
 
@@ -54,6 +78,7 @@ def update_task(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> TaskOut:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
     task = task_service.get_task(db, task_id)
     return task_out(db, task_service.update_task(db, task, payload, actor))
 
@@ -65,6 +90,7 @@ def transition_task(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> TaskOut:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
     task = task_service.get_task(db, task_id)
     return task_out(db, task_service.transition_task(db, task, payload, actor))
 
@@ -76,6 +102,7 @@ def reassign_task(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> TaskOut:
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
     task = task_service.get_task(db, task_id)
     return task_out(
         db,

@@ -13,7 +13,7 @@ export function LoginView({
   notice?: string;
   onAuthenticated: (context: AuthContext) => void;
 }) {
-  const [loginName, setLoginName] = useState("");
+  const [loginIdentifier, setLoginIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -23,7 +23,7 @@ export function LoginView({
     setError("");
     setSubmitting(true);
     try {
-      const context = await api.auth.login(loginName, password);
+      const context = await api.auth.login(loginIdentifier, password);
       setCsrfToken(context.csrf_token);
       onAuthenticated(context);
     } catch (caught) {
@@ -72,16 +72,16 @@ export function LoginView({
             <span className="mobile-brand">协作工作台</span>
             <p className="eyebrow">WELCOME BACK</p>
             <h2>登录团队空间</h2>
-            <p>使用管理员分配的本地账号进入。</p>
+            <p>使用登录名或显示名称进入。</p>
           </header>
           {notice ? <InlineNotice tone="warning">{notice}</InlineNotice> : null}
           {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
           <label className="field">
-            <span>登录名</span>
+            <span>登录名或显示名称</span>
             <input
-              value={loginName}
-              onChange={(event) => setLoginName(event.target.value)}
-              placeholder="例如 zhangsan"
+              value={loginIdentifier}
+              onChange={(event) => setLoginIdentifier(event.target.value)}
+              placeholder="例如 zhangsan 或 张三"
               autoComplete="username"
               required
               autoFocus

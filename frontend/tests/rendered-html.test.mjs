@@ -35,57 +35,86 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
     api,
     app,
     appShell,
+    dashboardView,
     authView,
     aiConfig,
     projectsView,
     tasksView,
     recordsView,
+    weeklyReportsView,
+    adminView,
     layout,
     packageJson,
     envExample,
+    apiProxy,
   ] =
     await Promise.all([
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/workspace-app.tsx", import.meta.url), "utf8"),
-    readFile(
-      new URL("../app/components/app-shell.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/auth-view.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/ai-config-panel.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/projects-view.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/tasks-view.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/components/records-view.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../.env.example", import.meta.url), "utf8"),
+      readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/workspace-app.tsx", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/components/app-shell.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/dashboard-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/auth-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/ai-config-panel.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/projects-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/tasks-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/records-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/weekly-reports-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/components/admin-view.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../package.json", import.meta.url), "utf8"),
+      readFile(new URL("../.env.example", import.meta.url), "utf8"),
+      readFile(
+        new URL("../app/api/[...path]/route.ts", import.meta.url),
+        "utf8",
+      ),
     ]);
 
   assert.match(api, /credentials:\s*"include"/);
+  assert.match(api, /NEXT_PUBLIC_API_BASE_URL\s*\?\?\s*""/);
   assert.match(api, /X-CSRF-Token/);
   assert.match(api, /request_id/);
   assert.match(api, /response\.status === 401/);
   assert.match(api, /setSessionInvalidatedHandler/);
+  assert.match(api, /normalizeAuthContext/);
+  assert.match(api, /Array\.isArray\(context\.permissions\)/);
   assert.match(api, /\/api\/v1\/ai\/chat/);
   assert.match(api, /\/api\/v1\/ai\/configuration\/test/);
+  assert.match(api, /\/api\/v1\/users\/permissions\/catalog/);
+  assert.match(api, /\/api\/v1\/users\/\$\{id\}\/permissions/);
+  assert.match(api, /\/api\/v1\/audit-events\?limit=100/);
   assert.match(api, /method:\s*"PUT"/);
   assert.match(appShell, /window\.confirm/);
   assert.match(appShell, /onClick=\{confirmLogout\}/);
+  assert.match(appShell, /sidebarCollapsed/);
+  assert.match(appShell, /className="sidebar-toggle"/);
+  assert.match(appShell, /aria-pressed=\{sidebarCollapsed\}/);
   assert.match(appShell, /<strong>AI 助手<\/strong>/);
   assert.match(appShell, /赋能售前和解决方案/);
   assert.match(authView, /赋能售前和解决方案/);
@@ -105,12 +134,47 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(aiConfig, /type="password"/);
   assert.doesNotMatch(aiConfig, /localStorage|sessionStorage/);
   assert.match(app, /ProjectsView/);
+  assert.match(app, /DashboardView/);
+  assert.match(app, /activeView === "dashboard"/);
+  assert.match(app, /auth\.permissions/);
+  assert.match(appShell, /label:\s*"作战台"/);
+  assert.match(appShell, /dashboard\.opportunity\.view/);
+  assert.match(appShell, /settings\.users\.manage/);
+  assert.match(dashboardView, /商机进展状态，一屏看清/);
+  assert.match(dashboardView, /人在、产出在、进展在/);
+  assert.match(dashboardView, /跨周趋势与团队节奏/);
+  assert.match(dashboardView, /api\.dashboard\.recordProgress/);
+  assert.match(dashboardView, /api\.dashboard\.generateTeamSummary/);
+  assert.match(dashboardView, /api\.tasks\.createRelation/);
+  assert.match(dashboardView, /建立任务关联/);
+  assert.match(dashboardView, /dashboard\.task_links/);
+  assert.match(dashboardView, /shortWeekLabel\(week\.label\)/);
+  assert.doesNotMatch(dashboardView, /T00:00:00\+08:00/);
   assert.match(app, /TasksView/);
   assert.match(app, /RecordsView/);
   assert.match(projectsView, /owner_avatar_key/);
   assert.match(projectsView, /member\.avatar_key/);
   assert.match(tasksView, /user\.avatar_key/);
   assert.match(recordsView, /author_avatar_key/);
+  assert.match(recordsView, /record\.project_name/);
+  assert.match(weeklyReportsView, /选择个人周报周目/);
+  assert.match(weeklyReportsView, /保存草稿/);
+  assert.match(weeklyReportsView, /提交周报/);
+  assert.match(weeklyReportsView, /往期团队周报/);
+  assert.match(weeklyReportsView, /api\.weeklyReports\.teamSummaries/);
+  assert.doesNotMatch(api + weeklyReportsView, /weekly-reports\/inbox/);
+  assert.match(adminView, /PermissionModal/);
+  assert.match(adminView, /system_admin_assignable/);
+  assert.match(adminView, /settings\.audit\.view/);
+  assert.match(adminView, /审计记录/);
+  assert.match(apiProxy, /MVP_INTERNAL_API_BASE_URL/);
+  assert.match(apiProxy, /"cookie"/);
+  assert.match(apiProxy, /"x-csrf-token"/);
+  assert.match(apiProxy, /request\.arrayBuffer\(\)/);
+  assert.match(apiProxy, /new Headers\(upstreamResponse\.headers\)/);
+  assert.match(apiProxy, /export const POST = proxy/);
+  assert.match(envExample, /^NEXT_PUBLIC_API_BASE_URL=$/m);
+  assert.match(envExample, /^MVP_INTERNAL_API_BASE_URL=http:\/\/127\.0\.0\.1:8787$/m);
   assert.doesNotMatch(
     projectsView + tasksView + recordsView,
     /display_name\.slice\(0,\s*1\)/,
@@ -124,7 +188,6 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   );
   assert.match(layout, /title:\s*"协作工作台"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.match(envExample, /NEXT_PUBLIC_API_BASE_URL=http:\/\/127\.0\.0\.1:8787/);
   assert.doesNotMatch(
     api + aiConfig + envExample,
     /sk-(?:cp-)?[A-Za-z0-9_-]{20,}/,

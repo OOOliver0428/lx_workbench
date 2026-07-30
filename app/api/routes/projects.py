@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
-from app.models import User
+from app.models import PermissionKey, User
 from app.schemas import (
     DuplicateCandidate,
     ProjectAliasCreate,
@@ -13,12 +13,16 @@ from app.schemas import (
     ProjectMergePreview,
     ProjectMergeRequest,
     ProjectOut,
+    ProjectProgressCreate,
+    ProjectProgressOut,
     ProjectSummaryOut,
     ProjectTagAssign,
     ProjectTransition,
     ProjectUpdate,
 )
 from app.serializers import project_detail, project_summary
+from app.services import dashboard as dashboard_service
+from app.services import permissions as permission_service
 from app.services import projects as project_service
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -31,9 +35,10 @@ def list_projects(
     parent_id: str | None = None,
     owner_id: str | None = None,
     q: str | None = Query(default=None, max_length=200),
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ProjectSummaryOut]:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_VIEW)
     rows = project_service.list_projects(
         db,
         status=status,
@@ -49,9 +54,10 @@ def list_projects(
 def find_duplicate_candidates(
     name: str = Query(min_length=1, max_length=200),
     exclude_id: str | None = None,
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DuplicateCandidate]:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_VIEW)
     return project_service.duplicate_candidates(db, name, exclude_id=exclude_id)
 
 
@@ -61,15 +67,38 @@ def create_project(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     return project_detail(db, project_service.create_project(db, payload, actor))
+
+
+@router.post(
+    "/{project_id}/progress",
+    response_model=ProjectProgressOut,
+    status_code=201,
+)
+def record_project_progress(
+    project_id: str,
+    payload: ProjectProgressCreate,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> ProjectProgressOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
+    progress = dashboard_service.record_project_progress(
+        db,
+        project_service.get_project(db, project_id),
+        payload,
+        actor,
+    )
+    return ProjectProgressOut.model_validate(progress)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(
     project_id: str,
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_VIEW)
     return project_detail(db, project_service.get_project(db, project_id))
 
 
@@ -80,6 +109,7 @@ def update_project(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project = project_service.get_project(db, project_id)
     return project_detail(db, project_service.update_project(db, project, payload, actor))
 
@@ -91,6 +121,7 @@ def transition_project(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project = project_service.get_project(db, project_id)
     result = project_service.transition_project(
         db,
@@ -110,6 +141,7 @@ def add_alias(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> ProjectAliasOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project = project_service.get_project(db, project_id)
     return ProjectAliasOut.model_validate(
         project_service.add_alias(
@@ -129,6 +161,7 @@ def add_tag(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> None:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project_service.add_project_tag(
         db,
         project_service.get_project(db, project_id),
@@ -146,6 +179,7 @@ def remove_tag(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> None:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project_service.remove_project_tag(
         db,
         project_service.get_project(db, project_id),
@@ -162,6 +196,7 @@ def add_member(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> None:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project_service.add_project_member(
         db,
         project_service.get_project(db, project_id),
@@ -179,6 +214,7 @@ def remove_member(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> None:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     project_service.remove_project_member(
         db,
         project_service.get_project(db, project_id),
@@ -192,9 +228,10 @@ def remove_member(
 def preview_merge(
     project_id: str,
     target_project_id: str,
-    _actor: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectMergePreview:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_VIEW)
     return project_service.merge_preview(
         db,
         project_service.get_project(db, project_id),
@@ -209,6 +246,7 @@ def merge_projects(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> ProjectMergeOut:
+    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_MANAGE)
     merge = project_service.merge_projects(
         db,
         project_service.get_project(db, project_id),

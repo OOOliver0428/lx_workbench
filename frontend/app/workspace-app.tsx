@@ -7,8 +7,13 @@ import {
   setSessionInvalidatedHandler,
 } from "./api";
 import { AdminView } from "./components/admin-view";
-import { AppShell, type WorkspaceView } from "./components/app-shell";
+import {
+  AppShell,
+  defaultWorkspaceView,
+  type WorkspaceView,
+} from "./components/app-shell";
 import { LoginView, PasswordChangeGate } from "./components/auth-view";
+import { DashboardView } from "./components/dashboard-view";
 import { ProjectsView } from "./components/projects-view";
 import { ProfileSettingsView } from "./components/profile-settings-view";
 import { RecordsView } from "./components/records-view";
@@ -19,13 +24,13 @@ import type { AuthContext } from "./types";
 export function WorkspaceApp() {
   const [auth, setAuth] = useState<AuthContext | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
-  const [activeView, setActiveView] = useState<WorkspaceView>("projects");
+  const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
   const [loginNotice, setLoginNotice] = useState("");
 
   const invalidateSession = useCallback((message: string) => {
     setCsrfToken("");
     setAuth(null);
-    setActiveView("projects");
+    setActiveView("dashboard");
     setLoginNotice(message || "会话已失效，请重新登录。");
   }, []);
 
@@ -40,6 +45,7 @@ export function WorkspaceApp() {
       .then((context) => {
         setCsrfToken(context.csrf_token);
         setAuth(context);
+        setActiveView(defaultWorkspaceView(context));
         setLoginNotice("");
       })
       .catch(() => setAuth(null))
@@ -67,7 +73,7 @@ export function WorkspaceApp() {
     } finally {
       setCsrfToken("");
       setAuth(null);
-      setActiveView("projects");
+      setActiveView("dashboard");
       setLoginNotice("");
     }
   }
@@ -91,13 +97,24 @@ export function WorkspaceApp() {
         onAuthenticated={(context) => {
           setLoginNotice("");
           setAuth(context);
+          setActiveView(defaultWorkspaceView(context));
         }}
       />
     );
   }
   if (auth.user.must_change_password) {
-    return <PasswordChangeGate context={auth} onChanged={setAuth} />;
+    return (
+      <PasswordChangeGate
+        context={auth}
+        onChanged={(context) => {
+          setAuth(context);
+          setActiveView(defaultWorkspaceView(context));
+        }}
+      />
+    );
   }
+
+  const permissions = auth.permissions ?? [];
 
   return (
     <AppShell
@@ -106,11 +123,29 @@ export function WorkspaceApp() {
       onViewChange={setActiveView}
       onLogout={logout}
     >
-      {activeView === "projects" ? <ProjectsView /> : null}
-      {activeView === "tasks" ? <TasksView /> : null}
-      {activeView === "records" ? <RecordsView /> : null}
+      {activeView === "dashboard" ? (
+        <DashboardView permissions={permissions} />
+      ) : null}
+      {activeView === "projects" ? (
+        <ProjectsView canManage={permissions.includes("projects.manage")} />
+      ) : null}
+      {activeView === "tasks" ? (
+        <TasksView canManage={permissions.includes("tasks.manage")} />
+      ) : null}
+      {activeView === "records" ? (
+        <RecordsView
+          canManage={permissions.includes("work_records.manage")}
+          canViewProjects={permissions.includes("projects.view")}
+          canViewTasks={permissions.includes("tasks.view")}
+        />
+      ) : null}
       {activeView === "reports" ? (
-        <WeeklyReportsView role={auth.user.role} />
+        <WeeklyReportsView
+          canManage={permissions.includes("weekly_reports.manage")}
+          canViewTeamReports={permissions.includes(
+            "dashboard.team_summary.generate",
+          )}
+        />
       ) : null}
       {activeView === "profile" ? (
         <ProfileSettingsView
@@ -118,7 +153,7 @@ export function WorkspaceApp() {
           onContextChange={setAuth}
         />
       ) : null}
-      {activeView === "admin" ? <AdminView /> : null}
+      {activeView === "admin" ? <AdminView context={auth} /> : null}
     </AppShell>
   );
 }

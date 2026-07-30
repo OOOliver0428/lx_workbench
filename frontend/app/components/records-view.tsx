@@ -7,7 +7,15 @@ import type { ProjectSummary, Task, WorkRecord } from "../types";
 import { AvatarImage } from "./avatar";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
-export function RecordsView() {
+export function RecordsView({
+  canManage,
+  canViewProjects,
+  canViewTasks,
+}: {
+  canManage: boolean;
+  canViewProjects: boolean;
+  canViewTasks: boolean;
+}) {
   const [records, setRecords] = useState<WorkRecord[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -26,8 +34,8 @@ export function RecordsView() {
       if (unassignedOnly) params.set("unassigned_only", "true");
       const [recordRows, projectRows, taskRows] = await Promise.all([
         api.records.list(params),
-        api.projects.list(),
-        api.tasks.list(),
+        canViewProjects ? api.projects.list() : Promise.resolve([]),
+        canViewTasks ? api.tasks.list() : Promise.resolve([]),
       ]);
       setRecords(recordRows);
       setProjects(projectRows);
@@ -39,7 +47,7 @@ export function RecordsView() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, unassignedOnly]);
+  }, [canViewProjects, canViewTasks, projectId, unassignedOnly]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
@@ -64,9 +72,11 @@ export function RecordsView() {
           <h1>工作记录</h1>
           <p>按项目沉淀每天的有效工作，为后续周报归纳提供可追溯依据。</p>
         </div>
-        <button className="primary-button" onClick={() => setCreateOpen(true)}>
-          <span>＋</span> 记录工作
-        </button>
+        {canManage ? (
+          <button className="primary-button" onClick={() => setCreateOpen(true)}>
+            <span>＋</span> 记录工作
+          </button>
+        ) : null}
       </header>
 
       <section className="toolbar">
@@ -127,7 +137,9 @@ export function RecordsView() {
                           className={record.project_id ? "linked" : "unassigned"}
                         >
                           {record.project_id
-                            ? projectNames.get(record.project_id) ?? "未知项目"
+                            ? record.project_name ??
+                              projectNames.get(record.project_id) ??
+                              "未知项目"
                             : "待归集"}
                         </span>
                         <span className="record-author">
@@ -144,7 +156,10 @@ export function RecordsView() {
                     <p>{record.content}</p>
                     {record.task_id ? (
                       <div className="record-task">
-                        任务 · {taskNames.get(record.task_id) ?? "未知任务"}
+                        任务 ·{" "}
+                        {record.task_title ??
+                          taskNames.get(record.task_id) ??
+                          "未知任务"}
                       </div>
                     ) : null}
                     {record.last_edited_by !== record.author_id ? (
@@ -196,7 +211,7 @@ export function RecordsView() {
         )}
       </section>
 
-      {createOpen ? (
+      {createOpen && canManage ? (
         <RecordCreateModal
           projects={projects}
           tasks={tasks}

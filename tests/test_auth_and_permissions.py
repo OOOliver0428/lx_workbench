@@ -26,6 +26,102 @@ def test_local_frontend_origin_is_allowed(api: dict) -> None:
     assert response.headers["access-control-allow-credentials"] == "true"
 
 
+def test_logout_returns_explicit_no_content_and_revokes_session(api: dict) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member")
+
+    response = client.post(
+        "/api/v1/auth/logout",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_login_accepts_display_name_with_normalized_comparison(api: dict) -> None:
+    client: TestClient = api["client"]
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"login_name": "  成员甲  ", "password": "Mvp-Test-Password-2026"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user"]["id"] == api["users"]["member"]
+
+
+def test_user_display_name_must_be_globally_unique(api: dict) -> None:
+    client: TestClient = api["client"]
+    admin_csrf = login(client, "admin")
+
+    duplicate = client.post(
+        "/api/v1/users",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "display_name": "  成员甲  ",
+            "password": "Initial-Password-2026",
+            "role": "member",
+        },
+    )
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["code"] == "DISPLAY_NAME_ALREADY_EXISTS"
+
+    hidden_super_admin_duplicate = client.post(
+        "/api/v1/users",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "display_name": "隐藏超级管理员",
+            "password": "Initial-Password-2026",
+            "role": "member",
+        },
+    )
+    assert hidden_super_admin_duplicate.status_code == 409
+    assert hidden_super_admin_duplicate.json()["code"] == "DISPLAY_NAME_ALREADY_EXISTS"
+
+    first_latin_name = client.post(
+        "/api/v1/users",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "display_name": "Sales Lead",
+            "password": "Initial-Password-2026",
+            "role": "member",
+        },
+    )
+    assert first_latin_name.status_code == 201, first_latin_name.text
+    casefold_duplicate = client.post(
+        "/api/v1/users",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "display_name": "sales lead",
+            "password": "Initial-Password-2026",
+            "role": "member",
+        },
+    )
+    assert casefold_duplicate.status_code == 409
+    assert casefold_duplicate.json()["code"] == "DISPLAY_NAME_ALREADY_EXISTS"
+
+
+def test_user_display_name_update_rejects_duplicates(api: dict) -> None:
+    client: TestClient = api["client"]
+    admin_csrf = login(client, "admin")
+    users = client.get("/api/v1/users").json()
+    member2 = next(user for user in users if user["id"] == api["users"]["member2"])
+
+    response = client.patch(
+        f"/api/v1/users/{member2['id']}",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "revision": member2["revision"],
+            "display_name": "成员甲",
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "DISPLAY_NAME_ALREADY_EXISTS"
+
+
 def test_initial_password_must_be_changed_before_business_access(api: dict) -> None:
     client: TestClient = api["client"]
     admin_csrf = login(client, "admin")
@@ -85,7 +181,10 @@ def test_initial_password_must_be_changed_before_business_access(api: dict) -> N
         },
     )
     assert changed.status_code == 204, changed.text
-    assert client.get("/api/v1/projects").status_code == 200
+    no_default_access = client.get("/api/v1/projects")
+    assert no_default_access.status_code == 403
+    assert no_default_access.json()["code"] == "PERMISSION_DENIED"
+    assert client.get("/api/v1/auth/me").json()["permissions"] == []
 
     client.cookies.clear()
     client.cookies.set("mvp_session", old_session_token)
@@ -146,6 +245,196 @@ def test_user_creation_only_accepts_name_role_and_initial_password(api: dict) ->
     assert payload["leader_id"] is None
     assert payload["avatar_key"] is None
     assert payload["login_name"].startswith("u")
+
+
+def test_super_admin_is_hidden_and_has_virtual_full_permissions(api: dict) -> None:
+    client: TestClient = api["client"]
+    super_admin_id = api["users"]["super_admin"]
+
+    for login_name in ("member", "leader", "admin", "super_admin"):
+        login(client, login_name)
+        visible_users = client.get("/api/v1/users")
+        assert visible_users.status_code == 200, visible_users.text
+        assert all(
+            user["id"] != super_admin_id and user["role"] != "super_admin"
+            for user in visible_users.json()
+        )
+
+    context = client.get("/api/v1/auth/me")
+    assert context.status_code == 200
+    assert {
+        "dashboard.opportunity.view",
+        "dashboard.work.view",
+        "dashboard.overview.view",
+        "settings.users.manage",
+        "settings.ai.manage",
+    }.issubset(set(context.json()["permissions"]))
+    hidden_permissions = client.get(
+        f"/api/v1/users/{super_admin_id}/permissions"
+    )
+    assert hidden_permissions.status_code == 404
+
+
+def test_super_admin_assigns_explicit_permissions_and_view_visibility(
+    api: dict,
+) -> None:
+    client: TestClient = api["client"]
+    super_csrf = login(client, "super_admin")
+    member = next(
+        user
+        for user in client.get("/api/v1/users").json()
+        if user["id"] == api["users"]["member"]
+    )
+
+    updated = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": member["revision"],
+            "permissions": [
+                "dashboard.overview.view",
+                "projects.manage",
+            ],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["assigned_permissions"] == [
+        "dashboard.overview.view",
+        "projects.manage",
+    ]
+    assert "projects.view" in updated.json()["effective_permissions"]
+
+    login(client, "member")
+    context = client.get("/api/v1/auth/me").json()
+    assert context["permissions"] == [
+        "dashboard.overview.view",
+        "projects.view",
+        "projects.manage",
+    ]
+    dashboard = client.get("/api/v1/dashboard")
+    assert dashboard.status_code == 200, dashboard.text
+    assert dashboard.json()["accessible_pages"] == ["overview"]
+    assert client.get("/api/v1/projects").status_code == 200
+    assert client.get("/api/v1/tasks").status_code == 403
+
+
+def test_system_admin_assigns_only_business_permissions_to_lower_roles(
+    api: dict,
+) -> None:
+    client: TestClient = api["client"]
+    admin_csrf = login(client, "admin")
+    member = next(
+        user
+        for user in client.get("/api/v1/users").json()
+        if user["id"] == api["users"]["member2"]
+    )
+
+    forbidden_system_permission = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "revision": member["revision"],
+            "permissions": ["settings.users.manage"],
+        },
+    )
+    assert forbidden_system_permission.status_code == 403
+
+    saved = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={
+            "revision": member["revision"],
+            "permissions": [
+                "dashboard.opportunity.view",
+                "work_records.manage",
+            ],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["assigned_permissions"] == [
+        "dashboard.opportunity.view",
+        "work_records.manage",
+    ]
+    assert "work_records.view" in saved.json()["effective_permissions"]
+
+    own_permissions = client.get(
+        f"/api/v1/users/{api['users']['admin']}/permissions"
+    )
+    assert own_permissions.status_code == 404
+    hidden_super_admin = client.get("/api/v1/users").json()
+    assert all(user["role"] != "super_admin" for user in hidden_super_admin)
+
+
+def test_team_summary_permission_opens_weekly_report_history(api: dict) -> None:
+    client: TestClient = api["client"]
+    super_csrf = login(client, "super_admin")
+    member = next(
+        user
+        for user in client.get("/api/v1/users").json()
+        if user["id"] == api["users"]["member2"]
+    )
+    granted = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": member["revision"],
+            "permissions": ["dashboard.team_summary.generate"],
+        },
+    )
+    assert granted.status_code == 200, granted.text
+    assert {
+        "dashboard.work.view",
+        "weekly_reports.view",
+    }.issubset(set(granted.json()["effective_permissions"]))
+
+    login(client, "member2")
+    assert client.get("/api/v1/weekly-reports").status_code == 200
+    team_history = client.get("/api/v1/weekly-reports/team-summaries")
+    assert team_history.status_code == 200
+    assert team_history.json() == []
+
+
+def test_audit_permission_never_reveals_super_admin_events(api: dict) -> None:
+    client: TestClient = api["client"]
+    login(client, "member2")
+    assert client.get("/api/v1/audit-events").status_code == 403
+
+    super_csrf = login(client, "super_admin")
+    member = next(
+        user
+        for user in client.get("/api/v1/users").json()
+        if user["id"] == api["users"]["member2"]
+    )
+    granted = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": member["revision"],
+            "permissions": ["settings.audit.view"],
+        },
+    )
+    assert granted.status_code == 200, granted.text
+
+    member_csrf = login(client, "member2")
+    context = client.get("/api/v1/auth/me").json()
+    updated = client.patch(
+        "/api/v1/profile/avatar",
+        headers={"X-CSRF-Token": member_csrf},
+        json={
+            "revision": context["user"]["revision"],
+            "avatar_key": "paper-01",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+
+    events = client.get("/api/v1/audit-events")
+    assert events.status_code == 200, events.text
+    assert any(event["action"] == "profile.avatar.update" for event in events.json())
+    assert all(
+        event["actor_id"] != api["users"]["super_admin"]
+        and event["entity_type"] != "work_record"
+        for event in events.json()
+    )
 
 
 def test_all_roles_can_choose_only_system_avatars(api: dict) -> None:

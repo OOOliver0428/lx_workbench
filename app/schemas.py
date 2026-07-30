@@ -5,7 +5,22 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator
 
-from app.models import ProjectStatus, TaskPriority, TaskStatus, UserRole
+from app.models import (
+    AttentionStatus,
+    BusinessStage,
+    PermissionKey,
+    ProjectStatus,
+    TaskPriority,
+    TaskStatus,
+    UserRole,
+)
+
+
+def _strip_required_text(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("不能只包含空格")
+    return stripped
 
 
 class ORMModel(BaseModel):
@@ -13,8 +28,17 @@ class ORMModel(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    login_name: str = Field(min_length=1, max_length=80)
+    login_name: str = Field(
+        min_length=1,
+        max_length=120,
+        description="登录名或显示名称",
+    )
     password: str = Field(min_length=1, max_length=256)
+
+    @field_validator("login_name")
+    @classmethod
+    def strip_login_identifier(cls, value: str) -> str:
+        return _strip_required_text(value)
 
 
 class UserOut(ORMModel):
@@ -31,8 +55,32 @@ class UserOut(ORMModel):
 
 class AuthContextOut(BaseModel):
     user: UserOut
+    permissions: list[str]
     csrf_token: str
     expires_at: datetime
+
+
+class PermissionDefinitionOut(BaseModel):
+    key: str
+    group: str
+    group_label: str
+    label: str
+    description: str
+    system_admin_assignable: bool
+
+
+class UserPermissionsOut(BaseModel):
+    user_id: str
+    revision: int
+    assigned_permissions: list[str]
+    effective_permissions: list[str]
+
+
+class UserPermissionsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    permissions: list[PermissionKey] = Field(default_factory=list)
 
 
 class ErrorResponse(BaseModel):
@@ -49,6 +97,11 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=10, max_length=256)
     role: UserRole = UserRole.MEMBER
 
+    @field_validator("display_name")
+    @classmethod
+    def strip_display_name(cls, value: str) -> str:
+        return _strip_required_text(value)
+
 
 class UserLeaderUpdate(BaseModel):
     revision: int = Field(ge=1)
@@ -60,6 +113,11 @@ class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     role: UserRole | None = None
     leader_id: str | None = None
+
+    @field_validator("display_name")
+    @classmethod
+    def strip_optional_display_name(cls, value: str | None) -> str | None:
+        return _strip_required_text(value) if value is not None else None
 
 
 class PasswordChange(BaseModel):
@@ -298,6 +356,50 @@ class TaskOut(ORMModel):
     collaborator_ids: list[str] = []
 
 
+class ProjectProgressCreate(BaseModel):
+    week_start: date
+    business_stage: BusinessStage
+    attention_status: AttentionStatus
+    progress_percent: int = Field(ge=0, le=100)
+    summary: str = Field(min_length=1, max_length=10000)
+    output_summary: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("week_start")
+    @classmethod
+    def week_must_start_on_monday(cls, value: date) -> date:
+        if value.weekday() != 0:
+            raise ValueError("week_start 必须是周一")
+        return value
+
+
+class ProjectProgressOut(ORMModel):
+    id: str
+    project_id: str
+    week_start: date
+    business_stage: str
+    attention_status: str
+    progress_percent: int
+    summary: str
+    output_summary: str | None
+    created_by: str
+    created_at: datetime
+    revision: int
+
+
+class TaskRelationCreate(BaseModel):
+    source_task_id: str
+    target_task_id: str
+    label: str = Field(min_length=1, max_length=240)
+
+
+class TaskRelationOut(ORMModel):
+    id: str
+    source_task_id: str
+    target_task_id: str
+    label: str
+    created_at: datetime
+
+
 class DeliverableInput(BaseModel):
     name: str = Field(min_length=1, max_length=240)
     url: HttpUrl
@@ -346,7 +448,9 @@ class WorkRecordOut(ORMModel):
     content: str
     minutes: int
     project_id: str | None
+    project_name: str | None = None
     task_id: str | None
+    task_title: str | None = None
     risk: str | None
     next_action: str | None
     last_edited_by: str
@@ -394,15 +498,167 @@ class WeeklyReportSubmit(BaseModel):
     overwrite_confirmed: bool = False
 
 
-class WeeklyReportInboxOut(BaseModel):
+class DashboardWeekOut(BaseModel):
+    week_start: date
+    week_end: date
+    label: str
+    is_current: bool
+
+
+class DashboardMemberOut(BaseModel):
+    id: str
+    display_name: str
+    role: str
+    avatar_key: str | None
+    submitted: bool
+    submitted_at: datetime | None
+    weekly_minutes: int
+    submitted_weeks: list[date]
+
+
+class DashboardWorkItemOut(BaseModel):
     id: str
     author_id: str
     author_display_name: str
+    author_avatar_key: str | None
+    content: str
+    minutes: int
+    risk: str | None
+    next_action: str | None
+
+
+class DashboardTaskOut(BaseModel):
+    id: str
+    title: str
+    status: str
+    priority: str
+    owner_id: str
+    owner_display_name: str
+    owner_avatar_key: str | None
+    due_date: date | None
+    blocker_reason: str | None
+    result: str | None
+
+
+class DashboardProjectMemberOut(BaseModel):
+    id: str
+    display_name: str
+    avatar_key: str | None
+
+
+class DashboardStageHistoryOut(BaseModel):
+    id: str
+    week_start: date
+    business_stage: str
+    progress_percent: int
+    created_at: datetime
+
+
+class DashboardProjectOut(BaseModel):
+    id: str
+    code: str
+    name: str
+    type_label: str
+    can_manage: bool
+    lifecycle_status: str
+    business_stage: str
+    attention_status: str
+    progress_percent: int
+    weekly_minutes: int
+    work_summary: str
+    output_summary: str
+    has_week_progress: bool
+    people: list[DashboardProjectMemberOut]
+    tasks: list[DashboardTaskOut]
+    work_items: list[DashboardWorkItemOut]
+    stage_history: list[DashboardStageHistoryOut]
+
+
+class DashboardDeliverableOut(BaseModel):
+    id: str
+    name: str
+    url: str
+    project_id: str
+    project_name: str
+    author_id: str | None
+    author_display_name: str | None
+
+
+class DashboardTaskLinkOut(BaseModel):
+    id: str
+    source_task_id: str
+    target_task_id: str
+    label: str
+
+
+class DashboardMetricsOut(BaseModel):
+    tracking_count: int
+    focus_count: int
+    stage_advanced_count: int
+    deliverable_count: int
+    coordinate_count: int
+    total_minutes: int
+    submitted_count: int
+    member_count: int
+
+
+class DashboardWeekTrendOut(BaseModel):
+    week_start: date
+    week_end: date
+    total_minutes: int
+    deliverable_count: int
+    submitted_count: int
+    member_count: int
+
+
+class DashboardStageCountOut(BaseModel):
+    business_stage: str
+    count: int
+
+
+class DashboardTimelineEventOut(BaseModel):
+    id: str
+    project_id: str
+    project_name: str
+    week_start: date
+    business_stage: str
+    attention_status: str
+    summary: str
+    created_at: datetime
+
+
+class TeamWeeklySummaryOut(ORMModel):
+    id: str
     week_start: date
     week_end: date
     content: str
-    submitted_at: datetime
-    submission_version: int
+    generated_by: str
+    forced: bool
+    submitted_count: int
+    expected_count: int
+    generation_model: str
+    generation_usage: dict[str, int] | None
+    created_at: datetime
+    revision: int
+
+
+class TeamWeeklySummaryGenerate(BaseModel):
+    force: bool = False
+
+
+class DashboardOut(BaseModel):
+    accessible_pages: list[str]
+    selected_week: DashboardWeekOut
+    weeks: list[DashboardWeekOut]
+    metrics: DashboardMetricsOut
+    members: list[DashboardMemberOut]
+    projects: list[DashboardProjectOut]
+    deliverables: list[DashboardDeliverableOut]
+    task_links: list[DashboardTaskLinkOut]
+    trends: list[DashboardWeekTrendOut]
+    stage_distribution: list[DashboardStageCountOut]
+    stage_timeline: list[DashboardTimelineEventOut]
+    latest_team_summary: TeamWeeklySummaryOut | None
 
 
 class AuditEventOut(ORMModel):

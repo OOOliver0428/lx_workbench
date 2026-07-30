@@ -16,6 +16,35 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
 
 
+def _include_sqlite_object(
+    obj: object,
+    _name: str | None,
+    type_: str,
+    _reflected: bool,
+    _compare_to: object | None,
+) -> bool:
+    """Ignore the one SQLite FK option that SQLAlchemy cannot reflect.
+
+    ``leader_id`` was added with SQLite's inline ``REFERENCES`` syntax so the
+    database enforces ``ON DELETE SET NULL``. SQLAlchemy's SQLite inspector
+    only recovers delete options from table-level constraints, which otherwise
+    makes every ``alembic check`` report a false remove/add pair.
+    """
+
+    if type_ != "foreign_key_constraint":
+        return True
+    table = getattr(obj, "table", None)
+    elements = getattr(obj, "elements", ())
+    column_names = tuple(
+        getattr(getattr(element, "parent", None), "name", None)
+        for element in elements
+    )
+    return not (
+        getattr(table, "name", None) == "users"
+        and column_names == ("leader_id",)
+    )
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=settings.database_url,
@@ -37,6 +66,11 @@ def run_migrations_online() -> None:
                 target_metadata=target_metadata,
                 compare_type=True,
                 render_as_batch=connection.dialect.name == "sqlite",
+                include_object=(
+                    _include_sqlite_object
+                    if connection.dialect.name == "sqlite"
+                    else None
+                ),
             )
             with context.begin_transaction():
                 context.run_migrations()

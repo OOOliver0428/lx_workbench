@@ -24,7 +24,7 @@ const transitionOptions: Record<ProjectStatus, ProjectStatus[]> = {
   merged: [],
 };
 
-export function ProjectsView() {
+export function ProjectsView({ canManage }: { canManage: boolean }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [tags, setTags] = useState<ProjectTag[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -88,9 +88,11 @@ export function ProjectsView() {
             <h1>项目</h1>
             <p>团队唯一的项目主数据，所有任务与工作记录都从这里建立关联。</p>
           </div>
-          <button className="primary-button" onClick={() => setCreateOpen(true)}>
-            <span>＋</span> 新建项目
-          </button>
+          {canManage ? (
+            <button className="primary-button" onClick={() => setCreateOpen(true)}>
+              <span>＋</span> 新建项目
+            </button>
+          ) : null}
         </header>
 
         <section className="toolbar">
@@ -191,7 +193,7 @@ export function ProjectsView() {
         </section>
       </div>
 
-      {createOpen ? (
+      {createOpen && canManage ? (
         <ProjectCreateModal
           projects={projects}
           tags={tags}
@@ -211,6 +213,7 @@ export function ProjectsView() {
           projects={projects}
           tags={tags}
           users={users}
+          canManage={canManage}
           onClose={() => setSelected(null)}
           onChanged={refreshSelected}
         />
@@ -386,6 +389,7 @@ function ProjectDetailDrawer({
   projects,
   tags,
   users,
+  canManage,
   onClose,
   onChanged,
 }: {
@@ -393,6 +397,7 @@ function ProjectDetailDrawer({
   projects: ProjectSummary[];
   tags: ProjectTag[];
   users: User[];
+  canManage: boolean;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
@@ -481,7 +486,8 @@ function ProjectDetailDrawer({
               <small>当前版本 #{project.revision}</small>
             </div>
             <div className="action-chip-list">
-              {transitionOptions[project.status].map((target) => (
+              {canManage
+                ? transitionOptions[project.status].map((target) => (
                 <button
                   key={target}
                   disabled={busy}
@@ -508,9 +514,12 @@ function ProjectDetailDrawer({
                 >
                   转为 <StatusBadge status={target} />
                 </button>
-              ))}
-              {!transitionOptions[project.status].length ? (
+                  ))
+                : null}
+              {canManage && !transitionOptions[project.status].length ? (
                 <small className="muted">当前状态没有可执行的下一步。</small>
+              ) : !canManage ? (
+                <small className="muted">当前账号只有项目查看权限。</small>
               ) : null}
             </div>
           </section>
@@ -537,7 +546,7 @@ function ProjectDetailDrawer({
                 </div>
               ))}
             </div>
-            {unusedUsers.length ? (
+            {canManage && unusedUsers.length ? (
               <label className="inline-adder">
                 <select defaultValue="">
                   <option value="" disabled>
@@ -587,7 +596,7 @@ function ProjectDetailDrawer({
                 </strong>
               </div>
             </div>
-            <div className="compact-adders">
+            {canManage ? <div className="compact-adders">
               {unusedTags.length ? (
                 <label className="inline-adder">
                   <select defaultValue="">
@@ -637,7 +646,7 @@ function ProjectDetailDrawer({
               >
                 ＋ 添加别名
               </button>
-            </div>
+            </div> : null}
           </section>
         </div>
       </aside>

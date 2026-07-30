@@ -1,0 +1,41 @@
+[Unit]
+Description=Solution Workspace MVP Frontend
+Documentation=file://@@PROJECT_DIR@@/deploy/systemd/README.md
+Wants=network-online.target
+After=network-online.target solution-workspace-backend.service
+PartOf=solution-workspace.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=@@APP_USER@@
+Group=@@APP_USER@@
+WorkingDirectory=@@PROJECT_DIR@@/frontend
+
+Environment=NODE_ENV=production
+Environment=PATH=@@NODE_BIN_DIR@@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=@@NODE_BIN@@ @@PROJECT_DIR@@/frontend/node_modules/vinext/dist/cli.js start --hostname 0.0.0.0 --port 5174
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+KillSignal=SIGINT
+UMask=0027
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=solution-workspace.target

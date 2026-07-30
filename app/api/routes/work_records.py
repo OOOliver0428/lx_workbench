@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_current_user, get_db, require_csrf
 from app.domain import is_super_admin
 from app.errors import PermissionDeniedError
-from app.models import User
+from app.models import PermissionKey, User
 from app.schemas import RevisionAction, WorkRecordCreate, WorkRecordOut, WorkRecordUpdate
 from app.serializers import work_record_out
+from app.services import permissions as permission_service
 from app.services import work_records as record_service
 
 router = APIRouter(prefix="/work-records", tags=["work-records"])
@@ -20,6 +21,7 @@ def list_work_records(
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[WorkRecordOut]:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
     rows = record_service.list_work_records(
         db,
         actor,
@@ -36,6 +38,7 @@ def create_work_record(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> WorkRecordOut:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     return work_record_out(db, record_service.create_work_record(db, payload, actor))
 
 
@@ -45,6 +48,7 @@ def get_work_record(
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> WorkRecordOut:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
     record = record_service.get_work_record(db, record_id)
     if record.author_id != actor.id and not is_super_admin(actor):
         raise PermissionDeniedError("无权查看他人的原始工作记录")
@@ -58,6 +62,7 @@ def update_work_record(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> WorkRecordOut:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     record = record_service.get_work_record(db, record_id)
     return work_record_out(db, record_service.update_work_record(db, record, payload, actor))
 
@@ -69,6 +74,7 @@ def delete_work_record(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> None:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     record_service.delete_work_record(
         db,
         record_service.get_work_record(db, record_id),

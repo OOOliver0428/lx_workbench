@@ -4,11 +4,12 @@ import argparse
 import getpass
 
 from alembic.config import Config
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from alembic import command
 from app.config import get_settings
 from app.database import create_database_engine, create_session_factory
+from app.identity import normalize_user_identifier
 from app.models import User, UserRole
 from app.security import hash_password
 
@@ -25,13 +26,33 @@ def create_user(args: argparse.Namespace) -> None:
     if len(password) < 10:
         raise SystemExit("密码至少 10 位")
     with factory.begin() as db:
-        login_name = args.login_name.strip().casefold()
-        if db.scalar(select(User.id).where(User.login_name == login_name)):
-            raise SystemExit("登录名已经存在")
+        login_name = normalize_user_identifier(args.login_name)
+        display_name = args.display_name.strip()
+        display_name_key = normalize_user_identifier(display_name)
+        if not login_name or not display_name:
+            raise SystemExit("登录名和显示名称不能为空")
+        if db.scalar(
+            select(User.id).where(
+                or_(
+                    User.login_name == login_name,
+                    User.display_name_key == login_name,
+                )
+            )
+        ):
+            raise SystemExit("登录名已经存在，或与现有显示名称冲突")
+        if db.scalar(
+            select(User.id).where(
+                or_(
+                    User.display_name_key == display_name_key,
+                    User.login_name == display_name_key,
+                )
+            )
+        ):
+            raise SystemExit("显示名称已经存在，或与现有登录名冲突")
         db.add(
             User(
                 login_name=login_name,
-                display_name=args.display_name.strip(),
+                display_name=display_name,
                 password_hash=hash_password(password),
                 role=args.role,
                 must_change_password=not args.no_force_change,

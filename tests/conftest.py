@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.models import Base, ProjectTag, User, UserRole
+from app.models import (
+    Base,
+    PermissionKey,
+    ProjectTag,
+    User,
+    UserPermission,
+    UserRole,
+)
 from app.security import hash_password
 
 TEST_PASSWORD = "Mvp-Test-Password-2026"
@@ -75,6 +82,36 @@ def api(tmp_path: Path) -> Iterator[dict[str, Any]]:
             }
             db.add_all(users.values())
             db.flush()
+            member_permissions = {
+                PermissionKey.DASHBOARD_OPPORTUNITY_VIEW,
+                PermissionKey.DASHBOARD_WORK_VIEW,
+                PermissionKey.PROJECTS_MANAGE,
+                PermissionKey.TASKS_MANAGE,
+                PermissionKey.WORK_RECORDS_MANAGE,
+                PermissionKey.WEEKLY_REPORTS_MANAGE,
+                PermissionKey.AI_USE,
+            }
+            leader_permissions = {
+                *member_permissions,
+                PermissionKey.DASHBOARD_OVERVIEW_VIEW,
+                PermissionKey.DASHBOARD_TEAM_SUMMARY,
+            }
+            admin_permissions = set(PermissionKey)
+            permission_sets = {
+                "member": member_permissions,
+                "member2": member_permissions,
+                "leader": leader_permissions,
+                "admin": admin_permissions,
+            }
+            db.add_all(
+                UserPermission(
+                    user_id=users[user_key].id,
+                    permission_key=permission.value,
+                    granted_by=users["super_admin"].id,
+                )
+                for user_key, permissions in permission_sets.items()
+                for permission in permissions
+            )
             tags = {
                 "opportunity": ProjectTag(
                     name="商机",

@@ -46,9 +46,35 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
                 )
             }
         user_columns = {item[1] for item in db.execute("PRAGMA table_info(users)")}
+        user_indexes = {
+            item[1]: bool(item[2]) for item in db.execute("PRAGMA index_list(users)")
+        }
         weekly_report_table = db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='weekly_reports'"
         ).fetchone()
+        dashboard_tables = {
+            item[0]
+            for item in db.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN (
+                    'project_progress',
+                    'task_relations',
+                    'team_weekly_summaries'
+                  )
+                """
+            )
+        }
+        permission_table = db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='user_permissions'"
+        ).fetchone()
+        task_relation_foreign_keys = {
+            item[3]: (item[2], item[4])
+            for item in db.execute("PRAGMA foreign_key_list(task_relations)")
+        }
     engine = create_database_engine(get_settings())
     with engine.connect() as connection:
         foreign_keys = connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one()
@@ -56,10 +82,19 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "a1c7e3f9b2d4"
+    assert revision == "c6e4b8a1d209"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
+    assert "display_name_key" in user_columns
+    assert user_indexes["uq_users_display_name_key"] is True
     assert weekly_report_table == ("weekly_reports",)
+    assert dashboard_tables == {
+        "project_progress",
+        "task_relations",
+        "team_weekly_summaries",
+    }
+    assert permission_table == ("user_permissions",)
+    assert task_relation_foreign_keys["deleted_by"] == ("users", "id")
     assert ai_config_table == ("ai_provider_configs",)
     assert "access_mode" in ai_config_columns
     assert duration_triggers == {
@@ -77,13 +112,14 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         db.execute(
             """
             INSERT INTO users(
-                id, login_name, display_name, password_hash, role,
+                id, login_name, display_name, display_name_key, password_hash, role,
                 is_active, must_change_password, created_at, updated_at, revision
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "10f240f0-b605-4180-904d-bb57c8b7c5d8",
                 "backup-user",
+                "备份验证用户",
                 "备份验证用户",
                 "not-a-real-password-hash",
                 "member",
@@ -105,7 +141,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "a1c7e3f9b2d4"
+    assert manifest["schemaRevision"] == "c6e4b8a1d209"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
     get_settings.cache_clear()

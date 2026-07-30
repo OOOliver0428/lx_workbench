@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
 from app.dependencies import get_current_session, get_db, require_csrf_session
 from app.errors import AppError
+from app.identity import normalize_user_identifier
 from app.models import AuthSession, User, utc_now
 from app.schemas import AuthContextOut, LoginRequest, PasswordChange
 from app.security import (
@@ -18,6 +19,7 @@ from app.security import (
     hash_session_token,
     verify_password,
 )
+from app.services.permissions import effective_permission_keys
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -31,11 +33,19 @@ def login(
 ) -> AuthContextOut:
     throttle = request.app.state.login_throttle
     client_ip = request.client.host if request.client else "unknown"
-    key = f"{client_ip}:{payload.login_name.casefold()}"
+    login_identifier = normalize_user_identifier(payload.login_name)
+    key = f"{client_ip}:{login_identifier}"
     if throttle.is_blocked(key):
         raise AppError("LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试", status_code=429)
 
-    user = db.scalar(select(User).where(User.login_name == payload.login_name.strip().casefold()))
+    user = db.scalar(
+        select(User).where(
+            or_(
+                User.login_name == login_identifier,
+                User.display_name_key == login_identifier,
+            )
+        )
+    )
     if not user or not user.is_active or not verify_password(user.password_hash, payload.password):
         throttle.record_failure(key)
         record_audit(
@@ -45,9 +55,13 @@ def login(
             entity_type="user",
             entity_id=user.id if user else None,
             result="failure",
-            detail={"loginName": payload.login_name.strip()},
+            detail={"loginIdentifier": payload.login_name},
         )
-        raise AppError("INVALID_CREDENTIALS", "用户名或密码错误", status_code=401)
+        raise AppError(
+            "INVALID_CREDENTIALS",
+            "登录名、显示名称或密码错误",
+            status_code=401,
+        )
 
     throttle.clear(key)
     token = generate_session_token()
@@ -81,6 +95,7 @@ def login(
     )
     return AuthContextOut(
         user=user,
+        permissions=effective_permission_keys(db, user),
         csrf_token=csrf_token,
         expires_at=expires_at,
     )
@@ -89,12 +104,12 @@ def login(
 @router.post("/logout", status_code=204)
 def logout(
     request: Request,
-    response: Response,
     auth: tuple[AuthSession, User] = Depends(require_csrf_session),
     db: Session = Depends(get_db),
 ) -> Response:
     auth_session, user = auth
     auth_session.revoked_at = utc_now()
+    response = Response(status_code=204)
     response.delete_cookie(request.app.state.settings.session_cookie_name, path="/")
     record_audit(
         db,
@@ -107,10 +122,14 @@ def logout(
 
 
 @router.get("/me", response_model=AuthContextOut)
-def me(auth: tuple[AuthSession, User] = Depends(get_current_session)) -> AuthContextOut:
+def me(
+    auth: tuple[AuthSession, User] = Depends(get_current_session),
+    db: Session = Depends(get_db),
+) -> AuthContextOut:
     auth_session, user = auth
     return AuthContextOut(
         user=user,
+        permissions=effective_permission_keys(db, user),
         csrf_token=auth_session.csrf_token,
         expires_at=auth_session.expires_at,
     )

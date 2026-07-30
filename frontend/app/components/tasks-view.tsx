@@ -7,7 +7,7 @@ import type { ProjectSummary, Task, TaskStatus, User } from "../types";
 import { AvatarImage } from "./avatar";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
 
-export function TasksView() {
+export function TasksView({ canManage }: { canManage: boolean }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -93,9 +93,11 @@ export function TasksView() {
           <h1>任务</h1>
           <p>围绕项目组织可执行事项，清楚记录负责人、阻塞与完成结果。</p>
         </div>
-        <button className="primary-button" onClick={() => setCreateOpen(true)}>
-          <span>＋</span> 新建任务
-        </button>
+        {canManage ? (
+          <button className="primary-button" onClick={() => setCreateOpen(true)}>
+            <span>＋</span> 新建任务
+          </button>
+        ) : null}
       </header>
 
       <section className="toolbar">
@@ -173,15 +175,19 @@ export function TasksView() {
                 <div className="blocker-note">阻塞：{task.blocker_reason}</div>
               ) : null}
               <footer>
-                {nextTaskActions(task.status).map((action) => (
-                  <button
-                    key={action.status}
-                    className={action.primary ? "small-primary" : "text-button"}
-                    onClick={() => transition(task, action.status)}
-                  >
-                    {action.label}
-                  </button>
-                ))}
+                {canManage
+                  ? nextTaskActions(task.status).map((action) => (
+                      <button
+                        key={action.status}
+                        className={
+                          action.primary ? "small-primary" : "text-button"
+                        }
+                        onClick={() => transition(task, action.status)}
+                      >
+                        {action.label}
+                      </button>
+                    ))
+                  : null}
               </footer>
             </article>
           ))
@@ -195,7 +201,7 @@ export function TasksView() {
         )}
       </section>
 
-      {createOpen ? (
+      {createOpen && canManage ? (
         <TaskCreateModal
           projects={projects}
           users={users}

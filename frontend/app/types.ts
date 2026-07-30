@@ -4,6 +4,25 @@ export type UserRole =
   | "system_admin"
   | "super_admin";
 
+export type PermissionKey =
+  | "dashboard.opportunity.view"
+  | "dashboard.work.view"
+  | "dashboard.overview.view"
+  | "dashboard.team_summary.generate"
+  | "projects.view"
+  | "projects.manage"
+  | "tasks.view"
+  | "tasks.manage"
+  | "work_records.view"
+  | "work_records.manage"
+  | "weekly_reports.view"
+  | "weekly_reports.manage"
+  | "ai.use"
+  | "settings.users.manage"
+  | "settings.tags.manage"
+  | "settings.ai.manage"
+  | "settings.audit.view";
+
 export interface User {
   id: string;
   login_name: string;
@@ -18,8 +37,40 @@ export interface User {
 
 export interface AuthContext {
   user: User;
+  permissions: PermissionKey[];
   csrf_token: string;
   expires_at: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  request_id: string | null;
+  actor_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  before_data: Record<string, unknown> | null;
+  after_data: Record<string, unknown> | null;
+  result: string;
+  detail: Record<string, unknown> | null;
+  client_ip: string | null;
+  created_at: string;
+}
+
+export interface PermissionDefinition {
+  key: PermissionKey;
+  group: string;
+  group_label: string;
+  label: string;
+  description: string;
+  system_admin_assignable: boolean;
+}
+
+export interface UserPermissions {
+  user_id: string;
+  revision: number;
+  assigned_permissions: PermissionKey[];
+  effective_permissions: PermissionKey[];
 }
 
 export interface AvatarOption {
@@ -159,7 +210,9 @@ export interface WorkRecord {
   content: string;
   minutes: number;
   project_id: string | null;
+  project_name: string | null;
   task_id: string | null;
+  task_title: string | null;
   risk: string | null;
   next_action: string | null;
   last_edited_by: string;
@@ -213,17 +266,6 @@ export interface CurrentWeeklyReport {
   report: WeeklyReport | null;
 }
 
-export interface WeeklyReportInboxItem {
-  id: string;
-  author_id: string;
-  author_display_name: string;
-  week_start: string;
-  week_end: string;
-  content: string;
-  submitted_at: string;
-  submission_version: number;
-}
-
 export interface AIProviderAccessMode {
   id: string;
   name: string;
@@ -273,4 +315,174 @@ export interface AIConfigurationTestResult {
   };
   verification_token: string;
   expires_at: string;
+}
+
+export type BusinessStage =
+  | "lead"
+  | "requirement"
+  | "solution_exchange"
+  | "solution_confirm"
+  | "poc"
+  | "tender"
+  | "won";
+
+export type AttentionStatus = "focus" | "steady" | "coordinate";
+
+export interface DashboardWeek {
+  week_start: string;
+  week_end: string;
+  label: string;
+  is_current: boolean;
+}
+
+export interface DashboardMember {
+  id: string;
+  display_name: string;
+  role: string;
+  avatar_key: string | null;
+  submitted: boolean;
+  submitted_at: string | null;
+  weekly_minutes: number;
+  submitted_weeks: string[];
+}
+
+export interface DashboardWorkItem {
+  id: string;
+  author_id: string;
+  author_display_name: string;
+  author_avatar_key: string | null;
+  content: string;
+  minutes: number;
+  risk: string | null;
+  next_action: string | null;
+}
+
+export interface DashboardTask {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  priority: "p0" | "p1" | "p2";
+  owner_id: string;
+  owner_display_name: string;
+  owner_avatar_key: string | null;
+  due_date: string | null;
+  blocker_reason: string | null;
+  result: string | null;
+}
+
+export interface DashboardProjectMember {
+  id: string;
+  display_name: string;
+  avatar_key: string | null;
+}
+
+export interface DashboardStageHistory {
+  id: string;
+  week_start: string;
+  business_stage: BusinessStage;
+  progress_percent: number;
+  created_at: string;
+}
+
+export interface DashboardProject {
+  id: string;
+  code: string;
+  name: string;
+  type_label: string;
+  can_manage: boolean;
+  lifecycle_status: ProjectStatus;
+  business_stage: BusinessStage;
+  attention_status: AttentionStatus;
+  progress_percent: number;
+  weekly_minutes: number;
+  work_summary: string;
+  output_summary: string;
+  has_week_progress: boolean;
+  people: DashboardProjectMember[];
+  tasks: DashboardTask[];
+  work_items: DashboardWorkItem[];
+  stage_history: DashboardStageHistory[];
+}
+
+export interface DashboardDeliverable {
+  id: string;
+  name: string;
+  url: string;
+  project_id: string;
+  project_name: string;
+  author_id: string | null;
+  author_display_name: string | null;
+}
+
+export interface DashboardTaskLink {
+  id: string;
+  source_task_id: string;
+  target_task_id: string;
+  label: string;
+}
+
+export interface DashboardMetrics {
+  tracking_count: number;
+  focus_count: number;
+  stage_advanced_count: number;
+  deliverable_count: number;
+  coordinate_count: number;
+  total_minutes: number;
+  submitted_count: number;
+  member_count: number;
+}
+
+export interface DashboardWeekTrend {
+  week_start: string;
+  week_end: string;
+  total_minutes: number;
+  deliverable_count: number;
+  submitted_count: number;
+  member_count: number;
+}
+
+export interface DashboardStageCount {
+  business_stage: BusinessStage;
+  count: number;
+}
+
+export interface DashboardTimelineEvent {
+  id: string;
+  project_id: string;
+  project_name: string;
+  week_start: string;
+  business_stage: BusinessStage;
+  attention_status: AttentionStatus;
+  summary: string;
+  created_at: string;
+}
+
+export interface TeamWeeklySummary {
+  id: string;
+  week_start: string;
+  week_end: string;
+  content: string;
+  generated_by: string;
+  forced: boolean;
+  submitted_count: number;
+  expected_count: number;
+  generation_model: string;
+  generation_usage: AIChatResult["usage"] | null;
+  created_at: string;
+  revision: number;
+}
+
+export interface Dashboard {
+  accessible_pages: Array<"opp" | "work" | "overview">;
+  selected_week: DashboardWeek;
+  weeks: DashboardWeek[];
+  metrics: DashboardMetrics;
+  members: DashboardMember[];
+  projects: DashboardProject[];
+  deliverables: DashboardDeliverable[];
+  task_links: DashboardTaskLink[];
+  trends: DashboardWeekTrend[];
+  stage_distribution: DashboardStageCount[];
+  stage_timeline: DashboardTimelineEvent[];
+  latest_team_summary: TeamWeeklySummary | null;
 }

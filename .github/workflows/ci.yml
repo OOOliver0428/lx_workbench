@@ -19,6 +19,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --all-groups
+      - run: bash -n deploy/systemd/install.sh
       - run: uv run ruff check app tests
       - run: uv run pytest
 

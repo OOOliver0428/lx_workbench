@@ -1,0 +1,43 @@
+[Unit]
+Description=Solution Workspace MVP Backend
+Documentation=file://@@PROJECT_DIR@@/deploy/systemd/README.md
+Wants=network-online.target
+After=network-online.target
+PartOf=solution-workspace.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=@@APP_USER@@
+Group=@@APP_USER@@
+WorkingDirectory=@@PROJECT_DIR@@
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+ExecStartPre=@@PROJECT_DIR@@/.venv/bin/alembic upgrade head
+ExecStart=@@PROJECT_DIR@@/.venv/bin/python server.py --host 127.0.0.1 --port 8787
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+TimeoutStopSec=30s
+KillSignal=SIGINT
+UMask=0077
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+ReadWritePaths=@@PROJECT_DIR@@/data @@PROJECT_DIR@@/backups
+
+[Install]
+WantedBy=solution-workspace.target
