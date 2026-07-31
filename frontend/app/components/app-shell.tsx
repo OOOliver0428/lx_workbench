@@ -12,6 +12,13 @@ import type {
 } from "../types";
 import { InlineNotice } from "./ui";
 import { AvatarImage } from "./avatar";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Close,
+  Logout,
+  Sparkle,
+} from "./icons";
 
 export type WorkspaceView =
   | "dashboard"
@@ -139,7 +146,13 @@ export function AppShell({
             aria-pressed={sidebarCollapsed}
             title={sidebarCollapsed ? "展开导航栏" : "收起导航栏"}
           >
-            <span aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span>
+            <span aria-hidden="true">
+              {sidebarCollapsed ? (
+                <ChevronRight size={15} />
+              ) : (
+                <ChevronLeft size={15} />
+              )}
+            </span>
           </button>
         </div>
         <nav className="primary-nav" aria-label="主导航">
@@ -159,7 +172,9 @@ export function AppShell({
                 <strong>{item.label}</strong>
                 <small>{item.description}</small>
               </span>
-              <i className="nav-arrow">›</i>
+              <i className="nav-arrow">
+                <ChevronRight size={15} />
+              </i>
             </button>
           ))}
         </nav>
@@ -172,7 +187,7 @@ export function AppShell({
               title="打开 AI 助手"
             >
               <span className="ai-orbit" aria-hidden="true">
-                ✦
+                <Sparkle size={16} />
               </span>
               <span>
                 <strong>AI 助手</strong>
@@ -204,7 +219,7 @@ export function AppShell({
               aria-label="退出登录"
               title="退出登录"
             >
-              ↗
+              <Logout size={15} />
             </button>
           </div>
         </div>
@@ -437,13 +452,15 @@ function AIDrawer({
         aria-label="团队 AI 助手"
       >
         <header>
-          <div className="ai-title-mark">✦</div>
+          <div className="ai-title-mark">
+            <Sparkle size={16} />
+          </div>
           <div>
             <p className="eyebrow">AI COPILOT</p>
             <h2>团队 AI 助手</h2>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="关闭">
-            ×
+            <Close size={16} />
           </button>
         </header>
         <div className="ai-service-status">
@@ -457,7 +474,9 @@ function AIDrawer({
         <div className="ai-conversation">
           {canUseAi && messages.length === 0 ? (
             <div className="ai-welcome">
-              <span>✦</span>
+              <span>
+                <Sparkle size={26} />
+              </span>
               <h3>从一个具体问题开始</h3>
               <p>
                 可以让我梳理项目目标、拆解下一步，或把工作记录整理成清晰表述。
@@ -556,7 +575,13 @@ function AIDrawer({
                   disabled={reportBusy || !status?.configured}
                   onClick={generateWeeklyReport}
                 >
-                  {reportBusy ? "正在生成…" : "✦ 生成本周周报"}
+                  {reportBusy ? (
+                    "正在生成…"
+                  ) : (
+                    <>
+                      <Sparkle size={14} /> 生成本周周报
+                    </>
+                  )}
                 </button>
               </>
             )}
@@ -575,7 +600,7 @@ function AIDrawer({
                 >
                   {message.role === "assistant" ? (
                     <span className="ai-message-avatar" aria-hidden="true">
-                      ✦
+                      <Sparkle size={14} />
                     </span>
                   ) : null}
                   <div className="ai-chat-bubble">
@@ -594,7 +619,7 @@ function AIDrawer({
               {submitting ? (
                 <article className="ai-chat-row ai-chat-assistant">
                   <span className="ai-message-avatar" aria-hidden="true">
-                    ✦
+                    <Sparkle size={14} />
                   </span>
                   <div
                     className="ai-chat-bubble ai-chat-thinking"

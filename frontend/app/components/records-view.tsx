@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
 import type { ProjectSummary, Task, WorkRecord } from "../types";
 import { AvatarImage } from "./avatar";
+import { ArrowUpRight, Plus } from "./icons";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
 export function RecordsView({
@@ -74,7 +75,7 @@ export function RecordsView({
         </div>
         {canManage ? (
           <button className="primary-button" onClick={() => setCreateOpen(true)}>
-            <span>＋</span> 记录工作
+            <Plus size={14} /> 记录工作
           </button>
         ) : null}
       </header>
@@ -192,7 +193,7 @@ export function RecordsView({
                             target="_blank"
                             rel="noreferrer"
                           >
-                            <span>↗</span>
+                            <span><ArrowUpRight size={12} /></span>
                             {deliverable.name}
                           </a>
                         ))}

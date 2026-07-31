@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Close } from "./icons";
 
 export function Modal({
   title,
@@ -30,7 +31,7 @@ export function Modal({
             <h2>{title}</h2>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="关闭">
-            ×
+            <Close size={16} />
           </button>
         </header>
         {children}
@@ -87,7 +88,7 @@ export function InlineNotice({
   tone = "info",
 }: {
   children: ReactNode;
-  tone?: "info" | "warning" | "error";
+  tone?: "info" | "success" | "warning" | "error";
 }) {
   return <div className={`inline-notice notice-${tone}`}>{children}</div>;
 }

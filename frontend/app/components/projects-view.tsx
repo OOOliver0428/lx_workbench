@@ -12,6 +12,7 @@ import type {
   User,
 } from "../types";
 import { AvatarImage } from "./avatar";
+import { ChevronRight, Close, Plus, Search } from "./icons";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
 
 const transitionOptions: Record<ProjectStatus, ProjectStatus[]> = {
@@ -90,14 +91,14 @@ export function ProjectsView({ canManage }: { canManage: boolean }) {
           </div>
           {canManage ? (
             <button className="primary-button" onClick={() => setCreateOpen(true)}>
-              <span>＋</span> 新建项目
+              <Plus size={14} /> 新建项目
             </button>
           ) : null}
         </header>
 
         <section className="toolbar">
           <label className="search-box">
-            <span aria-hidden="true">⌕</span>
+            <span aria-hidden="true"><Search size={16} /></span>
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -180,7 +181,7 @@ export function ProjectsView({ canManage }: { canManage: boolean }) {
                         )}`
                       : "尚未规划"}
                   </span>
-                  <span className="row-action">›</span>
+                  <span className="row-action"><ChevronRight size={16} /></span>
                 </button>
               ))}
             </div>
@@ -436,7 +437,7 @@ function ProjectDetailDrawer({
             <h2>{project.name}</h2>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="关闭">
-            ×
+            <Close size={14} />
           </button>
         </header>
         <div className="detail-status-line">
@@ -644,7 +645,7 @@ function ProjectDetailDrawer({
                   );
                 }}
               >
-                ＋ 添加别名
+                <Plus size={13} /> 添加别名
               </button>
             </div> : null}
           </section>

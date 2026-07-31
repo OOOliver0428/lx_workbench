@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
 import type { ProjectSummary, Task, TaskStatus, User } from "../types";
 import { AvatarImage } from "./avatar";
+import { Plus } from "./icons";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
 
 export function TasksView({ canManage }: { canManage: boolean }) {
@@ -95,7 +96,7 @@ export function TasksView({ canManage }: { canManage: boolean }) {
         </div>
         {canManage ? (
           <button className="primary-button" onClick={() => setCreateOpen(true)}>
-            <span>＋</span> 新建任务
+            <Plus size={14} /> 新建任务
           </button>
         ) : null}
       </header>

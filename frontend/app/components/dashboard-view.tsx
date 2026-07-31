@@ -20,6 +20,18 @@ import type {
 } from "../types";
 import { AvatarImage } from "./avatar";
 import { EmptyState, InlineNotice, Modal } from "./ui";
+import {
+  AlertTriangle,
+  Check,
+  Layers,
+  LogoMark,
+  Minus,
+  Package,
+  Plus,
+  Reload,
+  Sparkle,
+  TrendingUp,
+} from "./icons";
 
 type DashboardPage = "opp" | "work" | "overview";
 type OpportunityView = "list" | "graph";
@@ -170,7 +182,9 @@ export function DashboardView({
     <main className="war-room">
       <header className="war-room-topbar">
         <div className="war-room-title-lockup">
-          <span className="war-room-logo">◇</span>
+          <span className="war-room-logo">
+            <LogoMark size={21} />
+          </span>
           <strong>解决方案部门作战台</strong>
         </div>
         <nav className="war-room-tabs" aria-label="作战台视图">
@@ -236,7 +250,7 @@ export function DashboardView({
                 )
               }
             >
-              ＋ 录入进展
+              <Plus size={14} /> 录入进展
             </button>
           </div>
         ) : activePage === "work" ? (
@@ -369,28 +383,28 @@ function OpportunityPage({
       <div className="war-metric-grid">
         <MetricCard
           tone="blue"
-          icon="▣"
+          icon={<Layers size={20} />}
           label="在跟商机"
           value={dashboard.metrics.tracking_count}
           note={`${dashboard.metrics.focus_count} 个重点推进`}
         />
         <MetricCard
           tone="green"
-          icon="↗"
+          icon={<TrendingUp size={20} />}
           label="本周阶段推进"
           value={dashboard.metrics.stage_advanced_count}
           note="阶段节点已前移"
         />
         <MetricCard
           tone="purple"
-          icon="⇩"
+          icon={<Package size={20} />}
           label="新增交付物"
           value={dashboard.metrics.deliverable_count}
           note="来自真实工作记录"
         />
         <MetricCard
           tone="orange"
-          icon="△"
+          icon={<AlertTriangle size={20} />}
           label="待协调"
           value={dashboard.metrics.coordinate_count}
           note="需主管介入"
@@ -436,7 +450,7 @@ function OpportunityPage({
                       : "需要同时管理至少两个含任务的项目"
                   }
                 >
-                  ＋ 建立任务关联
+                  <Plus size={13} /> 建立任务关联
                 </button>
               ) : null}
               <select
@@ -602,7 +616,7 @@ function ProjectList({
                 title="录入该项目进展"
                 aria-label={`录入${project.name}进展`}
               >
-                ＋
+                <Plus size={13} />
               </button>
             ) : null}
           </div>
@@ -805,17 +819,17 @@ function ProjectGraph({
       </svg>
       <div className="war-graph-controls" aria-label="图谱缩放控制">
         <button type="button" onClick={() => zoomBy(0.15)} aria-label="放大">
-          ＋
+          <Plus size={14} />
         </button>
         <button type="button" onClick={() => zoomBy(-0.15)} aria-label="缩小">
-          −
+          <Minus size={14} />
         </button>
         <button
           type="button"
           onClick={() => setViewport({ x: 0, y: 0, scale: 1 })}
           aria-label="重置视图"
         >
-          ↺
+          <Reload size={13} />
         </button>
       </div>
       <span className="war-graph-hint">拖动画布 · 滚轮缩放</span>
@@ -888,7 +902,20 @@ function WorkPage({
                 </span>
               </article>
             ))}
-            <div className="war-submit-ring">
+            <div
+              className="war-submit-ring"
+              style={
+                {
+                  "--ring-pct": dashboard.metrics.member_count
+                    ? Math.round(
+                        (dashboard.metrics.submitted_count /
+                          dashboard.metrics.member_count) *
+                          100,
+                      )
+                    : 0,
+                } as CSSProperties
+              }
+            >
               <b>
                 {dashboard.metrics.submitted_count}/
                 {dashboard.metrics.member_count}
@@ -993,7 +1020,9 @@ function WorkPage({
 
       <aside className="war-panel war-ai-card">
         <div className="war-ai-title">
-          <span>✦</span>
+          <span>
+            <Sparkle size={18} />
+          </span>
           <div>
             <h3>团队周报 AI 汇总</h3>
             <p>按成员正式提交版本自动聚合</p>
@@ -1051,7 +1080,7 @@ function WorkPage({
         )}
         {allSubmitted ? (
           <div className="war-ai-hint ready">
-            ✓ 全员已提交，可生成本周团队周报
+            <Check size={12} /> 全员已提交，可生成本周团队周报
           </div>
         ) : (
           <div className="war-ai-hint">
@@ -1093,28 +1122,28 @@ function OverviewPage({ dashboard }: { dashboard: Dashboard }) {
       <div className="war-metric-grid">
         <MetricCard
           tone="blue"
-          icon="▣"
+          icon={<Layers size={20} />}
           label="覆盖周数"
           value={dashboard.trends.length}
           note="连续自然周"
         />
         <MetricCard
           tone="green"
-          icon="↗"
+          icon={<TrendingUp size={20} />}
           label="累计工时"
           value={`${formatHours(totalMinutes)}h`}
           note="来自工作记录"
         />
         <MetricCard
           tone="purple"
-          icon="⇩"
+          icon={<Package size={20} />}
           label="累计交付物"
           value={deliverableCount}
           note="真实登记产出"
         />
         <MetricCard
           tone="orange"
-          icon="△"
+          icon={<AlertTriangle size={20} />}
           label="在推进商机"
           value={
             dashboard.projects.filter(
@@ -1161,9 +1190,11 @@ function OverviewPage({ dashboard }: { dashboard: Dashboard }) {
                         : ""
                     }
                   >
-                    {member.submitted_weeks.includes(week.week_start)
-                      ? "✓"
-                      : "—"}
+                    {member.submitted_weeks.includes(week.week_start) ? (
+                      <Check size={12} />
+                    ) : (
+                      "—"
+                    )}
                   </i>
                 ))}
                 <b>
@@ -1768,7 +1799,7 @@ function MetricCard({
   note,
 }: {
   tone: "blue" | "green" | "purple" | "orange";
-  icon: string;
+  icon: ReactNode;
   label: string;
   value: ReactNode;
   note: string;

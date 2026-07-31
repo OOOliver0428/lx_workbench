@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { api, ApiClientError, setCsrfToken } from "../api";
 import type { AuthContext, AvatarOption } from "../types";
 import { AvatarImage, AvatarOptionPreview } from "./avatar";
+import { Shield } from "./icons";
 import { InlineNotice, Modal } from "./ui";
 
 export function ProfileSettingsView({
@@ -291,7 +292,7 @@ function PasswordSettingsCard({
           <p>所有用户都可以修改自己的密码，保存后会注销其他登录会话。</p>
         </div>
         <span className="security-mark" aria-hidden="true">
-          ＊＊
+          <Shield size={24} />
         </span>
       </header>
       <form onSubmit={submit}>

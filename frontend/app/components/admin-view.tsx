@@ -15,6 +15,7 @@ import type {
 } from "../types";
 import { AIConfigPanel } from "./ai-config-panel";
 import { AvatarImage } from "./avatar";
+import { Dice, Plus } from "./icons";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
 type AdminTab = "users" | "tags" | "ai" | "audit";
@@ -85,7 +86,7 @@ export function AdminView({ context }: { context: AuthContext }) {
               tab === "users" ? setCreateUserOpen(true) : setCreateTagOpen(true)
             }
           >
-            <span>＋</span> {tab === "users" ? "创建用户" : "创建标签"}
+            <Plus size={14} /> {tab === "users" ? "创建用户" : "创建标签"}
           </button>
         ) : null}
       </header>
@@ -403,7 +404,7 @@ function UserCreateModal({
                 setShowInitialPassword(true);
               }}
             >
-              ⚄
+              <Dice size={18} />
             </button>
           </div>
           <small className="field-hint">

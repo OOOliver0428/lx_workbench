@@ -8,6 +8,7 @@ import type {
   AIConfigurationTestResult,
   AIProviderOption,
 } from "../types";
+import { ArrowUpRight, Check } from "./icons";
 import { InlineNotice } from "./ui";
 
 const EMPTY_CONFIGURATION: AIConfiguration = {
@@ -337,14 +338,14 @@ export function AIConfigPanel() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  查看官方 API 文档 ↗
+                  查看官方 API 文档 <ArrowUpRight size={11} />
                 </a>
                 <a
                   href={selectedProvider.api_key_url}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  前往服务商控制台 ↗
+                  前往服务商控制台 <ArrowUpRight size={11} />
                 </a>
               </div>
             </fieldset>
@@ -360,7 +361,7 @@ export function AIConfigPanel() {
               {success ? <InlineNotice>{success}</InlineNotice> : null}
               {testResult ? (
                 <div className="connection-result">
-                  <span className="connection-check">✓</span>
+                  <span className="connection-check"><Check size={13} /></span>
                   <div>
                     <strong>连接成功</strong>
                     <small>
