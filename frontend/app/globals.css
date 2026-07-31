@@ -4902,14 +4902,6 @@ a {
   color: #1677ff;
 }
 
-.war-graph-hint {
-  bottom: 14px;
-  color: #8ca0b3;
-  font-size: 10px;
-  position: absolute;
-  right: 14px;
-}
-
 .war-graph-legend span {
   align-items: center;
   color: #71869b;
@@ -4940,6 +4932,166 @@ a {
 .war-graph-legend i.relation {
   border-top: 2px dashed #866dff;
   width: 15px;
+}
+
+.war-task-node,
+.war-project-node,
+.war-graph-edge,
+.war-graph-cross-edge,
+.war-graph-dim {
+  transition: opacity 0.18s ease;
+}
+
+.war-task-node,
+.war-project-node {
+  cursor: grab;
+  touch-action: none;
+}
+
+.war-task-node text {
+  pointer-events: none;
+}
+
+.war-graph-svg.node-dragging,
+.war-graph-svg.node-dragging .war-task-node,
+.war-graph-svg.node-dragging .war-project-node {
+  cursor: grabbing;
+}
+
+.war-graph-dim {
+  opacity: 0.12;
+}
+
+.war-graph-hint {
+  align-items: center;
+  bottom: 14px;
+  color: #8ca0b3;
+  display: flex;
+  font-size: 10px;
+  gap: 10px;
+  position: absolute;
+  right: 14px;
+}
+
+.war-graph-hint button {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #d9e6f0;
+  border-radius: 7px;
+  color: #46627c;
+  font-size: 10px;
+  padding: 4px 8px;
+}
+
+.war-graph-hint button:hover {
+  border-color: #8fc0ff;
+  color: var(--accent);
+}
+
+.war-graph-scope-hint {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 480px;
+  padding: 40px 30px;
+  text-align: center;
+}
+
+.war-graph-scope-hint-mark {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: 14px;
+  color: var(--accent);
+  display: inline-flex;
+  height: 52px;
+  justify-content: center;
+  margin-bottom: 18px;
+  width: 52px;
+}
+
+.war-graph-scope-hint h3 {
+  color: #172b41;
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.war-graph-scope-hint > p {
+  color: #647c93;
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 0 auto 22px;
+  max-width: 430px;
+}
+
+.war-graph-scope-hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.war-graph-fullscreen {
+  background:
+    linear-gradient(rgba(44, 119, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(44, 119, 255, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 92% 4%, rgba(50, 213, 228, 0.12), transparent 24%),
+    radial-gradient(circle at 80% 88%, rgba(107, 92, 255, 0.08), transparent 25%),
+    #f6fbff;
+  background-size: 28px 28px, 28px 28px, auto, auto, auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  inset: 0;
+  padding: 18px clamp(16px, 2.2vw, 36px) 22px;
+  position: fixed;
+  z-index: 90;
+}
+
+.war-graph-fullscreen-head {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #dceaf6;
+  border-radius: 16px;
+  box-shadow: 0 8px 26px rgba(35, 86, 130, 0.08);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: 9px 16px;
+}
+
+.war-graph-fullscreen-sub {
+  color: #688099;
+  flex: 1;
+  font-size: 11px;
+  margin: 0;
+  text-align: center;
+}
+
+.war-graph-fullscreen-tools {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.war-graph-fullscreen-body {
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.war-graph-fullscreen-body .war-graph-wrap {
+  height: 100%;
+  min-height: 0;
+}
+
+.war-graph-fullscreen-body .war-graph-svg {
+  height: 100%;
 }
 
 .war-work-grid {
@@ -5699,6 +5851,14 @@ a {
   .war-room-topbar {
     grid-template-columns: 1fr;
     position: static;
+  }
+
+  .war-graph-fullscreen-head {
+    flex-wrap: wrap;
+  }
+
+  .war-graph-fullscreen-sub {
+    display: none;
   }
 
   .war-room-title-lockup {

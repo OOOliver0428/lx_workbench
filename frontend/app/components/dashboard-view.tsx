@@ -1,13 +1,19 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
 import { api, ApiClientError } from "../api";
 import type {
   AttentionStatus,
@@ -23,6 +29,8 @@ import { EmptyState, InlineNotice, Modal } from "./ui";
 import {
   AlertTriangle,
   Check,
+  Close,
+  Expand,
   Layers,
   LogoMark,
   Minus,
@@ -348,6 +356,7 @@ function OpportunityPage({
   const [scope, setScope] = useState<"active" | "all">("active");
   const [attention, setAttention] = useState<AttentionStatus | "all">("all");
   const [search, setSearch] = useState("");
+  const [graphFullscreen, setGraphFullscreen] = useState(false);
   const canCreateRelation =
     canManageRelations &&
     dashboard.projects.filter(
@@ -453,6 +462,16 @@ function OpportunityPage({
                   <Plus size={13} /> 建立任务关联
                 </button>
               ) : null}
+              {view === "graph" ? (
+                <button
+                  type="button"
+                  className="war-tool-button"
+                  onClick={() => setGraphFullscreen(true)}
+                  title="全屏查看商机关系图谱"
+                >
+                  <Expand size={13} /> 全屏
+                </button>
+              ) : null}
               <select
                 value={attention}
                 onChange={(event) =>
@@ -480,6 +499,12 @@ function OpportunityPage({
               projects={projects}
               onSelect={onSelectProject}
               onRecord={onRecordProgress}
+            />
+          ) : scope === "all" ? (
+            <GraphScopeHint
+              projectCount={projects.length}
+              onOpenFullscreen={() => setGraphFullscreen(true)}
+              onBackToActive={() => setScope("active")}
             />
           ) : (
             <ProjectGraph
@@ -550,6 +575,18 @@ function OpportunityPage({
           </section>
         </aside>
       </div>
+      {graphFullscreen ? (
+        <GraphFullscreen
+          projects={projects}
+          links={dashboard.task_links}
+          scope={scope}
+          onScopeChange={(value) => setScope(value)}
+          onSelectProject={onSelectProject}
+          onClose={() => setGraphFullscreen(false)}
+          canCreateRelation={canCreateRelation}
+          onCreateRelation={onCreateRelation}
+        />
+      ) : null}
     </>
   );
 }
@@ -626,25 +663,505 @@ function ProjectList({
   );
 }
 
+const GRAPH_DIMS = {
+  normal: { width: 1100, height: 650 },
+  fullscreen: { width: 1680, height: 920 },
+} as const;
+
+type GraphDims = (typeof GRAPH_DIMS)[keyof typeof GRAPH_DIMS];
+
+type GraphProjectNode = {
+  project: DashboardProject;
+  x: number;
+  y: number;
+};
+
+type GraphTaskNode = {
+  task: DashboardTask;
+  projectId: string;
+  x: number;
+  y: number;
+  projectX: number;
+  projectY: number;
+};
+
+type NodeDownHandler = (
+  event: ReactPointerEvent<SVGGElement>,
+  key: string,
+  projectId: string,
+) => void;
+
+type NodeMoveHandler = (event: ReactPointerEvent<SVGGElement>) => void;
+
+type NodeEndHandler = (
+  event: ReactPointerEvent<SVGGElement>,
+) => boolean | null;
+
+const GraphEdge = memo(function GraphEdge({
+  x1,
+  y1,
+  x2,
+  y2,
+  dimmed,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  dimmed: boolean;
+}) {
+  return (
+    <line
+      x1={x1}
+      y1={y1}
+      x2={x2}
+      y2={y2}
+      className={`war-graph-edge${dimmed ? " war-graph-dim" : ""}`}
+    />
+  );
+});
+
+const GraphCrossEdge = memo(function GraphCrossEdge({
+  x1,
+  y1,
+  x2,
+  y2,
+  label,
+  dimmed,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  label: string;
+  dimmed: boolean;
+}) {
+  return (
+    <g className={dimmed ? "war-graph-dim" : undefined}>
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        className="war-graph-cross-edge"
+      />
+      <title>{label}</title>
+    </g>
+  );
+});
+
+const TaskGraphNode = memo(function TaskGraphNode({
+  node,
+  x,
+  y,
+  dimmed,
+  onDown,
+  onMove,
+  onEnd,
+  onHover,
+}: {
+  node: GraphTaskNode;
+  x: number;
+  y: number;
+  dimmed: boolean;
+  onDown: NodeDownHandler;
+  onMove: NodeMoveHandler;
+  onEnd: NodeEndHandler;
+  onHover: (projectId: string | null) => void;
+}) {
+  return (
+    <g
+      transform={`translate(${x} ${y})`}
+      className={`war-task-node${dimmed ? " war-graph-dim" : ""}`}
+      onPointerDown={(event) =>
+        onDown(event, `t:${node.task.id}`, node.projectId)
+      }
+      onPointerMove={onMove}
+      onPointerUp={onEnd}
+      onPointerCancel={onEnd}
+      onPointerEnter={() => onHover(node.projectId)}
+      onPointerLeave={() => onHover(null)}
+    >
+      <circle r="27" />
+      <text textAnchor="middle" y="4">
+        {node.task.title.slice(0, 4)}
+      </text>
+      <title>
+        {node.task.title} · {node.task.owner_display_name}
+      </title>
+    </g>
+  );
+});
+
+const ProjectGraphNode = memo(function ProjectGraphNode({
+  node,
+  x,
+  y,
+  dimmed,
+  onDown,
+  onMove,
+  onEnd,
+  onHover,
+  onSelect,
+}: {
+  node: GraphProjectNode;
+  x: number;
+  y: number;
+  dimmed: boolean;
+  onDown: NodeDownHandler;
+  onMove: NodeMoveHandler;
+  onEnd: NodeEndHandler;
+  onHover: (projectId: string | null) => void;
+  onSelect: (project: DashboardProject) => void;
+}) {
+  return (
+    <g
+      transform={`translate(${x} ${y})`}
+      className={`war-project-node${dimmed ? " war-graph-dim" : ""}`}
+      onPointerDown={(event) =>
+        onDown(event, `p:${node.project.id}`, node.project.id)
+      }
+      onPointerMove={onMove}
+      onPointerUp={(event) => {
+        if (onEnd(event) === false) onSelect(node.project);
+      }}
+      onPointerCancel={onEnd}
+      onPointerEnter={() => onHover(node.project.id)}
+      onPointerLeave={() => onHover(null)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(node.project);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <circle
+        r="54"
+        fill="#fff"
+        stroke={projectColor(node.project.id)}
+        filter="url(#war-node-shadow)"
+      />
+      <text textAnchor="middle" y="-7">
+        {node.project.name.slice(0, 7)}
+      </text>
+      <text textAnchor="middle" y="15" className="war-node-sub">
+        {stageLabel(node.project.business_stage)}
+      </text>
+    </g>
+  );
+});
+
+function GraphScopeHint({
+  projectCount,
+  onOpenFullscreen,
+  onBackToActive,
+}: {
+  projectCount: number;
+  onOpenFullscreen: () => void;
+  onBackToActive: () => void;
+}) {
+  return (
+    <div className="war-graph-scope-hint">
+      <span className="war-graph-scope-hint-mark" aria-hidden="true">
+        <Expand size={22} />
+      </span>
+      <h3>全部项目图谱请在全屏模式查看</h3>
+      <p>
+        当前范围包含 {projectCount} 个项目，节点与连线较多，嵌入面板难以完整展示。
+        全屏模式提供完整画布，同样支持拖拽排版、悬停聚焦、画布缩放与建立任务关联。
+      </p>
+      <div className="war-graph-scope-hint-actions">
+        <button
+          type="button"
+          className="war-primary-button"
+          onClick={onOpenFullscreen}
+        >
+          <Expand size={14} /> 进入全屏查看
+        </button>
+        <button
+          type="button"
+          className="war-secondary-button"
+          onClick={onBackToActive}
+        >
+          返回本周有进展
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GraphFullscreen({
+  projects,
+  links,
+  scope,
+  onScopeChange,
+  onSelectProject,
+  onClose,
+  canCreateRelation,
+  onCreateRelation,
+}: {
+  projects: DashboardProject[];
+  links: Dashboard["task_links"];
+  scope: "active" | "all";
+  onScopeChange: (scope: "active" | "all") => void;
+  onSelectProject: (project: DashboardProject) => void;
+  onClose: () => void;
+  canCreateRelation: boolean;
+  onCreateRelation: () => void;
+}) {
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
+  return (
+    <div
+      className="war-graph-fullscreen"
+      role="dialog"
+      aria-modal="true"
+      aria-label="商机关系图谱全屏视图"
+    >
+      <header className="war-graph-fullscreen-head">
+        <div className="war-room-title-lockup">
+          <span className="war-room-logo">
+            <LogoMark size={21} />
+          </span>
+          <strong>商机关系图谱</strong>
+        </div>
+        <p className="war-graph-fullscreen-sub">
+          拖拽节点重新排版 · 悬停节点聚焦本项目 · 拖动画布平移 · 滚轮缩放
+        </p>
+        <div className="war-graph-fullscreen-tools">
+          <Segmented
+            value={scope}
+            options={[
+              ["active", "本周有进展"],
+              ["all", "所有项目"],
+            ]}
+            onChange={(value) => onScopeChange(value as "active" | "all")}
+          />
+          {canCreateRelation ? (
+            <button
+              type="button"
+              className="war-tool-button"
+              onClick={onCreateRelation}
+            >
+              <Plus size={13} /> 建立任务关联
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="war-secondary-button"
+            onClick={onClose}
+          >
+            <Close size={14} /> 退出全屏
+          </button>
+        </div>
+      </header>
+      <div className="war-graph-fullscreen-body">
+        {projects.length ? (
+          <ProjectGraph
+            projects={projects}
+            links={links}
+            onSelect={onSelectProject}
+            fullscreen
+          />
+        ) : (
+          <EmptyState
+            title="暂无图谱节点"
+            description="当前范围内没有可展示的项目，切换显示范围或调整筛选后再试。"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProjectGraph({
   projects,
   links,
   onSelect,
+  fullscreen = false,
 }: {
   projects: DashboardProject[];
   links: Dashboard["task_links"];
   onSelect: (project: DashboardProject) => void;
+  fullscreen?: boolean;
 }) {
-  const layout = useMemo(() => graphLayout(projects), [projects]);
+  const dims = fullscreen ? GRAPH_DIMS.fullscreen : GRAPH_DIMS.normal;
+  const layout = useMemo(() => graphLayout(projects, dims), [projects, dims]);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
-  const [dragging, setDragging] = useState(false);
-  const drag = useRef<{
+  const [panning, setPanning] = useState(false);
+  const [nodeDragging, setNodeDragging] = useState(false);
+  const [offsets, setOffsets] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+  const [hoverProjectId, setHoverProjectId] = useState<string | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const panDrag = useRef<{
     pointerId: number;
     clientX: number;
     clientY: number;
     originX: number;
     originY: number;
   } | null>(null);
+  const nodeDrag = useRef<{
+    pointerId: number;
+    key: string;
+    projectId: string;
+    clientX: number;
+    clientY: number;
+    baseX: number;
+    baseY: number;
+    moved: boolean;
+  } | null>(null);
+  const viewportRef = useRef(viewport);
+  const offsetsRef = useRef(offsets);
+  const offsetFrame = useRef(0);
+  const pendingOffset = useRef<{ key: string; x: number; y: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  useEffect(() => {
+    offsetsRef.current = offsets;
+  }, [offsets]);
+
+  const scheduleOffset = useCallback((key: string, x: number, y: number) => {
+    pendingOffset.current = { key, x, y };
+    if (offsetFrame.current) return;
+    offsetFrame.current = window.requestAnimationFrame(() => {
+      offsetFrame.current = 0;
+      const pending = pendingOffset.current;
+      pendingOffset.current = null;
+      if (!pending) return;
+      setOffsets((current) => {
+        const previous = current[pending.key];
+        if (previous && previous.x === pending.x && previous.y === pending.y) {
+          return current;
+        }
+        return { ...current, [pending.key]: { x: pending.x, y: pending.y } };
+      });
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (offsetFrame.current) {
+        window.cancelAnimationFrame(offsetFrame.current);
+      }
+    },
+    [],
+  );
+
+  const positions = useMemo(() => {
+    const projectPositions = new Map<string, { x: number; y: number }>();
+    for (const node of layout.projectNodes) {
+      const offset = offsets[`p:${node.project.id}`];
+      projectPositions.set(node.project.id, {
+        x: node.x + (offset?.x ?? 0),
+        y: node.y + (offset?.y ?? 0),
+      });
+    }
+    const taskPositions = new Map<string, { x: number; y: number }>();
+    for (const node of layout.taskNodes) {
+      const offset = offsets[`t:${node.task.id}`];
+      taskPositions.set(node.task.id, {
+        x: node.x + (offset?.x ?? 0),
+        y: node.y + (offset?.y ?? 0),
+      });
+    }
+    return { projectPositions, taskPositions };
+  }, [layout, offsets]);
+
+  const focusTaskIds = useMemo(() => {
+    if (!hoverProjectId) return null;
+    const taskIds = new Set(
+      layout.taskNodes
+        .filter((node) => node.projectId === hoverProjectId)
+        .map((node) => node.task.id),
+    );
+    for (const link of links) {
+      if (taskIds.has(link.source_task_id)) {
+        taskIds.add(link.target_task_id);
+      } else if (taskIds.has(link.target_task_id)) {
+        taskIds.add(link.source_task_id);
+      }
+    }
+    return taskIds;
+  }, [hoverProjectId, layout, links]);
+
+  const handleNodeDown = useCallback<NodeDownHandler>(
+    (event, key, projectId) => {
+      event.stopPropagation();
+      nodeDrag.current = {
+        pointerId: event.pointerId,
+        key,
+        projectId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        baseX: offsetsRef.current[key]?.x ?? 0,
+        baseY: offsetsRef.current[key]?.y ?? 0,
+        moved: false,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setHoverProjectId(projectId);
+      setNodeDragging(true);
+    },
+    [],
+  );
+
+  const handleNodeMove = useCallback<NodeMoveHandler>(
+    (event) => {
+      const active = nodeDrag.current;
+      if (!active || active.pointerId !== event.pointerId) return;
+      const svg = svgRef.current;
+      if (!svg) return;
+      const scale = viewportRef.current.scale;
+      const deltaX =
+        ((event.clientX - active.clientX) * (dims.width / svg.clientWidth)) /
+        scale;
+      const deltaY =
+        ((event.clientY - active.clientY) * (dims.height / svg.clientHeight)) /
+        scale;
+      if (!active.moved && Math.hypot(deltaX, deltaY) > 3) {
+        active.moved = true;
+      }
+      if (active.moved) {
+        scheduleOffset(active.key, active.baseX + deltaX, active.baseY + deltaY);
+      }
+    },
+    [dims, scheduleOffset],
+  );
+
+  const handleNodeEnd = useCallback<NodeEndHandler>((event) => {
+    const active = nodeDrag.current;
+    if (!active || active.pointerId !== event.pointerId) return null;
+    nodeDrag.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    setNodeDragging(false);
+    setHoverProjectId(null);
+    return active.moved;
+  }, []);
+
+  const handleNodeHover = useCallback((projectId: string | null) => {
+    if (nodeDrag.current) return;
+    setHoverProjectId(projectId);
+  }, []);
+
+  const hasCustomLayout = Object.keys(offsets).length > 0;
 
   function zoomBy(delta: number) {
     setViewport((current) => ({
@@ -664,14 +1181,16 @@ function ProjectGraph({
   return (
     <div className="war-graph-wrap">
       <svg
-        className={`war-graph-svg${dragging ? " dragging" : ""}`}
-        viewBox="0 0 1100 650"
+        ref={svgRef}
+        className={`war-graph-svg${panning ? " dragging" : ""}${nodeDragging ? " node-dragging" : ""}`}
+        viewBox={`0 0 ${dims.width} ${dims.height}`}
         role="img"
         aria-label="项目与任务关系图"
         onPointerDown={(event) => {
+          if (nodeDrag.current) return;
           const target = event.target as Element;
           if (target.closest(".war-project-node, .war-task-node")) return;
-          drag.current = {
+          panDrag.current = {
             pointerId: event.pointerId,
             clientX: event.clientX,
             clientY: event.clientY,
@@ -679,42 +1198,42 @@ function ProjectGraph({
             originY: viewport.y,
           };
           event.currentTarget.setPointerCapture(event.pointerId);
-          setDragging(true);
+          setPanning(true);
         }}
         onPointerMove={(event) => {
-          if (!drag.current || drag.current.pointerId !== event.pointerId) {
+          if (!panDrag.current || panDrag.current.pointerId !== event.pointerId) {
             return;
           }
-          const scaleX = 1100 / event.currentTarget.clientWidth;
-          const scaleY = 650 / event.currentTarget.clientHeight;
+          const scaleX = dims.width / event.currentTarget.clientWidth;
+          const scaleY = dims.height / event.currentTarget.clientHeight;
           setViewport((current) => ({
             ...current,
             x:
-              drag.current!.originX +
-              (event.clientX - drag.current!.clientX) * scaleX,
+              panDrag.current!.originX +
+              (event.clientX - panDrag.current!.clientX) * scaleX,
             y:
-              drag.current!.originY +
-              (event.clientY - drag.current!.clientY) * scaleY,
+              panDrag.current!.originY +
+              (event.clientY - panDrag.current!.clientY) * scaleY,
           }));
         }}
         onPointerUp={(event) => {
-          if (drag.current?.pointerId === event.pointerId) {
-            drag.current = null;
+          if (panDrag.current?.pointerId === event.pointerId) {
+            panDrag.current = null;
             event.currentTarget.releasePointerCapture(event.pointerId);
-            setDragging(false);
+            setPanning(false);
           }
         }}
         onPointerCancel={() => {
-          drag.current = null;
-          setDragging(false);
+          panDrag.current = null;
+          setPanning(false);
         }}
         onWheel={(event) => {
           event.preventDefault();
           const rect = event.currentTarget.getBoundingClientRect();
           const pointerX =
-            ((event.clientX - rect.left) / rect.width) * 1100;
+            ((event.clientX - rect.left) / rect.width) * dims.width;
           const pointerY =
-            ((event.clientY - rect.top) / rect.height) * 650;
+            ((event.clientY - rect.top) / rect.height) * dims.height;
           setViewport((current) => {
             const nextScale = clamp(
               current.scale * (event.deltaY > 0 ? 0.9 : 1.1),
@@ -744,77 +1263,92 @@ function ProjectGraph({
         <g
           transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.scale})`}
         >
-          {layout.taskNodes.map((taskNode) => (
-            <line
-              key={`edge-${taskNode.task.id}`}
-              x1={taskNode.projectX}
-              y1={taskNode.projectY}
-              x2={taskNode.x}
-              y2={taskNode.y}
-              className="war-graph-edge"
-            />
-          ))}
-          {links.map((link) => {
-            const source = layout.taskById.get(link.source_task_id);
-            const target = layout.taskById.get(link.target_task_id);
-            if (!source || !target) return null;
+          {layout.taskNodes.map((taskNode) => {
+            const projectPosition = positions.projectPositions.get(
+              taskNode.projectId,
+            );
+            const taskPosition = positions.taskPositions.get(taskNode.task.id);
+            if (!projectPosition || !taskPosition) return null;
             return (
-              <g key={link.id}>
-                <line
-                  x1={source.x}
-                  y1={source.y}
-                  x2={target.x}
-                  y2={target.y}
-                  className="war-graph-cross-edge"
-                />
-                <title>{link.label}</title>
-              </g>
+              <GraphEdge
+                key={`edge-${taskNode.task.id}`}
+                x1={projectPosition.x}
+                y1={projectPosition.y}
+                x2={taskPosition.x}
+                y2={taskPosition.y}
+                dimmed={
+                  focusTaskIds !== null &&
+                  !focusTaskIds.has(taskNode.task.id)
+                }
+              />
             );
           })}
-          {layout.taskNodes.map((node) => (
-            <g
-              key={node.task.id}
-              transform={`translate(${node.x} ${node.y})`}
-              className="war-task-node"
-            >
-              <circle r="27" />
-              <text textAnchor="middle" y="4">
-                {node.task.title.slice(0, 4)}
-              </text>
-              <title>
-                {node.task.title} · {node.task.owner_display_name}
-              </title>
-            </g>
-          ))}
-          {layout.projectNodes.map((node) => (
-            <g
-              key={node.project.id}
-              transform={`translate(${node.x} ${node.y})`}
-              className="war-project-node"
-              onClick={() => onSelect(node.project)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onSelect(node.project);
+          {links.map((link) => {
+            const sourcePosition = positions.taskPositions.get(
+              link.source_task_id,
+            );
+            const targetPosition = positions.taskPositions.get(
+              link.target_task_id,
+            );
+            if (!sourcePosition || !targetPosition) return null;
+            return (
+              <GraphCrossEdge
+                key={link.id}
+                x1={sourcePosition.x}
+                y1={sourcePosition.y}
+                x2={targetPosition.x}
+                y2={targetPosition.y}
+                label={link.label}
+                dimmed={
+                  focusTaskIds !== null &&
+                  !(
+                    focusTaskIds.has(link.source_task_id) &&
+                    focusTaskIds.has(link.target_task_id)
+                  )
                 }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <circle
-                r="54"
-                fill="#fff"
-                stroke={projectColor(node.project.id)}
-                filter="url(#war-node-shadow)"
               />
-              <text textAnchor="middle" y="-7">
-                {node.project.name.slice(0, 7)}
-              </text>
-              <text textAnchor="middle" y="15" className="war-node-sub">
-                {stageLabel(node.project.business_stage)}
-              </text>
-            </g>
-          ))}
+            );
+          })}
+          {layout.taskNodes.map((node) => {
+            const position = positions.taskPositions.get(node.task.id);
+            if (!position) return null;
+            return (
+              <TaskGraphNode
+                key={node.task.id}
+                node={node}
+                x={position.x}
+                y={position.y}
+                dimmed={
+                  focusTaskIds !== null && !focusTaskIds.has(node.task.id)
+                }
+                onDown={handleNodeDown}
+                onMove={handleNodeMove}
+                onEnd={handleNodeEnd}
+                onHover={handleNodeHover}
+              />
+            );
+          })}
+          {layout.projectNodes.map((node) => {
+            const position = positions.projectPositions.get(node.project.id);
+            if (!position) return null;
+            return (
+              <ProjectGraphNode
+                key={node.project.id}
+                node={node}
+                x={position.x}
+                y={position.y}
+                dimmed={
+                  hoverProjectId !== null &&
+                  node.project.id !== hoverProjectId
+                }
+                onDown={handleNodeDown}
+                onMove={handleNodeMove}
+                onEnd={handleNodeEnd}
+                onHover={handleNodeHover}
+                onSelect={onSelect}
+              />
+            );
+          })}
         </g>
       </svg>
       <div className="war-graph-controls" aria-label="图谱缩放控制">
@@ -832,7 +1366,14 @@ function ProjectGraph({
           <Reload size={13} />
         </button>
       </div>
-      <span className="war-graph-hint">拖动画布 · 滚轮缩放</span>
+      <div className="war-graph-hint">
+        <span>拖动画布平移 · 滚轮缩放 · 拖拽节点排版 · 悬停聚焦</span>
+        {hasCustomLayout ? (
+          <button type="button" onClick={() => setOffsets({})}>
+            重置排版
+          </button>
+        ) : null}
+      </div>
       <div className="war-graph-legend">
         <span><i className="project" />项目节点</span>
         <span><i className="task" />任务节点</span>
@@ -1903,33 +2444,35 @@ function AvatarStack({
   );
 }
 
-function graphLayout(projects: DashboardProject[]) {
-  const centerX = 550;
-  const centerY = 315;
-  const radiusX = projects.length > 4 ? 360 : 290;
-  const radiusY = projects.length > 4 ? 215 : 175;
-  const projectNodes = projects.map((project, index) => {
-    const angle = (Math.PI * 2 * index) / Math.max(projects.length, 1) - Math.PI / 2;
-    return {
-      project,
-      x: centerX + Math.cos(angle) * radiusX,
-      y: centerY + Math.sin(angle) * radiusY,
-    };
-  });
-  const taskNodes: Array<{
-    task: DashboardTask;
-    x: number;
-    y: number;
-    projectX: number;
-    projectY: number;
-  }> = [];
+function graphLayout(projects: DashboardProject[], dims: GraphDims) {
+  const centerX = dims.width / 2;
+  const centerY = dims.height / 2 - 5;
+  const radiusX =
+    projects.length > 4 ? dims.width * 0.33 : dims.width * 0.26;
+  const radiusY =
+    projects.length > 4 ? dims.height * 0.34 : dims.height * 0.27;
+  const taskSpreadX = dims.width >= 1600 ? 150 : 112;
+  const taskSpreadY = dims.height >= 900 ? 108 : 82;
+  const projectNodes: GraphProjectNode[] = projects.map(
+    (project, index) => {
+      const angle =
+        (Math.PI * 2 * index) / Math.max(projects.length, 1) - Math.PI / 2;
+      return {
+        project,
+        x: centerX + Math.cos(angle) * radiusX,
+        y: centerY + Math.sin(angle) * radiusY,
+      };
+    },
+  );
+  const taskNodes: GraphTaskNode[] = [];
   projectNodes.forEach((node) => {
     node.project.tasks.slice(0, 6).forEach((task, index, tasks) => {
       const angle = (Math.PI * 2 * index) / Math.max(tasks.length, 1);
       taskNodes.push({
         task,
-        x: node.x + Math.cos(angle) * 112,
-        y: node.y + Math.sin(angle) * 82,
+        projectId: node.project.id,
+        x: node.x + Math.cos(angle) * taskSpreadX,
+        y: node.y + Math.sin(angle) * taskSpreadY,
         projectX: node.x,
         projectY: node.y,
       });
