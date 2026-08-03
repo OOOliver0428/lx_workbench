@@ -11,6 +11,7 @@ backup_dir="${temporary_dir}/backups"
 env_file="${temporary_dir}/app.env"
 node_bin="$(command -v node)"
 node_bin_dir="$(dirname -- "${node_bin}")"
+true_bin="$(type -P true)"
 backend_user="$(id -un)"
 backend_group="$(id -gn)"
 
@@ -23,7 +24,7 @@ mkdir -p \
 touch "${env_file}"
 touch "${temporary_dir}/ops.lock"
 ln -s "$(command -v python3)" "${project_dir}/.venv/bin/python"
-ln -s "$(command -v true)" "${project_dir}/.venv/bin/alembic"
+ln -s "${true_bin}" "${project_dir}/.venv/bin/alembic"
 touch "${project_dir}/server.py"
 touch "${project_dir}/frontend/node_modules/vinext/dist/cli.js"
 
