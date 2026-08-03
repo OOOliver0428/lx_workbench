@@ -26,7 +26,7 @@ def list_tasks(
     owner_id: str | None = None,
     status: str | None = None,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[TaskOut]:
     permission_service.assert_permission(db, actor, PermissionKey.TASKS_VIEW)
     return [
@@ -44,9 +44,9 @@ def list_tasks(
 def create_task(
     payload: TaskCreate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TaskOut:
-    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_CREATE)
     return task_out(db, task_service.create_task(db, payload, actor))
 
 
@@ -54,9 +54,9 @@ def create_task(
 def create_task_relation(
     payload: TaskRelationCreate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TaskRelationOut:
-    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_EDIT)
     relation = dashboard_service.create_task_relation(db, payload, actor)
     return TaskRelationOut.model_validate(relation)
 
@@ -65,7 +65,7 @@ def create_task_relation(
 def get_task(
     task_id: str,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TaskOut:
     permission_service.assert_permission(db, actor, PermissionKey.TASKS_VIEW)
     return task_out(db, task_service.get_task(db, task_id))
@@ -76,9 +76,9 @@ def update_task(
     task_id: str,
     payload: TaskUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TaskOut:
-    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_EDIT)
     task = task_service.get_task(db, task_id)
     return task_out(db, task_service.update_task(db, task, payload, actor))
 
@@ -88,9 +88,9 @@ def transition_task(
     task_id: str,
     payload: TaskTransition,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TaskOut:
-    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_EDIT)
     task = task_service.get_task(db, task_id)
     return task_out(db, task_service.transition_task(db, task, payload, actor))
 
@@ -100,9 +100,9 @@ def reassign_task(
     task_id: str,
     payload: TaskReassign,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TaskOut:
-    permission_service.assert_permission(db, actor, PermissionKey.TASKS_MANAGE)
+    permission_service.assert_permission(db, actor, PermissionKey.TASKS_EDIT)
     task = task_service.get_task(db, task_id)
     return task_out(
         db,

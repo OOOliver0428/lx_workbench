@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from alembic import command
 from app.config import get_settings
 from app.database import create_database_engine, create_session_factory
+from app.demo_data import seed_demo_data
 from app.identity import normalize_user_identifier
 from app.models import User, UserRole
 from app.security import hash_password
@@ -62,6 +63,30 @@ def create_user(args: argparse.Namespace) -> None:
     print(f"已创建用户 {args.login_name}（{args.role}）")
 
 
+def seed_demo(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    if settings.environment.casefold() == "production" and not args.allow_production:
+        raise SystemExit(
+            "拒绝在 production 环境写入演示数据；如确认需要，请显式添加 --allow-production"
+        )
+    upgrade_database()
+    password = args.password or getpass.getpass("演示账号统一密码: ")
+    if len(password) < 10:
+        raise SystemExit("演示账号密码至少 10 位")
+    engine = create_database_engine(settings)
+    factory = create_session_factory(engine)
+    with factory.begin() as db:
+        summary = seed_demo_data(db, password=password)
+    engine.dispose()
+    print(f"演示数据已准备完成（自然周 {summary['week_start']}）")
+    print(
+        "账号: "
+        + ", ".join(summary["login_names"])
+        + f"；项目 {summary['projects']} 个；任务 {summary['tasks']} 个；"
+        + f"工作记录 {summary['work_records']} 条；周报 {summary['weekly_reports']} 份"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="团队项目管理 MVP 管理命令")
     subparsers = parser.add_subparsers(dest="command_name", required=True)
@@ -76,12 +101,20 @@ def main() -> None:
     )
     user_parser.add_argument("--password")
     user_parser.add_argument("--no-force-change", action="store_true")
+    demo_parser = subparsers.add_parser(
+        "seed-demo-data",
+        help="创建可重复执行的全量功能测试数据",
+    )
+    demo_parser.add_argument("--password")
+    demo_parser.add_argument("--allow-production", action="store_true")
 
     args = parser.parse_args()
     if args.command_name == "upgrade-db":
         upgrade_database()
     elif args.command_name == "create-user":
         create_user(args)
+    elif args.command_name == "seed-demo-data":
+        seed_demo(args)
 
 
 if __name__ == "__main__":

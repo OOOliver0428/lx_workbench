@@ -28,7 +28,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 def ai_status(
     request: Request,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AIStatusOut:
     permission_service.assert_any_permission(
         db,
@@ -46,7 +46,7 @@ def ai_status(
 @router.get("/providers", response_model=list[AIProviderOptionOut])
 def ai_providers(
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[AIProviderOptionOut]:
     permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     return ai_service.list_providers()
@@ -56,7 +56,7 @@ def ai_providers(
 def ai_configuration(
     request: Request,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AIConfigurationOut:
     permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     return ai_service.get_configuration(db, request.app.state.settings)
@@ -67,7 +67,7 @@ def test_ai_configuration(
     payload: AIConfigurationTestRequest,
     request: Request,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AIConfigurationTestOut:
     permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     result = ai_service.test_configuration(request.app.state.settings, payload)
@@ -92,7 +92,7 @@ def save_ai_configuration(
     payload: AIConfigurationSaveRequest,
     request: Request,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AIConfigurationOut:
     permission_service.assert_permission(db, actor, PermissionKey.AI_CONFIG_MANAGE)
     previous = db.get(AIProviderConfig, ai_service.PRIMARY_CONFIG_ID)
@@ -134,7 +134,7 @@ def ai_chat(
     payload: AIChatRequest,
     request: Request,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AIChatOut:
     permission_service.assert_permission(db, actor, PermissionKey.AI_USE)
     result = ai_service.chat(db, request.app.state.settings, payload, actor)

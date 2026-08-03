@@ -9,11 +9,15 @@ import type {
   AuthContext,
   AvatarOption,
   DuplicateCandidate,
+  Opportunity,
   Project,
+  ProjectMergePreview,
+  ProjectMergeResult,
   ProjectSummary,
   ProjectTag,
   Task,
   User,
+  UserCandidate,
   CurrentWeeklyReport,
   Dashboard,
   TeamWeeklySummary,
@@ -65,6 +69,18 @@ export class ApiClientError extends Error {
     this.details = body.details;
     this.requestId = body.request_id;
   }
+}
+
+export function apiErrorMessage(caught: unknown, fallback: string) {
+  if (!(caught instanceof ApiClientError)) return fallback;
+  const retryHint =
+    caught.status === 409
+      ? " 数据已被其他人更新，请刷新最新版本后重试。"
+      : "";
+  const requestHint = caught.requestId
+    ? `（请求编号：${caught.requestId}）`
+    : "";
+  return `${caught.message}${retryHint}${requestHint}`;
 }
 
 export function setCsrfToken(value: string) {
@@ -139,7 +155,12 @@ export const api = {
       }),
   },
   users: {
-    list: () => request<User[]>("/api/v1/users"),
+    list: (includeInactive = false) =>
+      request<User[]>(
+        `/api/v1/users${includeInactive ? "?include_inactive=true" : ""}`,
+      ),
+    candidates: () =>
+      request<UserCandidate[]>("/api/v1/users/candidates"),
     permissionCatalog: () =>
       request<PermissionDefinition[]>("/api/v1/users/permissions/catalog"),
     permissions: (id: string) =>
@@ -193,14 +214,35 @@ export const api = {
       }),
   },
   tags: {
-    list: () => request<ProjectTag[]>("/api/v1/project-tags"),
+    list: (includeInactive = false) =>
+      request<ProjectTag[]>(
+        `/api/v1/project-tags${
+          includeInactive ? "?include_inactive=true" : ""
+        }`,
+      ),
     create: (payload: {
       name: string;
       description?: string;
       color?: string;
+      sort_order?: number;
     }) =>
       request<ProjectTag>("/api/v1/project-tags", {
         method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (
+      id: string,
+      payload: {
+        revision: number;
+        name?: string;
+        description?: string | null;
+        color?: string | null;
+        sort_order?: number;
+        is_active?: boolean;
+      },
+    ) =>
+      request<ProjectTag>(`/api/v1/project-tags/${id}`, {
+        method: "PATCH",
         body: JSON.stringify(payload),
       }),
   },
@@ -249,12 +291,103 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ revision, value }),
       }),
+    mergePreview: (id: string, targetProjectId: string) =>
+      request<ProjectMergePreview>(
+        `/api/v1/projects/${id}/merge-preview?target_project_id=${encodeURIComponent(
+          targetProjectId,
+        )}`,
+      ),
+    merge: (
+      id: string,
+      payload: {
+        source_revision: number;
+        target_project_id: string;
+        target_revision: number;
+        reason: string;
+      },
+    ) =>
+      request<ProjectMergeResult>(`/api/v1/projects/${id}/merge`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+  },
+  opportunities: {
+    list: () => request<Opportunity[]>("/api/v1/opportunities"),
+    get: (id: string) =>
+      request<Opportunity>(`/api/v1/opportunities/${id}`),
+    create: (payload: {
+      name: string;
+      customer_name: string | null;
+      description: string | null;
+      owner_id: string | null;
+      member_ids: string[];
+    }) =>
+      request<Opportunity>("/api/v1/opportunities", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    recordProgress: (
+      id: string,
+      payload: {
+        revision: number;
+        week_start: string;
+        business_stage: string;
+        attention_status: string;
+        progress_percent: number;
+        summary: string;
+        output_summary: string | null;
+      },
+    ) =>
+      request(`/api/v1/opportunities/${id}/progress`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    convertToProject: (
+      id: string,
+      revision: number,
+      project: Record<string, unknown>,
+    ) =>
+      request<{
+        opportunity_id: string;
+        opportunity_revision: number;
+        project: Project;
+      }>(`/api/v1/opportunities/${id}/convert-to-project`, {
+        method: "POST",
+        body: JSON.stringify({ revision, project }),
+      }),
   },
   tasks: {
     list: (params?: URLSearchParams) =>
       request<Task[]>(`/api/v1/tasks${params?.size ? `?${params}` : ""}`),
     create: (payload: Record<string, unknown>) =>
       request<Task>("/api/v1/tasks", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (
+      id: string,
+      payload: {
+        revision: number;
+        title?: string;
+        description?: string | null;
+        priority?: string;
+        due_date?: string | null;
+        collaborator_ids?: string[];
+      },
+    ) =>
+      request<Task>(`/api/v1/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    reassign: (
+      id: string,
+      payload: {
+        revision: number;
+        owner_id: string;
+        reason: string;
+      },
+    ) =>
+      request<Task>(`/api/v1/tasks/${id}/reassign`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
@@ -291,6 +424,16 @@ export const api = {
       request<WorkRecord>("/api/v1/work-records", {
         method: "POST",
         body: JSON.stringify(payload),
+      }),
+    update: (id: string, payload: Record<string, unknown>) =>
+      request<WorkRecord>(`/api/v1/work-records/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    delete: (id: string, revision: number, reason?: string | null) =>
+      request<void>(`/api/v1/work-records/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ revision, reason: reason || null }),
       }),
   },
   ai: {
@@ -365,8 +508,9 @@ export const api = {
         }`,
       ),
     recordProgress: (
-      projectId: string,
+      opportunityId: string,
       payload: {
+        revision: number;
         week_start: string;
         business_stage: string;
         attention_status: string;
@@ -375,7 +519,7 @@ export const api = {
         output_summary: string | null;
       },
     ) =>
-      request(`/api/v1/projects/${projectId}/progress`, {
+      request(`/api/v1/opportunities/${opportunityId}/progress`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),

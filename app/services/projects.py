@@ -16,10 +16,12 @@ from app.models import (
     ProjectMember,
     ProjectMemberRole,
     ProjectMerge,
+    ProjectProgress,
     ProjectStatus,
     ProjectTag,
     ProjectTagAssignment,
     Task,
+    TaskRelation,
     User,
     UserRole,
     WorkRecord,
@@ -698,6 +700,14 @@ def merge_preview(db: Session, source: Project, target: Project) -> ProjectMerge
         db.scalars(select(ProjectAlias.value).where(ProjectAlias.project_id == source.id)).all()
     )
     aliases.insert(0, source.name)
+    source_task_ids = select(Task.id).where(
+        Task.project_id == source.id,
+        Task.deleted_at.is_(None),
+    )
+    target_task_ids = select(Task.id).where(
+        Task.project_id == target.id,
+        Task.deleted_at.is_(None),
+    )
     return ProjectMergePreview(
         source_project_id=source.id,
         target_project_id=target.id,
@@ -720,6 +730,28 @@ def merge_preview(db: Session, source: Project, target: Project) -> ProjectMerge
             select(func.count(Deliverable.id)).where(
                 Deliverable.project_id == source.id,
                 Deliverable.deleted_at.is_(None),
+            )
+        )
+        or 0,
+        progress_count=db.scalar(
+            select(func.count(ProjectProgress.id)).where(
+                ProjectProgress.project_id == source.id
+            )
+        )
+        or 0,
+        invalidated_task_relation_count=db.scalar(
+            select(func.count(TaskRelation.id)).where(
+                TaskRelation.deleted_at.is_(None),
+                or_(
+                    (
+                        TaskRelation.source_task_id.in_(source_task_ids)
+                        & TaskRelation.target_task_id.in_(target_task_ids)
+                    ),
+                    (
+                        TaskRelation.source_task_id.in_(target_task_ids)
+                        & TaskRelation.target_task_id.in_(source_task_ids)
+                    ),
+                ),
             )
         )
         or 0,
@@ -754,6 +786,38 @@ def merge_projects(
     target_snapshot = jsonable_snapshot(target, PROJECT_SNAPSHOT_FIELDS)
 
     now = utc_now()
+    source_task_ids = select(Task.id).where(
+        Task.project_id == source.id,
+        Task.deleted_at.is_(None),
+    )
+    target_task_ids = select(Task.id).where(
+        Task.project_id == target.id,
+        Task.deleted_at.is_(None),
+    )
+    # Relations are defined as cross-project edges. Source-to-target edges
+    # become invalid once both endpoints belong to the target project.
+    db.execute(
+        update(TaskRelation)
+        .where(
+            TaskRelation.deleted_at.is_(None),
+            or_(
+                (
+                    TaskRelation.source_task_id.in_(source_task_ids)
+                    & TaskRelation.target_task_id.in_(target_task_ids)
+                ),
+                (
+                    TaskRelation.source_task_id.in_(target_task_ids)
+                    & TaskRelation.target_task_id.in_(source_task_ids)
+                ),
+            ),
+        )
+        .values(
+            deleted_at=now,
+            deleted_by=actor.id,
+            revision=TaskRelation.revision + 1,
+            updated_at=now,
+        )
+    )
     db.execute(
         update(Task)
         .where(Task.project_id == source.id)
@@ -778,6 +842,15 @@ def merge_projects(
         .values(
             project_id=target.id,
             revision=Deliverable.revision + 1,
+            updated_at=now,
+        )
+    )
+    db.execute(
+        update(ProjectProgress)
+        .where(ProjectProgress.project_id == source.id)
+        .values(
+            project_id=target.id,
+            revision=ProjectProgress.revision + 1,
             updated_at=now,
         )
     )
@@ -870,6 +943,10 @@ def merge_projects(
             "task_count": preview.task_count,
             "work_record_count": preview.work_record_count,
             "deliverable_count": preview.deliverable_count,
+            "progress_count": preview.progress_count,
+            "invalidated_task_relation_count": (
+                preview.invalidated_task_relation_count
+            ),
             "child_project_count": preview.child_project_count,
             "member_count": preview.new_member_count,
             "tag_count": preview.new_tag_count,

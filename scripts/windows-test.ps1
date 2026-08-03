@@ -2,7 +2,15 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet("start", "stop", "restart", "status")]
-    [string]$Action = "status"
+    [string]$Action = "status",
+
+    [ValidateRange(1, 65535)]
+    [int]$BackendPort = 0,
+
+    [ValidateRange(1, 65535)]
+    [int]$FrontendPort = 0,
+
+    [switch]$AutoSelectPorts
 )
 
 Set-StrictMode -Version Latest
@@ -11,10 +19,8 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
 $RunRoot = Join-Path $ProjectRoot ".run\windows-test"
-$BackendPort = 8787
-$FrontendPort = 5174
-$BackendReadyUrl = "http://127.0.0.1:$BackendPort/api/v1/health/ready"
-$FrontendReadyUrl = "http://127.0.0.1:$FrontendPort/"
+$DefaultBackendPort = 8787
+$DefaultFrontendPort = 5174
 
 function Normalize-PathEnvironment {
     # Some terminal hosts inject both Path and PATH. Windows PowerShell's
@@ -56,6 +62,56 @@ function Ensure-RunDirectory {
     }
 }
 
+function Get-EnvironmentFileValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    $pattern = "^\s*$([regex]::Escape($Key))\s*=\s*(?<value>.*)\s*$"
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $match = [regex]::Match($line, $pattern)
+        if ($match.Success) {
+            return $match.Groups["value"].Value.Trim().Trim('"').Trim("'")
+        }
+    }
+    return $null
+}
+
+function Initialize-Ports {
+    if ($BackendPort -eq 0) {
+        $configuredPort = Get-EnvironmentFileValue `
+            -Path (Join-Path $ProjectRoot ".env") `
+            -Key "MVP_SERVER_PORT"
+        [int]$parsedPort = 0
+        if ($null -ne $configuredPort -and
+            [int]::TryParse($configuredPort, [ref]$parsedPort) -and
+            $parsedPort -ge 1 -and
+            $parsedPort -le 65535) {
+            $script:BackendPort = $parsedPort
+        }
+        else {
+            $script:BackendPort = $DefaultBackendPort
+        }
+    }
+
+    if ($FrontendPort -eq 0) {
+        $script:FrontendPort = $DefaultFrontendPort
+    }
+}
+
+function Get-BackendReadyUrl {
+    return "http://127.0.0.1:$BackendPort/api/v1/health/ready"
+}
+
+function Get-FrontendReadyUrl {
+    return "http://127.0.0.1:$FrontendPort/"
+}
+
 function Get-PidFile {
     param([Parameter(Mandatory = $true)][string]$Name)
     return Join-Path $RunRoot "$Name.pid.json"
@@ -72,13 +128,17 @@ function Remove-PidFile {
 function Save-ProcessRecord {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [int]$ListenerPid = 0
     )
 
     $record = [ordered]@{
         name = $Name
         pid = $Process.Id
         start_time_ticks = $Process.StartTime.ToUniversalTime().Ticks
+        port = $Port
+        listener_pid = $ListenerPid
     }
     $record |
         ConvertTo-Json |
@@ -101,6 +161,12 @@ function Get-ManagedProcess {
             Remove-PidFile -Name $Name
             return $null
         }
+        if ($record.PSObject.Properties.Name -contains "port") {
+            $process | Add-Member -NotePropertyName ManagedPort -NotePropertyValue ([int]$record.port) -Force
+        }
+        if ($record.PSObject.Properties.Name -contains "listener_pid") {
+            $process | Add-Member -NotePropertyName ManagedListenerPid -NotePropertyValue ([int]$record.listener_pid) -Force
+        }
         return $process
     }
     catch {
@@ -109,18 +175,62 @@ function Get-ManagedProcess {
     }
 }
 
-function Get-ListenerPid {
+function Get-ListenerInfo {
     param([Parameter(Mandatory = $true)][int]$Port)
 
-    $listener = Get-NetTCPConnection `
+    $listenerPids = @{}
+    $listeners = @(Get-NetTCPConnection `
         -State Listen `
         -LocalPort $Port `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($null -eq $listener) {
-        return $null
+        -ErrorAction SilentlyContinue)
+    foreach ($listener in $listeners) {
+        $listenerPids[[int]$listener.OwningProcess] = $true
     }
-    return [int]$listener.OwningProcess
+
+    # Get-NetTCPConnection can hide listeners in restricted terminal sessions.
+    # netstat still exposes their PID, so use it as a fallback (and deduplicate).
+    $escapedPort = [regex]::Escape([string]$Port)
+    foreach ($line in netstat.exe -ano -p tcp) {
+        $match = [regex]::Match(
+            $line,
+            "^\s*TCP\s+(?<local>\S+)\s+\S+\s+LISTENING\s+(?<pid>\d+)\s*$"
+        )
+        if ($match.Success -and $match.Groups["local"].Value -match "(?:\]|:)$escapedPort$") {
+            $listenerPids[[int]$match.Groups["pid"].Value] = $true
+        }
+    }
+
+    foreach ($listenerPid in $listenerPids.Keys | Sort-Object) {
+        $process = Get-Process -Id $listenerPid -ErrorAction SilentlyContinue
+        [pscustomobject]@{
+            Pid = [int]$listenerPid
+            ProcessName = if ($null -ne $process) { $process.ProcessName } else { "unknown" }
+            Path = if ($null -ne $process) { $process.Path } else { $null }
+        }
+    }
+}
+
+function Format-ListenerInfo {
+    param([Parameter(Mandatory = $true)]$Listener)
+
+    $pathText = if ([string]::IsNullOrWhiteSpace($Listener.Path)) {
+        ""
+    }
+    else {
+        " ($($Listener.Path))"
+    }
+    return "PID $($Listener.Pid) [$($Listener.ProcessName)]$pathText"
+}
+
+function Find-AvailablePort {
+    param([Parameter(Mandatory = $true)][int]$StartingPort)
+
+    for ($candidate = $StartingPort; $candidate -le 65535; $candidate++) {
+        if (@(Get-ListenerInfo -Port $candidate).Count -eq 0) {
+            return $candidate
+        }
+    }
+    throw "No available TCP port was found from $StartingPort through 65535."
 }
 
 function Assert-PortAvailable {
@@ -129,9 +239,10 @@ function Assert-PortAvailable {
         [Parameter(Mandatory = $true)][int]$Port
     )
 
-    $listenerPid = Get-ListenerPid -Port $Port
-    if ($null -ne $listenerPid) {
-        throw "$Name cannot start: port $Port is already used by unmanaged PID $listenerPid."
+    $listeners = @(Get-ListenerInfo -Port $Port)
+    if ($listeners.Count -gt 0) {
+        $owners = $listeners | ForEach-Object { Format-ListenerInfo -Listener $_ }
+        throw "$Name cannot start: port $Port is already used by $($owners -join '; '). Use a different port or pass -AutoSelectPorts."
     }
 }
 
@@ -152,6 +263,7 @@ function Wait-Endpoint {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][int]$Port,
         [int]$TimeoutSeconds = 45
     )
 
@@ -161,8 +273,9 @@ function Wait-Endpoint {
         if ($Process.HasExited) {
             throw "$Name exited before becoming ready."
         }
-        if (Test-Endpoint -Url $Url) {
-            return
+        $listeners = @(Get-ListenerInfo -Port $Port)
+        if ($listeners.Count -gt 0 -and (Test-Endpoint -Url $Url)) {
+            return $listeners[0]
         }
         Start-Sleep -Milliseconds 500
     }
@@ -201,6 +314,13 @@ function Start-Backend {
         return
     }
 
+    if ($AutoSelectPorts) {
+        $selectedPort = Find-AvailablePort -StartingPort $BackendPort
+        if ($selectedPort -ne $BackendPort) {
+            Write-Host "Backend port $BackendPort is in use; using $selectedPort."
+            $script:BackendPort = $selectedPort
+        }
+    }
     Assert-PortAvailable -Name "Backend" -Port $BackendPort
     $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $python)) {
@@ -233,11 +353,20 @@ function Start-Backend {
         -RedirectStandardError (Join-Path $RunRoot "backend.err.log") `
         -WindowStyle Hidden `
         -PassThru
-    Save-ProcessRecord -Name "backend" -Process $process
+    Save-ProcessRecord -Name "backend" -Process $process -Port $BackendPort
 
     try {
-        Wait-Endpoint -Name "Backend" -Url $BackendReadyUrl -Process $process
-        Write-Host "Backend ready: $BackendReadyUrl (PID $($process.Id))"
+        $listener = Wait-Endpoint `
+            -Name "Backend" `
+            -Url (Get-BackendReadyUrl) `
+            -Process $process `
+            -Port $BackendPort
+        Save-ProcessRecord `
+            -Name "backend" `
+            -Process $process `
+            -Port $BackendPort `
+            -ListenerPid $listener.Pid
+        Write-Host "Backend ready: $(Get-BackendReadyUrl) (launcher PID $($process.Id), listener $(Format-ListenerInfo -Listener $listener))"
     }
     catch {
         Show-ErrorLog -Name "backend"
@@ -253,6 +382,13 @@ function Start-Frontend {
         return
     }
 
+    if ($AutoSelectPorts) {
+        $selectedPort = Find-AvailablePort -StartingPort $FrontendPort
+        if ($selectedPort -ne $FrontendPort) {
+            Write-Host "Frontend port $FrontendPort is in use; using $selectedPort."
+            $script:FrontendPort = $selectedPort
+        }
+    }
     Assert-PortAvailable -Name "Frontend" -Port $FrontendPort
     $npm = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
     if ($null -eq $npm) {
@@ -268,19 +404,46 @@ function Start-Frontend {
     }
 
     Reset-LogFiles -Name "frontend"
-    $process = Start-Process `
-        -FilePath $npm.Source `
-        -ArgumentList @("run", "dev") `
-        -WorkingDirectory $FrontendRoot `
-        -RedirectStandardOutput (Join-Path $RunRoot "frontend.out.log") `
-        -RedirectStandardError (Join-Path $RunRoot "frontend.err.log") `
-        -WindowStyle Hidden `
-        -PassThru
-    Save-ProcessRecord -Name "frontend" -Process $process
+    $previousApiBase = [Environment]::GetEnvironmentVariable(
+        "MVP_INTERNAL_API_BASE_URL",
+        [System.EnvironmentVariableTarget]::Process
+    )
+    [Environment]::SetEnvironmentVariable(
+        "MVP_INTERNAL_API_BASE_URL",
+        "http://127.0.0.1:$BackendPort",
+        [System.EnvironmentVariableTarget]::Process
+    )
+    try {
+        $process = Start-Process `
+            -FilePath $npm.Source `
+            -ArgumentList @("run", "dev", "--", "--port", "$FrontendPort", "--strictPort") `
+            -WorkingDirectory $FrontendRoot `
+            -RedirectStandardOutput (Join-Path $RunRoot "frontend.out.log") `
+            -RedirectStandardError (Join-Path $RunRoot "frontend.err.log") `
+            -WindowStyle Hidden `
+            -PassThru
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            "MVP_INTERNAL_API_BASE_URL",
+            $previousApiBase,
+            [System.EnvironmentVariableTarget]::Process
+        )
+    }
+    Save-ProcessRecord -Name "frontend" -Process $process -Port $FrontendPort
 
     try {
-        Wait-Endpoint -Name "Frontend" -Url $FrontendReadyUrl -Process $process
-        Write-Host "Frontend ready: $FrontendReadyUrl (PID $($process.Id))"
+        $listener = Wait-Endpoint `
+            -Name "Frontend" `
+            -Url (Get-FrontendReadyUrl) `
+            -Process $process `
+            -Port $FrontendPort
+        Save-ProcessRecord `
+            -Name "frontend" `
+            -Process $process `
+            -Port $FrontendPort `
+            -ListenerPid $listener.Pid
+        Write-Host "Frontend ready: $(Get-FrontendReadyUrl) (launcher PID $($process.Id), listener $(Format-ListenerInfo -Listener $listener))"
     }
     catch {
         Show-ErrorLog -Name "frontend"
@@ -322,7 +485,7 @@ function Start-All {
     }
 
     Write-Host ""
-    Write-Host "Workspace is ready: $FrontendReadyUrl" -ForegroundColor Green
+    Write-Host "Workspace is ready: $(Get-FrontendReadyUrl)" -ForegroundColor Green
     Write-Host "Logs: $RunRoot"
 }
 
@@ -340,15 +503,31 @@ function Show-ServiceStatus {
     )
 
     $managed = Get-ManagedProcess -Name $Name
-    $listenerPid = Get-ListenerPid -Port $Port
+    if ($null -ne $managed -and $managed.PSObject.Properties.Name -contains "ManagedPort") {
+        $Port = [int]$managed.ManagedPort
+        if ($Name -eq "backend") {
+            $Url = "http://127.0.0.1:$Port/api/v1/health/ready"
+        }
+        else {
+            $Url = "http://127.0.0.1:$Port/"
+        }
+    }
+    $listeners = @(Get-ListenerInfo -Port $Port)
     $healthy = Test-Endpoint -Url $Url
 
     if ($null -ne $managed) {
         $healthText = if ($healthy) { "ready" } else { "not ready" }
-        Write-Host "$Name`: managed, PID $($managed.Id), port $Port, $healthText"
+        $listenerText = if ($listeners.Count -gt 0) {
+            $listeners | ForEach-Object { Format-ListenerInfo -Listener $_ }
+        }
+        else {
+            "none"
+        }
+        Write-Host "$Name`: managed launcher PID $($managed.Id), port $Port, $healthText, listener $($listenerText -join '; ')"
     }
-    elseif ($null -ne $listenerPid) {
-        Write-Host "$Name`: unmanaged listener, PID $listenerPid, port $Port"
+    elseif ($listeners.Count -gt 0) {
+        $listenerText = $listeners | ForEach-Object { Format-ListenerInfo -Listener $_ }
+        Write-Host "$Name`: unmanaged listener on port ${Port}: $($listenerText -join '; ')"
     }
     else {
         Write-Host "$Name`: stopped"
@@ -360,14 +539,15 @@ function Show-Status {
     Show-ServiceStatus `
         -Name "backend" `
         -Port $BackendPort `
-        -Url $BackendReadyUrl
+        -Url (Get-BackendReadyUrl)
     Show-ServiceStatus `
         -Name "frontend" `
         -Port $FrontendPort `
-        -Url $FrontendReadyUrl
+        -Url (Get-FrontendReadyUrl)
 }
 
 Normalize-PathEnvironment
+Initialize-Ports
 
 switch ($Action) {
     "start" {

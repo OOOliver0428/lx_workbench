@@ -13,6 +13,6 @@ def live() -> dict[str, bool]:
 
 
 @router.get("/health/ready")
-def ready(db: Session = Depends(get_db)) -> dict[str, object]:
+def ready(db: Session = Depends(get_db, scope="function")) -> dict[str, object]:
     db.execute(text("SELECT 1"))
     return {"ok": True, "database": "ready"}

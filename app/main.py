@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
 from app.config import Settings, get_settings
@@ -36,7 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
         responses={
             status_code: {"model": ErrorResponse}
-            for status_code in (400, 401, 403, 404, 409, 422, 429, 502, 503)
+            for status_code in (400, 401, 403, 404, 409, 422, 429, 500, 502, 503)
         },
     )
     app.state.settings = settings
@@ -113,6 +114,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={
                 "code": "DATABASE_CONSTRAINT_CONFLICT",
                 "message": "数据与现有记录冲突",
+                "request_id": getattr(request.state, "request_id", None),
+                "details": None,
+            },
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error_handler(
+        request: Request,
+        error: StarletteHTTPException,
+    ) -> JSONResponse:
+        code, message = {
+            404: ("RESOURCE_NOT_FOUND", "请求的资源不存在"),
+            405: ("METHOD_NOT_ALLOWED", "请求方法不被允许"),
+        }.get(
+            error.status_code,
+            ("HTTP_ERROR", "请求无法处理"),
+        )
+        return JSONResponse(
+            status_code=error.status_code,
+            headers=error.headers,
+            content={
+                "code": code,
+                "message": message,
+                "request_id": getattr(request.state, "request_id", None),
+                "details": None,
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error_handler(
+        request: Request,
+        error: Exception,
+    ) -> JSONResponse:
+        logging.getLogger(__name__).error(
+            "unhandled application error",
+            exc_info=error,
+        )
+        return JSONResponse(
+            status_code=500,
+            headers={
+                "X-Request-ID": getattr(request.state, "request_id", ""),
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+                "Referrer-Policy": "no-referrer",
+                "Cache-Control": "no-store",
+            },
+            content={
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "系统暂时无法处理该请求",
                 "request_id": getattr(request.state, "request_id", None),
                 "details": None,
             },

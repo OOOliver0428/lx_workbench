@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.models import ProjectProgress, TaskRelation
 from tests.conftest import login
 
 
@@ -228,6 +229,41 @@ def test_project_merge_moves_linked_entities_atomically(api: dict) -> None:
     )
     assert task_response.status_code == 201, task_response.text
     task = task_response.json()
+    target_task_response = client.post(
+        "/api/v1/tasks",
+        headers={"X-CSRF-Token": member_csrf},
+        json={
+            "project_id": target["id"],
+            "title": "目标项目关联任务",
+            "owner_id": api["users"]["member"],
+        },
+    )
+    assert target_task_response.status_code == 201, target_task_response.text
+    target_task = target_task_response.json()
+    relation_response = client.post(
+        "/api/v1/tasks/relations",
+        headers={"X-CSRF-Token": member_csrf},
+        json={
+            "source_task_id": task["id"],
+            "target_task_id": target_task["id"],
+            "label": "合并后应失效的跨项目关系",
+        },
+    )
+    assert relation_response.status_code == 201, relation_response.text
+    relation = relation_response.json()
+    progress_response = client.post(
+        f"/api/v1/projects/{source['id']}/progress",
+        headers={"X-CSRF-Token": member_csrf},
+        json={
+            "week_start": "2026-07-27",
+            "business_stage": "requirement",
+            "attention_status": "steady",
+            "progress_percent": 30,
+            "summary": "合并前的项目进展",
+        },
+    )
+    assert progress_response.status_code == 201, progress_response.text
+    progress = progress_response.json()
 
     record_response = client.post(
         "/api/v1/work-records",
@@ -252,6 +288,8 @@ def test_project_merge_moves_linked_entities_atomically(api: dict) -> None:
     assert preview.json()["task_count"] == 1
     assert preview.json()["work_record_count"] == 1
     assert preview.json()["deliverable_count"] == 1
+    assert preview.json()["progress_count"] == 1
+    assert preview.json()["invalidated_task_relation_count"] == 1
 
     merged = client.post(
         f"/api/v1/projects/{source['id']}/merge",
@@ -278,7 +316,18 @@ def test_project_merge_moves_linked_entities_atomically(api: dict) -> None:
     assert moved_record["project_id"] == target["id"]
     assert moved_record["revision"] == record["revision"] + 1
     assert moved_record["deliverables"][0]["project_id"] == target["id"]
+    assert merged.json()["moved_counts"]["progress_count"] == 1
+    assert merged.json()["moved_counts"]["invalidated_task_relation_count"] == 1
     assert merged_source["status"] == "merged"
     assert merged_source["merged_into_project_id"] == target["id"]
+    with api["app"].state.session_factory() as db:
+        moved_progress = db.get(ProjectProgress, progress["id"])
+        retired_relation = db.get(TaskRelation, relation["id"])
+        assert moved_progress
+        assert moved_progress.project_id == target["id"]
+        assert moved_progress.revision == progress["revision"] + 1
+        assert retired_relation
+        assert retired_relation.deleted_at is not None
+        assert retired_relation.deleted_by == api["users"]["leader"]
     assert {tag["name"] for tag in merged_target["tags"]} == {"商机", "改造"}
     assert "重复项目旧名称" in {alias["value"] for alias in merged_target["aliases"]}

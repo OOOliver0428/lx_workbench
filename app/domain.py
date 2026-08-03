@@ -35,6 +35,11 @@ def new_project_code() -> str:
     return f"PRJ-{date_part}-{uuid.uuid4().hex[:8].upper()}"
 
 
+def new_opportunity_code() -> str:
+    date_part = datetime.now(UTC).strftime("%Y%m%d")
+    return f"OPP-{date_part}-{uuid.uuid4().hex[:8].upper()}"
+
+
 def is_privileged(user: User) -> bool:
     return user.role in PRIVILEGED_ROLES
 

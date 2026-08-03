@@ -53,6 +53,14 @@ class UserOut(ORMModel):
     revision: int
 
 
+class UserCandidateOut(ORMModel):
+    """Minimum user fields exposed for business assignment pickers."""
+
+    id: str
+    display_name: str
+    avatar_key: str | None
+
+
 class AuthContextOut(BaseModel):
     user: UserOut
     permissions: list[str]
@@ -67,6 +75,7 @@ class PermissionDefinitionOut(BaseModel):
     label: str
     description: str
     system_admin_assignable: bool
+    requires_team_scope: bool
 
 
 class UserPermissionsOut(BaseModel):
@@ -225,6 +234,99 @@ class ProjectCreate(BaseModel):
         return list(dict.fromkeys(value))
 
 
+class OpportunityMemberOut(BaseModel):
+    id: str
+    display_name: str
+    avatar_key: str | None
+
+
+class OpportunityCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    customer_name: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=10000)
+    owner_id: str | None = None
+    member_ids: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("member_ids")
+    @classmethod
+    def unique_members(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
+class OpportunityProgressCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    week_start: date
+    business_stage: BusinessStage
+    attention_status: AttentionStatus
+    progress_percent: int = Field(ge=0, le=100)
+    summary: str = Field(min_length=1, max_length=10000)
+    output_summary: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("week_start")
+    @classmethod
+    def week_must_start_on_monday(cls, value: date) -> date:
+        if value.weekday() != 0:
+            raise ValueError("week_start 必须是周一")
+        return value
+
+
+class OpportunityProgressOut(ORMModel):
+    id: str
+    opportunity_id: str
+    week_start: date
+    business_stage: str
+    attention_status: str
+    progress_percent: int
+    summary: str
+    output_summary: str | None
+    created_by: str
+    created_at: datetime
+    revision: int
+
+
+class OpportunityOut(ORMModel):
+    id: str
+    code: str
+    name: str
+    customer_name: str | None
+    description: str | None
+    owner_id: str
+    owner_display_name: str = ""
+    owner_avatar_key: str | None = None
+    status: str
+    business_stage: str
+    attention_status: str
+    progress_percent: int
+    linked_project_id: str | None
+    linked_project_code: str | None = None
+    linked_project_name: str | None = None
+    linked_project_status: str | None = None
+    project_linked_at: datetime | None
+    members: list[OpportunityMemberOut] = []
+    can_manage: bool = False
+    can_convert: bool = False
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OpportunityConvertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    project: ProjectCreate
+
+
+class OpportunityConversionOut(BaseModel):
+    opportunity_id: str
+    opportunity_revision: int
+    project: ProjectOut
+
+
 class ProjectUpdate(BaseModel):
     revision: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -284,6 +386,8 @@ class ProjectMergePreview(BaseModel):
     task_count: int
     work_record_count: int
     deliverable_count: int
+    progress_count: int
+    invalidated_task_relation_count: int
     child_project_count: int
     new_member_count: int
     new_tag_count: int
@@ -512,7 +616,7 @@ class DashboardMemberOut(BaseModel):
     avatar_key: str | None
     submitted: bool
     submitted_at: datetime | None
-    weekly_minutes: int
+    weekly_minutes: int | None
     submitted_weeks: list[date]
 
 
@@ -564,7 +668,7 @@ class DashboardProjectOut(BaseModel):
     business_stage: str
     attention_status: str
     progress_percent: int
-    weekly_minutes: int
+    weekly_minutes: int | None
     work_summary: str
     output_summary: str
     has_week_progress: bool
@@ -572,6 +676,33 @@ class DashboardProjectOut(BaseModel):
     tasks: list[DashboardTaskOut]
     work_items: list[DashboardWorkItemOut]
     stage_history: list[DashboardStageHistoryOut]
+
+
+class DashboardOpportunityOut(BaseModel):
+    id: str
+    code: str
+    name: str
+    customer_name: str | None
+    description: str | None
+    owner_id: str
+    owner_display_name: str
+    owner_avatar_key: str | None
+    can_manage: bool
+    can_convert: bool
+    status: str
+    business_stage: str
+    attention_status: str
+    progress_percent: int
+    work_summary: str
+    output_summary: str
+    has_week_progress: bool
+    linked_project_id: str | None
+    linked_project_code: str | None
+    linked_project_name: str | None
+    linked_project_status: str | None
+    people: list[DashboardProjectMemberOut]
+    stage_history: list[DashboardStageHistoryOut]
+    revision: int
 
 
 class DashboardDeliverableOut(BaseModel):
@@ -618,8 +749,8 @@ class DashboardStageCountOut(BaseModel):
 
 class DashboardTimelineEventOut(BaseModel):
     id: str
-    project_id: str
-    project_name: str
+    opportunity_id: str
+    opportunity_name: str
     week_start: date
     business_stage: str
     attention_status: str
@@ -652,6 +783,7 @@ class DashboardOut(BaseModel):
     weeks: list[DashboardWeekOut]
     metrics: DashboardMetricsOut
     members: list[DashboardMemberOut]
+    opportunities: list[DashboardOpportunityOut]
     projects: list[DashboardProjectOut]
     deliverables: list[DashboardDeliverableOut]
     task_links: list[DashboardTaskLinkOut]

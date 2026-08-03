@@ -10,7 +10,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -20,13 +19,51 @@ from sqlalchemy import (
     event,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime as SQLAlchemyDateTime
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from app.identity import normalize_user_identifier
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class DateTime(TypeDecorator[datetime]):
+    """Persist UTC and always restore timezone-aware datetimes.
+
+    SQLite ignores ``timezone=True`` and returns naive values. Keeping this
+    compatibility wrapper under the existing model type name avoids a schema
+    migration while making every ORM-loaded timestamp unambiguously UTC.
+    """
+
+    impl = SQLAlchemyDateTime
+    cache_ok = True
+
+    def __init__(self, *, timezone: bool = True) -> None:
+        super().__init__()
+        self.timezone = timezone
+
+    def load_dialect_impl(self, dialect):
+        return dialect.type_descriptor(
+            SQLAlchemyDateTime(timezone=dialect.name != "sqlite")
+        )
+
+    def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        value = value.astimezone(UTC)
+        return value.replace(tzinfo=None) if dialect.name == "sqlite" else value
+
+    def process_result_value(self, value: datetime | None, _dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 def new_id() -> str:
@@ -46,13 +83,17 @@ class UserRole(StrEnum):
 
 class PermissionKey(StrEnum):
     DASHBOARD_OPPORTUNITY_VIEW = "dashboard.opportunity.view"
+    DASHBOARD_OPPORTUNITY_PROGRESS = "dashboard.opportunity.progress"
+    DASHBOARD_OPPORTUNITY_CREATE = "dashboard.opportunity.create"
     DASHBOARD_WORK_VIEW = "dashboard.work.view"
     DASHBOARD_OVERVIEW_VIEW = "dashboard.overview.view"
     DASHBOARD_TEAM_SUMMARY = "dashboard.team_summary.generate"
     PROJECTS_VIEW = "projects.view"
-    PROJECTS_MANAGE = "projects.manage"
+    PROJECTS_EDIT = "projects.edit"
+    PROJECTS_CREATE = "projects.create"
     TASKS_VIEW = "tasks.view"
-    TASKS_MANAGE = "tasks.manage"
+    TASKS_EDIT = "tasks.edit"
+    TASKS_CREATE = "tasks.create"
     WORK_RECORDS_VIEW = "work_records.view"
     WORK_RECORDS_MANAGE = "work_records.manage"
     WEEKLY_REPORTS_VIEW = "weekly_reports.view"
@@ -72,6 +113,13 @@ class ProjectStatus(StrEnum):
     ARCHIVED = "archived"
     REJECTED = "rejected"
     MERGED = "merged"
+
+
+class OpportunityStatus(StrEnum):
+    ACTIVE = "active"
+    WON = "won"
+    LOST = "lost"
+    ARCHIVED = "archived"
 
 
 class ProjectMemberRole(StrEnum):
@@ -123,6 +171,14 @@ class TimestampMixin:
 
 class RevisionMixin:
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    @declared_attr.directive
+    def __mapper_args__(cls) -> dict[str, object]:
+        # Keep the existing API-level revision checks for friendly error details,
+        # while also making the database UPDATE itself conditional on the
+        # originally loaded revision. This closes the race where two sessions
+        # both passed ``assert_revision`` before either one committed.
+        return {"version_id_col": cls.revision}
 
 
 class SoftDeleteMixin:
@@ -297,6 +353,115 @@ class Project(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
             sqlite_where=text("deleted_at IS NULL AND status != 'merged'"),
         ),
         Index("ix_projects_status_deleted", "status", "deleted_at"),
+    )
+
+
+class Opportunity(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
+    """Commercial opportunity kept separate from delivery project master data."""
+
+    __tablename__ = "opportunities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    code: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    customer_name: Mapped[str | None] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=OpportunityStatus.ACTIVE.value
+    )
+    business_stage: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=BusinessStage.LEAD.value
+    )
+    attention_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=AttentionStatus.STEADY.value
+    )
+    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    linked_project_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        unique=True,
+        index=True,
+    )
+    project_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "progress_percent >= 0 AND progress_percent <= 100",
+            name="ck_opportunities_progress_percent",
+        ),
+        Index("ix_opportunities_status_deleted", "status", "deleted_at"),
+    )
+
+
+class OpportunityMember(Base):
+    __tablename__ = "opportunity_members"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    opportunity_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("opportunities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    added_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "opportunity_id",
+            "user_id",
+            name="uq_opportunity_members_opportunity_user",
+        ),
+    )
+
+
+class OpportunityProgress(Base, TimestampMixin, RevisionMixin):
+    """Append-only commercial progress facts for an opportunity."""
+
+    __tablename__ = "opportunity_progress"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    opportunity_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("opportunities.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    week_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    business_stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    attention_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    output_summary: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "progress_percent >= 0 AND progress_percent <= 100",
+            name="ck_opportunity_progress_percent",
+        ),
+        Index(
+            "ix_opportunity_progress_opportunity_week_created",
+            "opportunity_id",
+            "week_start",
+            "created_at",
+        ),
     )
 
 

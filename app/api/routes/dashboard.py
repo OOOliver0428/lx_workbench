@@ -19,7 +19,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 def get_dashboard(
     week_start: date | None = None,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> DashboardOut:
     return dashboard_service.build_dashboard(
         db,
@@ -34,7 +34,7 @@ def generate_team_summary(
     payload: TeamWeeklySummaryGenerate,
     request: Request,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> TeamWeeklySummaryOut:
     summary = dashboard_service.generate_team_summary(
         db,

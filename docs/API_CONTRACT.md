@@ -42,21 +42,29 @@ API 地址或直接读取 CSRF。
 
 ## 权限与可见性
 
-- 权限按用户显式保存。除超级管理员外，角色不自动附带业务权限；新账号默认权限集合为空。
+- 权限按用户显式保存。新账号默认拥有 `projects.view`、`tasks.view`、工作记录查看/维护、
+  个人周报查看/维护和 `ai.use`；个人设置无需额外权限。其他业务及系统权限需另行授权。
 - 超级管理员的有效权限始终是权限目录全集，不依赖数据库授权记录。
 - 超级管理员对其他所有用户永久不可见：不出现在 `GET /api/v1/users`、直属负责人候选、
   项目成员、任务协作者、周报收件范围和权限配置目标中。即使调用者也是超级管理员，
   用户目录仍不返回超级管理员账号。
 - 超级管理员可读取 `GET /api/v1/users/permissions/catalog`，并通过
   `GET/PUT /api/v1/users/{user_id}/permissions` 配置任一非超级管理员账号。
+- `GET /api/v1/users` 仅供具备用户管理权限的账号读取完整账号信息；项目和任务负责人选择器
+  使用 `GET /api/v1/users/candidates`，该接口只返回有效普通账号的 ID、显示名称与头像，
+  不返回登录名、角色、直属 Leader、启停状态、首次改密状态或 revision。
 - 系统管理员具备下级权限配置入口，但只能读取和修改 `member`、`team_leader` 的业务权限；
   `settings.users.manage`、`settings.tags.manage`、`settings.ai.manage`、
   `settings.audit.view` 等系统级权限只能由超级管理员授予。系统管理员不能把角色提升为
   系统管理员，也不能配置系统管理员或超级管理员。
 - 权限更新是全量替换，并携带目标用户当前 `revision` 做乐观锁校验；变更写入审计日志。
-- 管理权限会隐含对应查看权限，例如 `projects.manage` 隐含 `projects.view`；
-  `dashboard.team_summary.generate` 隐含 `dashboard.work.view`。接口返回
-  `assigned_permissions` 与展开后的 `effective_permissions`，避免前端自行推导。
+- 权限按层级展开：商机为 `dashboard.opportunity.view` →
+  `dashboard.opportunity.progress` → `dashboard.opportunity.create`，项目和任务分别为
+  `view` → `edit` → `create`。`dashboard.team_summary.generate` 隐含
+  `dashboard.work.view`。保存高级权限时服务端同步持久化全部前置权限；取消低级权限时前端
+  同步取消依赖它的高级权限。
+- `dashboard.work.view` 与 `dashboard.team_summary.generate` 仅在目标账号至少为
+  `team_leader` 且存在有效直属成员时可授予并生效；直属关系或角色不再满足条件时立即失效。
 
 ## 账号与个人设置
 
@@ -101,18 +109,22 @@ API 地址或直接读取 CSRF。
 - 工作记录响应同时返回 `author_id`、`author_display_name`、`author_avatar_key`、
   `last_edited_by`、`last_editor_display_name` 和 `last_editor_avatar_key`。超级管理员查看
   多人记录时，前端必须显示记录人与其头像；发生代编辑时还必须显示最后代编辑人。
+- `GET /api/v1/work-records?current_week_only=true` 只返回当前上海自然周（周一至周日）的记录，
+  可与项目和待归集筛选组合使用。
 
 ## 作战台聚合
 
 - `GET /api/v1/dashboard?week_start=YYYY-MM-DD` 返回所选自然周及最近五周的商机、任务、工作记录摘要、交付物、成员周报提交状态、阶段分布和趋势；`week_start` 会归一化到周一。
-- 作战台不接受浏览器提交统计结果。项目、任务、工作记录、交付物和已提交周报仍是唯一业务事实，服务端负责聚合并执行数据范围校验。
+- 作战台不接受浏览器提交统计结果。商机、项目、任务、工作记录、交付物和已提交周报均由服务端聚合并执行数据范围校验。
 - `dashboard.opportunity.view`、`dashboard.work.view` 和 `dashboard.overview.view` 分别控制
-  “商机追踪”“工作管理”“周期总览”。除超级管理员外不按角色预设可见页签；没有任何作战台
+  “商机追踪”“工作管理”“周期总览”；商机录入和新建使用各自的递增权限。没有任何作战台
   视图权限时，聚合接口返回 403。
 - 原始工作记录始终只对本人和超级管理员可见。个人周报是否提交、直属负责人关系和作战台
   视图权限都不会扩大原始记录、正文或工时的可见范围。
-- `POST /api/v1/projects/{project_id}/progress` 追加一条指定周的项目阶段、关注状态、进度和摘要事实，不覆盖历史。仅项目负责人和管理角色可写入。
-- `POST /api/v1/tasks/relations` 建立不同项目任务之间的关联。调用者必须同时具备两个项目的管理权限，同一任务对不可重复关联。
+- `POST /api/v1/opportunities` 要求 `dashboard.opportunity.create`；`POST /api/v1/opportunities/{opportunity_id}/progress` 要求 `dashboard.opportunity.progress`，追加指定周的商业阶段、关注状态、进度和摘要事实，不覆盖历史，并要求提交商机最新 `revision`。
+- 商机达到 `solution_exchange`（方案交流）或后续阶段后，`POST /api/v1/opportunities/{opportunity_id}/convert-to-project` 在同一事务中创建项目、复制商机成员并建立一对一关联；重复转换、陈旧版本或项目创建失败均不会留下半成品关联。
+- 商业阶段只归商机所有；项目关系图及任务、工作记录和交付物仍以项目为主数据。历史项目和项目进展由 Alembic 迁移为关联商机及商机进展，避免升级丢数。
+- `POST /api/v1/tasks/relations` 要求 `tasks.edit` 并建立不同项目任务之间的关联。调用者仍须同时具备两个项目的对象级管理资格，同一任务对不可重复关联。
 - `POST /api/v1/dashboard/team-summary?week_start=YYYY-MM-DD` 只读取该周已正式提交、且当前负责人有权读取的个人周报。默认要求范围内全员提交；`force=true` 可在缺交时继续生成，并永久记录实际人数、预期人数和强制标记。该接口要求 `dashboard.team_summary.generate`；历史汇总按生成负责人隔离，成员或其他负责人不能通过作战台读取其正文。
 - `GET /api/v1/weekly-reports/team-summaries` 同样要求
   `dashboard.team_summary.generate`，且只返回当前用户自己生成的历史团队周报。

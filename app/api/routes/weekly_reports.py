@@ -19,7 +19,7 @@ router = APIRouter(prefix="/weekly-reports", tags=["weekly-reports"])
 @router.get("/current", response_model=WeeklyReportCurrentOut)
 def get_current_weekly_report(
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WeeklyReportCurrentOut:
     permission_service.assert_permission(db, actor, PermissionKey.WEEKLY_REPORTS_VIEW)
     week_start, week_end = report_service.current_week_bounds()
@@ -34,7 +34,7 @@ def get_current_weekly_report(
 @router.get("", response_model=list[WeeklyReportOut])
 def list_own_weekly_reports(
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[WeeklyReportOut]:
     permission_service.assert_permission(db, actor, PermissionKey.WEEKLY_REPORTS_VIEW)
     return [
@@ -46,7 +46,7 @@ def list_own_weekly_reports(
 @router.get("/team-summaries", response_model=list[TeamWeeklySummaryOut])
 def list_team_weekly_summaries(
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[TeamWeeklySummaryOut]:
     permission_service.assert_permission(
         db,
@@ -64,7 +64,7 @@ def list_team_weekly_summaries(
 def generate_current_weekly_report(
     request: Request,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WeeklyReportOut:
     permission_service.assert_permission(
         db,
@@ -84,7 +84,7 @@ def save_weekly_report_draft(
     report_id: str,
     payload: WeeklyReportDraftUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WeeklyReportOut:
     permission_service.assert_permission(
         db,
@@ -102,7 +102,7 @@ def submit_weekly_report(
     report_id: str,
     payload: WeeklyReportSubmit,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WeeklyReportOut:
     permission_service.assert_permission(
         db,

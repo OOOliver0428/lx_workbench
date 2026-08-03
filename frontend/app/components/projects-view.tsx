@@ -2,15 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { api, ApiClientError } from "../api";
+import { api, apiErrorMessage, ApiClientError } from "../api";
 import type {
   DuplicateCandidate,
   Project,
+  ProjectCreationDraft,
+  ProjectMergePreview,
+  ProjectMergeResult,
   ProjectStatus,
   ProjectSummary,
   ProjectTag,
   User,
+  UserCandidate,
 } from "../types";
+import { canManageProjectObject } from "../object-permissions";
 import { AvatarImage } from "./avatar";
 import { ChevronRight, Close, Plus, Search } from "./icons";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
@@ -25,16 +30,30 @@ const transitionOptions: Record<ProjectStatus, ProjectStatus[]> = {
   merged: [],
 };
 
-export function ProjectsView({ canManage }: { canManage: boolean }) {
+export function ProjectsView({
+  canEdit,
+  canCreate,
+  currentUser,
+  creationDraft,
+  onCreationDraftHandled,
+}: {
+  canEdit: boolean;
+  canCreate: boolean;
+  currentUser: User;
+  creationDraft: ProjectCreationDraft | null;
+  onCreationDraftHandled: () => void;
+}) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
   const [tags, setTags] = useState<ProjectTag[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<UserCandidate[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Project | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,12 +62,18 @@ export function ProjectsView({ canManage }: { canManage: boolean }) {
       const params = new URLSearchParams();
       if (search.trim()) params.set("q", search.trim());
       if (status) params.set("status", status);
-      const [projectRows, tagRows, userRows] = await Promise.all([
-        api.projects.list(params),
+      const projectRowsRequest = api.projects.list(params);
+      const allProjectRowsRequest = params.size
+        ? api.projects.list()
+        : projectRowsRequest;
+      const [projectRows, allProjectRows, tagRows, userRows] = await Promise.all([
+        projectRowsRequest,
+        allProjectRowsRequest,
         api.tags.list(),
-        api.users.list(),
+        api.users.candidates(),
       ]);
       setProjects(projectRows);
+      setAllProjects(allProjectRows);
       setTags(tagRows);
       setUsers(userRows);
     } catch (caught) {
@@ -89,7 +114,7 @@ export function ProjectsView({ canManage }: { canManage: boolean }) {
             <h1>项目</h1>
             <p>团队唯一的项目主数据，所有任务与工作记录都从这里建立关联。</p>
           </div>
-          {canManage ? (
+          {canCreate ? (
             <button className="primary-button" onClick={() => setCreateOpen(true)}>
               <Plus size={14} /> 新建项目
             </button>
@@ -194,14 +219,20 @@ export function ProjectsView({ canManage }: { canManage: boolean }) {
         </section>
       </div>
 
-      {createOpen && canManage ? (
+      {(createOpen || creationDraft) && canCreate ? (
         <ProjectCreateModal
-          projects={projects}
+          projects={allProjects}
           tags={tags}
           users={users}
-          onClose={() => setCreateOpen(false)}
+          currentUser={currentUser}
+          creationDraft={creationDraft}
+          onClose={() => {
+            setCreateOpen(false);
+            onCreationDraftHandled();
+          }}
           onCreated={async (project) => {
             setCreateOpen(false);
+            onCreationDraftHandled();
             await load();
             setSelected(project);
           }}
@@ -214,9 +245,45 @@ export function ProjectsView({ canManage }: { canManage: boolean }) {
           projects={projects}
           tags={tags}
           users={users}
-          canManage={canManage}
+          canManage={canManageProjectObject(canEdit, currentUser, selected)}
+          canMerge={
+            canManageProjectObject(canEdit, currentUser, selected) &&
+            ["team_leader", "system_admin", "super_admin"].includes(
+              currentUser.role,
+            ) &&
+            selected.status !== "merged"
+          }
           onClose={() => setSelected(null)}
           onChanged={refreshSelected}
+          onMerge={() => setMergeOpen(true)}
+        />
+      ) : null}
+
+      {selected && mergeOpen ? (
+        <ProjectMergeModal
+          source={selected}
+          projects={allProjects}
+          onClose={() => setMergeOpen(false)}
+          onMerged={async (result) => {
+            setMergeOpen(false);
+            setSelected({
+              ...selected,
+              status: "merged",
+              merged_into_project_id: result.target_project_id,
+              revision: selected.revision + 1,
+            });
+            await load();
+            try {
+              setSelected(await api.projects.get(selected.id));
+            } catch (caught) {
+              setError(
+                apiErrorMessage(
+                  caught,
+                  "项目已合并，但最新详情刷新失败，请重新打开项目。",
+                ),
+              );
+            }
+          }}
         />
       ) : null}
     </>
@@ -227,16 +294,21 @@ function ProjectCreateModal({
   projects,
   tags,
   users,
+  currentUser,
+  creationDraft,
   onClose,
   onCreated,
 }: {
   projects: ProjectSummary[];
   tags: ProjectTag[];
-  users: User[];
+  users: UserCandidate[];
+  currentUser: User;
+  creationDraft: ProjectCreationDraft | null;
   onClose: () => void;
   onCreated: (project: Project) => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(creationDraft?.name ?? "");
+  const [ownerId, setOwnerId] = useState(creationDraft?.owner_id ?? "");
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
   const [allowSimilar, setAllowSimilar] = useState(false);
   const [error, setError] = useState("");
@@ -258,16 +330,25 @@ function ProjectCreateModal({
     const form = new FormData(event.currentTarget);
     const tagIds = form.getAll("tag_ids").map(String);
     try {
-      const project = await api.projects.create({
+      const projectPayload = {
         name: name.trim(),
         description: optional(form.get("description")),
         parent_project_id: optional(form.get("parent_project_id")),
-        owner_id: optional(form.get("owner_id")),
+        owner_id: ownerId || null,
         planned_start_date: optional(form.get("planned_start_date")),
         planned_end_date: optional(form.get("planned_end_date")),
         tag_ids: tagIds,
         allow_similar_name: allowSimilar,
-      });
+      };
+      const project = creationDraft
+        ? (
+            await api.opportunities.convertToProject(
+              creationDraft.opportunity_id,
+              creationDraft.opportunity_revision,
+              projectPayload,
+            )
+          ).project
+        : await api.projects.create(projectPayload);
       onCreated(project);
     } catch (caught) {
       if (caught instanceof ApiClientError) {
@@ -285,8 +366,18 @@ function ProjectCreateModal({
   }
 
   return (
-    <Modal title="建立项目主数据" eyebrow="NEW PROJECT" onClose={onClose} wide>
+    <Modal
+      title={creationDraft ? "从商机创建关联项目" : "建立项目主数据"}
+      eyebrow={creationDraft ? "CREATE & LINK PROJECT" : "NEW PROJECT"}
+      onClose={onClose}
+      wide
+    >
       <form className="modal-form" onSubmit={submit}>
+        {creationDraft ? (
+          <InlineNotice tone="info">
+            商机 {creationDraft.opportunity_code} 已带入；创建成功后将自动建立唯一关联。
+          </InlineNotice>
+        ) : null}
         <div className="form-grid">
           <label className="field field-span-two">
             <span>项目标准名称 *</span>
@@ -327,6 +418,7 @@ function ProjectCreateModal({
             <textarea
               name="description"
               rows={4}
+              defaultValue={creationDraft?.description ?? ""}
               placeholder="说明项目目标、范围和关键背景"
             />
           </label>
@@ -343,8 +435,19 @@ function ProjectCreateModal({
           </label>
           <label className="field">
             <span>项目负责人</span>
-            <select name="owner_id">
-              <option value="">由我负责</option>
+            <select
+              name="owner_id"
+              value={ownerId}
+              onChange={(event) => setOwnerId(event.target.value)}
+              required={currentUser.role === "super_admin"}
+            >
+              {currentUser.role === "super_admin" ? (
+                <option value="" disabled>
+                  请选择项目负责人
+                </option>
+              ) : (
+                <option value="">由我负责</option>
+              )}
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.display_name}
@@ -377,7 +480,11 @@ function ProjectCreateModal({
             取消
           </button>
           <button className="primary-button" disabled={submitting}>
-            {submitting ? "正在创建…" : "创建项目"}
+            {submitting
+              ? "正在创建…"
+              : creationDraft
+                ? "创建并关联项目"
+                : "创建项目"}
           </button>
         </footer>
       </form>
@@ -391,16 +498,20 @@ function ProjectDetailDrawer({
   tags,
   users,
   canManage,
+  canMerge,
   onClose,
   onChanged,
+  onMerge,
 }: {
   project: Project;
   projects: ProjectSummary[];
   tags: ProjectTag[];
-  users: User[];
+  users: UserCandidate[];
   canManage: boolean;
+  canMerge: boolean;
   onClose: () => void;
   onChanged: () => Promise<void>;
+  onMerge: () => void;
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -649,8 +760,201 @@ function ProjectDetailDrawer({
               </button>
             </div> : null}
           </section>
+
+          {canMerge ? (
+            <section className="detail-section">
+              <div className="section-heading">
+                <h3>合并项目</h3>
+                <small>仅团队负责人和管理员可执行</small>
+              </div>
+              <p className="project-description">
+                先预览会被迁移的数据，再使用来源与目标项目的最新版本确认合并。
+              </p>
+              <button
+                className="secondary-button"
+                disabled={busy}
+                onClick={onMerge}
+              >
+                预览并合并
+              </button>
+            </section>
+          ) : null}
         </div>
       </aside>
+    </div>
+  );
+}
+
+function ProjectMergeModal({
+  source,
+  projects,
+  onClose,
+  onMerged,
+}: {
+  source: Project;
+  projects: ProjectSummary[];
+  onClose: () => void;
+  onMerged: (result: ProjectMergeResult) => Promise<void>;
+}) {
+  const [targetProjectId, setTargetProjectId] = useState("");
+  const [preview, setPreview] = useState<ProjectMergePreview | null>(null);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const target = projects.find((project) => project.id === targetProjectId);
+  const candidates = projects.filter(
+    (project) => project.id !== source.id && project.status !== "merged",
+  );
+
+  async function loadPreview() {
+    if (!targetProjectId) {
+      setError("请先选择目标项目。");
+      return;
+    }
+    setPreviewing(true);
+    setError("");
+    setPreview(null);
+    try {
+      setPreview(
+        await api.projects.mergePreview(source.id, targetProjectId),
+      );
+    } catch (caught) {
+      setError(apiErrorMessage(caught, "合并预览失败，请稍后重试。"));
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!preview || !target) {
+      setError("请先获取当前选择的合并预览。");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("请填写合并原因。");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await api.projects.merge(source.id, {
+        source_revision: source.revision,
+        target_project_id: target.id,
+        target_revision: target.revision,
+        reason: reason.trim(),
+      });
+      await onMerged(result);
+    } catch (caught) {
+      setError(apiErrorMessage(caught, "项目合并失败，请稍后重试。"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title="预览并确认项目合并" eyebrow="MERGE PROJECT" onClose={onClose} wide>
+      <form className="modal-form" onSubmit={submit}>
+        <div className="form-grid">
+          <label className="field">
+            <span>来源项目</span>
+            <input value={`${source.code} · ${source.name}`} disabled />
+          </label>
+          <label className="field">
+            <span>目标项目 *</span>
+            <select
+              value={targetProjectId}
+              onChange={(event) => {
+                setTargetProjectId(event.target.value);
+                setPreview(null);
+                setError("");
+              }}
+              required
+            >
+              <option value="" disabled>
+                选择保留的目标项目
+              </option>
+              {candidates.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.code} · {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field-span-two">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={previewing || !targetProjectId}
+              onClick={loadPreview}
+            >
+              {previewing ? "正在计算…" : "获取合并预览"}
+            </button>
+          </div>
+
+          {preview ? (
+            <section className="detail-section field-span-two">
+              <div className="section-heading">
+                <h3>
+                  {preview.source_name} → {preview.target_name}
+                </h3>
+                <small>以下数据将被移动</small>
+              </div>
+              <dl className="detail-grid">
+                <MergeCount label="任务" value={preview.task_count} />
+                <MergeCount label="工时记录" value={preview.work_record_count} />
+                <MergeCount label="交付物" value={preview.deliverable_count} />
+                <MergeCount label="项目进展" value={preview.progress_count} />
+                <MergeCount
+                  label="失效任务关系"
+                  value={preview.invalidated_task_relation_count}
+                />
+                <MergeCount label="子项目" value={preview.child_project_count} />
+                <MergeCount label="新增成员" value={preview.new_member_count} />
+                <MergeCount label="新增标签" value={preview.new_tag_count} />
+              </dl>
+              {preview.aliases_to_move.length ? (
+                <p className="project-description">
+                  将迁移别名：{preview.aliases_to_move.join("、")}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          <label className="field field-span-two">
+            <span>合并原因 *</span>
+            <textarea
+              rows={3}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="说明为何确认两个项目属于同一项目"
+              required
+            />
+          </label>
+        </div>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="primary-button"
+            disabled={submitting || !preview}
+          >
+            {submitting ? "正在合并…" : "确认合并"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function MergeCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
     </div>
   );
 }

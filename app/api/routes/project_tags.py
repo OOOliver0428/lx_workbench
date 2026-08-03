@@ -14,14 +14,13 @@ router = APIRouter(prefix="/project-tags", tags=["project-tags"])
 def list_tags(
     include_inactive: bool = False,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[ProjectTagOut]:
     permission_service.assert_any_permission(
         db,
         actor,
         (
             PermissionKey.PROJECTS_VIEW,
-            PermissionKey.PROJECTS_MANAGE,
             PermissionKey.TAGS_MANAGE,
         ),
     )
@@ -35,7 +34,7 @@ def list_tags(
 def create_tag(
     payload: ProjectTagCreate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> ProjectTagOut:
     permission_service.assert_permission(db, actor, PermissionKey.TAGS_MANAGE)
     return ProjectTagOut.model_validate(tag_service.create_tag(db, payload, actor))
@@ -46,7 +45,7 @@ def update_tag(
     tag_id: str,
     payload: ProjectTagUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> ProjectTagOut:
     permission_service.assert_permission(db, actor, PermissionKey.TAGS_MANAGE)
     tag = tag_service.get_tag(db, tag_id)

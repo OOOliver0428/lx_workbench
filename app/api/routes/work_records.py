@@ -18,8 +18,9 @@ def list_work_records(
     author_id: str | None = None,
     project_id: str | None = None,
     unassigned_only: bool = False,
+    current_week_only: bool = False,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[WorkRecordOut]:
     permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
     rows = record_service.list_work_records(
@@ -28,6 +29,7 @@ def list_work_records(
         author_id=author_id,
         project_id=project_id,
         unassigned_only=unassigned_only,
+        current_week_only=current_week_only,
     )
     return [work_record_out(db, row) for row in rows]
 
@@ -36,7 +38,7 @@ def list_work_records(
 def create_work_record(
     payload: WorkRecordCreate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WorkRecordOut:
     permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     return work_record_out(db, record_service.create_work_record(db, payload, actor))
@@ -46,7 +48,7 @@ def create_work_record(
 def get_work_record(
     record_id: str,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WorkRecordOut:
     permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
     record = record_service.get_work_record(db, record_id)
@@ -60,7 +62,7 @@ def update_work_record(
     record_id: str,
     payload: WorkRecordUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> WorkRecordOut:
     permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     record = record_service.get_work_record(db, record_id)
@@ -72,7 +74,7 @@ def delete_work_record(
     record_id: str,
     payload: RevisionAction,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> None:
     permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     record_service.delete_work_record(

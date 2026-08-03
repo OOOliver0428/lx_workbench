@@ -82,17 +82,21 @@ def api(tmp_path: Path) -> Iterator[dict[str, Any]]:
             }
             db.add_all(users.values())
             db.flush()
+            users["leader"].leader_id = users["admin"].id
+            users["member2"].leader_id = users["leader"].id
             member_permissions = {
                 PermissionKey.DASHBOARD_OPPORTUNITY_VIEW,
-                PermissionKey.DASHBOARD_WORK_VIEW,
-                PermissionKey.PROJECTS_MANAGE,
-                PermissionKey.TASKS_MANAGE,
+                PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS,
+                PermissionKey.DASHBOARD_OPPORTUNITY_CREATE,
+                PermissionKey.PROJECTS_CREATE,
+                PermissionKey.TASKS_CREATE,
                 PermissionKey.WORK_RECORDS_MANAGE,
                 PermissionKey.WEEKLY_REPORTS_MANAGE,
                 PermissionKey.AI_USE,
             }
             leader_permissions = {
                 *member_permissions,
+                PermissionKey.DASHBOARD_WORK_VIEW,
                 PermissionKey.DASHBOARD_OVERVIEW_VIEW,
                 PermissionKey.DASHBOARD_TEAM_SUMMARY,
             }
@@ -139,11 +143,15 @@ def api(tmp_path: Path) -> Iterator[dict[str, Any]]:
         }
 
 
-def login(client: TestClient, login_name: str) -> str:
+def login(
+    client: TestClient,
+    login_name: str,
+    password: str = TEST_PASSWORD,
+) -> str:
     client.cookies.clear()
     response = client.post(
         "/api/v1/auth/login",
-        json={"login_name": login_name, "password": TEST_PASSWORD},
+        json={"login_name": login_name, "password": password},
     )
     assert response.status_code == 200, response.text
     return response.json()["csrf_token"]

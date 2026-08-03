@@ -13,6 +13,7 @@ from app.identity import normalize_user_identifier
 from app.models import PermissionKey, User, UserRole, utc_now
 from app.schemas import (
     PermissionDefinitionOut,
+    UserCandidateOut,
     UserCreate,
     UserLeaderUpdate,
     UserOut,
@@ -90,15 +91,47 @@ def _ensure_no_leader_cycle(db: Session, user: User, leader: User) -> None:
 @router.get("", response_model=list[UserOut])
 def list_users(
     include_inactive: bool = False,
-    _actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[UserOut]:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.USERS_MANAGE,
+    )
     query = select(User)
     if not include_inactive:
         query = query.where(User.is_active.is_(True))
     users = db.scalars(query.order_by(User.display_name)).all()
     return [
         UserOut.model_validate(user) for user in users if user.role != UserRole.SUPER_ADMIN.value
+    ]
+
+
+@router.get("/candidates", response_model=list[UserCandidateOut])
+def list_user_candidates(
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+) -> list[UserCandidateOut]:
+    permission_service.assert_any_permission(
+        db,
+        actor,
+        (
+            PermissionKey.PROJECTS_VIEW,
+            PermissionKey.TASKS_VIEW,
+            PermissionKey.DASHBOARD_OPPORTUNITY_CREATE,
+        ),
+        "当前账号无权查看负责人候选目录",
+    )
+    users = db.scalars(
+        select(User)
+        .where(User.is_active.is_(True))
+        .order_by(User.display_name)
+    ).all()
+    return [
+        UserCandidateOut.model_validate(user)
+        for user in users
+        if user.role != UserRole.SUPER_ADMIN.value
     ]
 
 
@@ -115,6 +148,7 @@ def permission_catalog(
             label=definition.label,
             description=definition.description,
             system_admin_assignable=definition.system_admin_assignable,
+            requires_team_scope=definition.requires_team_scope,
         )
         for definition in permission_service.PERMISSION_CATALOG
     ]
@@ -124,7 +158,7 @@ def permission_catalog(
 def get_user_permissions(
     user_id: str,
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> UserPermissionsOut:
     target = db.get(User, user_id)
     if not target or target.role == UserRole.SUPER_ADMIN.value:
@@ -151,7 +185,7 @@ def update_user_permissions(
     user_id: str,
     payload: UserPermissionsUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> UserPermissionsOut:
     target = db.get(User, user_id)
     if not target or target.role == UserRole.SUPER_ADMIN.value:
@@ -175,7 +209,7 @@ def update_user_permissions(
 def create_user(
     payload: UserCreate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> UserOut:
     permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     if payload.role == UserRole.SUPER_ADMIN:
@@ -204,6 +238,11 @@ def create_user(
             "DISPLAY_NAME_ALREADY_EXISTS",
             "显示名称已被使用，请换一个",
         ) from error
+    initial_permissions = permission_service.grant_initial_permissions(
+        db,
+        user=user,
+        actor=actor,
+    )
     record_audit(
         db,
         actor=actor,
@@ -215,6 +254,7 @@ def create_user(
             "displayName": user.display_name,
             "role": user.role,
             "leaderId": None,
+            "permissions": initial_permissions,
         },
     )
     return UserOut.model_validate(user)
@@ -225,7 +265,7 @@ def update_user(
     user_id: str,
     payload: UserUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> UserOut:
     permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     user = db.get(User, user_id)
@@ -328,7 +368,7 @@ def update_user_leader(
     user_id: str,
     payload: UserLeaderUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> UserOut:
     permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     user = db.get(User, user_id)

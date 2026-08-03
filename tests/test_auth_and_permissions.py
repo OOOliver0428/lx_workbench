@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi.testclient import TestClient
 
 from tests.conftest import login
@@ -50,6 +52,26 @@ def test_login_accepts_display_name_with_normalized_comparison(api: dict) -> Non
 
     assert response.status_code == 200, response.text
     assert response.json()["user"]["id"] == api["users"]["member"]
+
+
+def test_persisted_session_expiry_remains_explicit_utc(api: dict) -> None:
+    client: TestClient = api["client"]
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "login_name": "member",
+            "password": "Mvp-Test-Password-2026",
+        },
+    )
+    assert response.status_code == 200, response.text
+    login_expiry = response.json()["expires_at"]
+    assert datetime.fromisoformat(login_expiry).utcoffset().total_seconds() == 0
+
+    persisted = client.get("/api/v1/auth/me")
+    assert persisted.status_code == 200, persisted.text
+    persisted_expiry = persisted.json()["expires_at"]
+    assert persisted_expiry == login_expiry
+    assert datetime.fromisoformat(persisted_expiry).utcoffset().total_seconds() == 0
 
 
 def test_user_display_name_must_be_globally_unique(api: dict) -> None:
@@ -181,10 +203,17 @@ def test_initial_password_must_be_changed_before_business_access(api: dict) -> N
         },
     )
     assert changed.status_code == 204, changed.text
-    no_default_access = client.get("/api/v1/projects")
-    assert no_default_access.status_code == 403
-    assert no_default_access.json()["code"] == "PERMISSION_DENIED"
-    assert client.get("/api/v1/auth/me").json()["permissions"] == []
+    assert client.get("/api/v1/projects").status_code == 200
+    assert client.get("/api/v1/tasks").status_code == 200
+    assert client.get("/api/v1/auth/me").json()["permissions"] == [
+        "projects.view",
+        "tasks.view",
+        "work_records.view",
+        "work_records.manage",
+        "weekly_reports.view",
+        "weekly_reports.manage",
+        "ai.use",
+    ]
 
     client.cookies.clear()
     client.cookies.set("mvp_session", old_session_token)
@@ -245,13 +274,30 @@ def test_user_creation_only_accepts_name_role_and_initial_password(api: dict) ->
     assert payload["leader_id"] is None
     assert payload["avatar_key"] is None
     assert payload["login_name"].startswith("u")
+    permissions = client.get(f"/api/v1/users/{payload['id']}/permissions")
+    assert permissions.status_code == 200, permissions.text
+    assert permissions.json()["assigned_permissions"] == [
+        "projects.view",
+        "tasks.view",
+        "work_records.view",
+        "work_records.manage",
+        "weekly_reports.view",
+        "weekly_reports.manage",
+        "ai.use",
+    ]
 
 
 def test_super_admin_is_hidden_and_has_virtual_full_permissions(api: dict) -> None:
     client: TestClient = api["client"]
     super_admin_id = api["users"]["super_admin"]
 
-    for login_name in ("member", "leader", "admin", "super_admin"):
+    for login_name in ("member", "leader"):
+        login(client, login_name)
+        visible_users = client.get("/api/v1/users/candidates")
+        assert visible_users.status_code == 200, visible_users.text
+        assert all(user["id"] != super_admin_id for user in visible_users.json())
+
+    for login_name in ("admin", "super_admin"):
         login(client, login_name)
         visible_users = client.get("/api/v1/users")
         assert visible_users.status_code == 200, visible_users.text
@@ -293,14 +339,16 @@ def test_super_admin_assigns_explicit_permissions_and_view_visibility(
             "revision": member["revision"],
             "permissions": [
                 "dashboard.overview.view",
-                "projects.manage",
+                "projects.create",
             ],
         },
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["assigned_permissions"] == [
         "dashboard.overview.view",
-        "projects.manage",
+        "projects.view",
+        "projects.edit",
+        "projects.create",
     ]
     assert "projects.view" in updated.json()["effective_permissions"]
 
@@ -309,7 +357,8 @@ def test_super_admin_assigns_explicit_permissions_and_view_visibility(
     assert context["permissions"] == [
         "dashboard.overview.view",
         "projects.view",
-        "projects.manage",
+        "projects.edit",
+        "projects.create",
     ]
     dashboard = client.get("/api/v1/dashboard")
     assert dashboard.status_code == 200, dashboard.text
@@ -353,6 +402,7 @@ def test_system_admin_assigns_only_business_permissions_to_lower_roles(
     assert saved.status_code == 200, saved.text
     assert saved.json()["assigned_permissions"] == [
         "dashboard.opportunity.view",
+        "work_records.view",
         "work_records.manage",
     ]
     assert "work_records.view" in saved.json()["effective_permissions"]
@@ -371,7 +421,7 @@ def test_team_summary_permission_opens_weekly_report_history(api: dict) -> None:
     member = next(
         user
         for user in client.get("/api/v1/users").json()
-        if user["id"] == api["users"]["member2"]
+        if user["id"] == api["users"]["leader"]
     )
     granted = client.put(
         f"/api/v1/users/{member['id']}/permissions",
@@ -387,11 +437,105 @@ def test_team_summary_permission_opens_weekly_report_history(api: dict) -> None:
         "weekly_reports.view",
     }.issubset(set(granted.json()["effective_permissions"]))
 
-    login(client, "member2")
+    login(client, "leader")
     assert client.get("/api/v1/weekly-reports").status_code == 200
     team_history = client.get("/api/v1/weekly-reports/team-summaries")
     assert team_history.status_code == 200
     assert team_history.json() == []
+
+
+def test_progressive_permissions_and_team_scope_eligibility(api: dict) -> None:
+    client: TestClient = api["client"]
+    super_csrf = login(client, "super_admin")
+    users = client.get("/api/v1/users").json()
+    member = next(user for user in users if user["id"] == api["users"]["member"])
+
+    expanded = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": member["revision"],
+            "permissions": [
+                "dashboard.opportunity.create",
+                "projects.create",
+                "tasks.create",
+            ],
+        },
+    )
+    assert expanded.status_code == 200, expanded.text
+    assert expanded.json()["assigned_permissions"] == [
+        "dashboard.opportunity.view",
+        "dashboard.opportunity.progress",
+        "dashboard.opportunity.create",
+        "projects.view",
+        "projects.edit",
+        "projects.create",
+        "tasks.view",
+        "tasks.edit",
+        "tasks.create",
+    ]
+
+    ineligible = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": expanded.json()["revision"],
+            "permissions": ["dashboard.work.view"],
+        },
+    )
+    assert ineligible.status_code == 400, ineligible.text
+    assert ineligible.json()["code"] == "TEAM_SCOPE_PERMISSION_INELIGIBLE"
+
+    edit_only = client.put(
+        f"/api/v1/users/{member['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": expanded.json()["revision"],
+            "permissions": ["projects.edit", "tasks.edit"],
+        },
+    )
+    assert edit_only.status_code == 200, edit_only.text
+    assert edit_only.json()["assigned_permissions"] == [
+        "projects.view",
+        "projects.edit",
+        "tasks.view",
+        "tasks.edit",
+    ]
+
+    member_csrf = login(client, "member")
+    assert client.get("/api/v1/projects").status_code == 200
+    cannot_create_project = client.post(
+        "/api/v1/projects",
+        headers={"X-CSRF-Token": member_csrf},
+        json={
+            "name": "仅编辑权限不可创建",
+            "owner_id": member["id"],
+            "member_ids": [],
+            "tag_ids": [],
+        },
+    )
+    assert cannot_create_project.status_code == 403
+
+    super_csrf = login(client, "super_admin")
+    leader = next(
+        user
+        for user in client.get("/api/v1/users").json()
+        if user["id"] == api["users"]["leader"]
+    )
+    eligible = client.put(
+        f"/api/v1/users/{leader['id']}/permissions",
+        headers={"X-CSRF-Token": super_csrf},
+        json={
+            "revision": leader["revision"],
+            "permissions": ["dashboard.team_summary.generate"],
+        },
+    )
+    assert eligible.status_code == 200, eligible.text
+    assert eligible.json()["assigned_permissions"] == [
+        "dashboard.work.view",
+        "dashboard.team_summary.generate",
+        "weekly_reports.view",
+    ]
 
 
 def test_audit_permission_never_reveals_super_admin_events(api: dict) -> None:

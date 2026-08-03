@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -62,7 +63,10 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
                   AND name IN (
                     'project_progress',
                     'task_relations',
-                    'team_weekly_summaries'
+                    'team_weekly_summaries',
+                    'opportunities',
+                    'opportunity_members',
+                    'opportunity_progress'
                   )
                 """
             )
@@ -82,7 +86,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "c6e4b8a1d209"
+    assert revision == "e5b9c7d1a304"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -92,6 +96,9 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
         "project_progress",
         "task_relations",
         "team_weekly_summaries",
+        "opportunities",
+        "opportunity_members",
+        "opportunity_progress",
     }
     assert permission_table == ("user_permissions",)
     assert task_relation_foreign_keys["deleted_by"] == ("users", "id")
@@ -103,6 +110,183 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     }
     assert foreign_keys == 1
     assert journal_mode == "wal"
+    get_settings.cache_clear()
+
+
+def test_populated_previous_revision_upgrades_without_data_loss(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "historic.db"
+    monkeypatch.setenv("MVP_DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
+    get_settings.cache_clear()
+    config = Config("alembic.ini")
+    command.upgrade(config, "f7d3a9c2b104")
+
+    with closing(sqlite3.connect(database_path)) as db:
+        db.execute(
+            """
+            INSERT INTO users(
+                id, login_name, display_name, password_hash, role,
+                is_active, must_change_password, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                "historic-user",
+                "  历史升级用户  ",
+                "not-a-real-password-hash",
+                "member",
+                1,
+                0,
+                "2026-07-27T00:00:00+00:00",
+                "2026-07-27T00:00:00+00:00",
+                1,
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO projects(
+                id, code, name, normalized_name, status, owner_id, proposed_by,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "df7ca924-5b2d-4ce4-8667-c99000d1083a",
+                "HIST-001",
+                "历史商机项目",
+                "历史商机项目",
+                "active",
+                "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                "2026-07-27T00:00:00+00:00",
+                "2026-07-27T00:00:00+00:00",
+                1,
+            ),
+        )
+        db.executemany(
+            """
+            INSERT INTO user_permissions(
+                id, user_id, permission_key, granted_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "39bfbe54-9954-4453-95b9-874de77d9060",
+                    "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                    "projects.manage",
+                    None,
+                    "2026-07-27T00:00:00+00:00",
+                    "2026-07-27T00:00:00+00:00",
+                ),
+                (
+                    "55245dd3-6324-40fc-a45f-123aaf249afc",
+                    "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                    "tasks.manage",
+                    None,
+                    "2026-07-27T00:00:00+00:00",
+                    "2026-07-27T00:00:00+00:00",
+                ),
+            ],
+        )
+        db.execute(
+            """
+            INSERT INTO project_members(
+                id, project_id, user_id, role, added_by, joined_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "96842f96-b9c8-42c0-a27d-786558a01ea8",
+                "df7ca924-5b2d-4ce4-8667-c99000d1083a",
+                "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                "owner",
+                "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                "2026-07-27T00:00:00+00:00",
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO project_progress(
+                id, project_id, week_start, business_stage, attention_status,
+                progress_percent, summary, output_summary, created_by,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ec85d4ec-acde-490e-8954-f395d94d1570",
+                "df7ca924-5b2d-4ce4-8667-c99000d1083a",
+                "2026-07-27",
+                "solution_exchange",
+                "focus",
+                40,
+                "历史方案交流记录",
+                "历史方案初稿",
+                "5f86438e-03ef-44b0-b245-2d37d7a62785",
+                "2026-07-31T08:00:00+00:00",
+                "2026-07-31T08:00:00+00:00",
+                1,
+            ),
+        )
+        db.commit()
+
+    command.upgrade(config, "head")
+    with closing(sqlite3.connect(database_path)) as db:
+        revision = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+        user = db.execute(
+            """
+            SELECT login_name, display_name, display_name_key
+            FROM users
+            WHERE id = '5f86438e-03ef-44b0-b245-2d37d7a62785'
+            """
+        ).fetchone()
+        integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+        migrated_opportunity = db.execute(
+            """
+            SELECT name, business_stage, attention_status, progress_percent,
+                   linked_project_id
+            FROM opportunities
+            WHERE linked_project_id = 'df7ca924-5b2d-4ce4-8667-c99000d1083a'
+            """
+        ).fetchone()
+        migrated_progress = db.execute(
+            """
+            SELECT summary, output_summary FROM opportunity_progress
+            WHERE opportunity_id = (
+                SELECT id FROM opportunities
+                WHERE linked_project_id = 'df7ca924-5b2d-4ce4-8667-c99000d1083a'
+            )
+            """
+        ).fetchone()
+        migrated_member_count = db.execute(
+            """
+            SELECT COUNT(*) FROM opportunity_members
+            WHERE opportunity_id = (
+                SELECT id FROM opportunities
+                WHERE linked_project_id = 'df7ca924-5b2d-4ce4-8667-c99000d1083a'
+            )
+            """
+        ).fetchone()[0]
+        migrated_permissions = db.execute(
+            """
+            SELECT permission_key FROM user_permissions
+            WHERE user_id = '5f86438e-03ef-44b0-b245-2d37d7a62785'
+            ORDER BY permission_key
+            """
+        ).fetchall()
+
+    assert revision == "e5b9c7d1a304"
+    assert user == ("historic-user", "历史升级用户", "历史升级用户")
+    assert integrity == "ok"
+    assert migrated_opportunity == (
+        "历史商机项目",
+        "solution_exchange",
+        "focus",
+        40,
+        "df7ca924-5b2d-4ce4-8667-c99000d1083a",
+    )
+    assert migrated_progress == ("历史方案交流记录", "历史方案初稿")
+    assert migrated_member_count == 1
+    assert migrated_permissions == [("projects.create",), ("tasks.create",)]
     get_settings.cache_clear()
 
 
@@ -141,7 +325,20 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "c6e4b8a1d209"
+    assert manifest["schemaRevision"] == "e5b9c7d1a304"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
+
+    # Exercise the actual restore shape: replace a lost source file with the
+    # verified snapshot, then open and read it as the application database.
+    database_path.unlink()
+    shutil.copy2(backup_path, database_path)
+    with closing(sqlite3.connect(database_path)) as restored:
+        assert restored.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert (
+            restored.execute(
+                "SELECT display_name FROM users WHERE login_name='backup-user'"
+            ).fetchone()[0]
+            == display_name
+        )
     get_settings.cache_clear()

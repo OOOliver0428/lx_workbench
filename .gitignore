@@ -16,6 +16,7 @@ Thumbs.db
 # Python
 __pycache__/
 *.py[cod]
+.coverage
 .venv/
 venv/
 

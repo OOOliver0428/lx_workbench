@@ -34,3 +34,24 @@ class LoginThrottle:
     def clear(self, key: str) -> None:
         with self._lock:
             self._failures.pop(key, None)
+
+    @staticmethod
+    def _login_keys(client_ip: str, login_identifier: str) -> tuple[str, str]:
+        return (
+            f"source-login:{client_ip}:{login_identifier}",
+            f"login:{login_identifier}",
+        )
+
+    def is_login_blocked(self, client_ip: str, login_identifier: str) -> bool:
+        return any(
+            self.is_blocked(key)
+            for key in self._login_keys(client_ip, login_identifier)
+        )
+
+    def record_login_failure(self, client_ip: str, login_identifier: str) -> None:
+        for key in self._login_keys(client_ip, login_identifier):
+            self.record_failure(key)
+
+    def clear_login(self, client_ip: str, login_identifier: str) -> None:
+        for key in self._login_keys(client_ip, login_identifier):
+            self.clear(key)

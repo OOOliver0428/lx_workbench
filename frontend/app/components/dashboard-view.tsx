@@ -19,10 +19,14 @@ import type {
   AttentionStatus,
   BusinessStage,
   Dashboard,
+  DashboardOpportunity,
   DashboardProject,
   DashboardTask,
   PermissionKey,
+  ProjectCreationDraft,
   TeamWeeklySummary,
+  User,
+  UserCandidate,
 } from "../types";
 import { AvatarImage } from "./avatar";
 import { EmptyState, InlineNotice, Modal } from "./ui";
@@ -93,8 +97,12 @@ const PAGE_COPY: Record<
 
 export function DashboardView({
   permissions,
+  currentUser,
+  onCreateProjectFromOpportunity,
 }: {
   permissions: PermissionKey[];
+  currentUser: User;
+  onCreateProjectFromOpportunity: (draft: ProjectCreationDraft) => void;
 }) {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [selectedWeek, setSelectedWeek] = useState("");
@@ -103,11 +111,20 @@ export function DashboardView({
   const [error, setError] = useState("");
   const [selectedProject, setSelectedProject] =
     useState<DashboardProject | null>(null);
-  const [progressProject, setProgressProject] =
-    useState<DashboardProject | null>(null);
+  const [selectedOpportunity, setSelectedOpportunity] =
+    useState<DashboardOpportunity | null>(null);
+  const [progressOpportunity, setProgressOpportunity] =
+    useState<DashboardOpportunity | null>(null);
+  const [createOpportunityOpen, setCreateOpportunityOpen] = useState(false);
   const [relationOpen, setRelationOpen] = useState(false);
   const [summary, setSummary] = useState<TeamWeeklySummary | null>(null);
-  const canManageTasks = permissions.includes("tasks.manage");
+  const canEditTasks = permissions.includes("tasks.edit");
+  const canRecordOpportunityProgress = permissions.includes(
+    "dashboard.opportunity.progress",
+  );
+  const canCreateOpportunities = permissions.includes(
+    "dashboard.opportunity.create",
+  );
   const canGenerateTeamSummary = permissions.includes(
     "dashboard.team_summary.generate",
   );
@@ -247,19 +264,33 @@ export function DashboardView({
             >
               复制商机摘要
             </button>
-            <button
-              type="button"
-              className="war-primary-button"
-              disabled={!dashboard.projects.some((project) => project.can_manage)}
-              onClick={() =>
-                setProgressProject(
-                  dashboard.projects.find((project) => project.can_manage) ??
-                    null,
-                )
-              }
-            >
-              <Plus size={14} /> 录入进展
-            </button>
+            {canRecordOpportunityProgress ? (
+              <button
+                type="button"
+                className="war-primary-button"
+                disabled={!dashboard.opportunities.some(
+                  (opportunity) => opportunity.can_manage,
+                )}
+                onClick={() =>
+                  setProgressOpportunity(
+                    dashboard.opportunities.find(
+                      (opportunity) => opportunity.can_manage,
+                    ) ?? null,
+                  )
+                }
+              >
+                <Plus size={14} /> 录入进展
+              </button>
+            ) : null}
+            {canCreateOpportunities ? (
+              <button
+                type="button"
+                className="war-primary-button"
+                onClick={() => setCreateOpportunityOpen(true)}
+              >
+                <Plus size={14} /> 新建商机
+              </button>
+            ) : null}
           </div>
         ) : activePage === "work" ? (
           <button
@@ -275,10 +306,12 @@ export function DashboardView({
       {activePage === "opp" ? (
         <OpportunityPage
           dashboard={dashboard}
+          onSelectOpportunity={setSelectedOpportunity}
           onSelectProject={setSelectedProject}
-          onRecordProgress={setProgressProject}
+          onRecordProgress={setProgressOpportunity}
+          onCreateProject={onCreateProjectFromOpportunity}
           onCreateRelation={() => setRelationOpen(true)}
-          canManageRelations={canManageTasks}
+          canManageRelations={canEditTasks}
         />
       ) : null}
       {activePage === "work" ? (
@@ -297,28 +330,50 @@ export function DashboardView({
         {page.index} · {page.label}
       </span>
 
+      {selectedOpportunity ? (
+        <OpportunityDetailModal
+          opportunity={selectedOpportunity}
+          onClose={() => setSelectedOpportunity(null)}
+          onRecord={() => {
+            setProgressOpportunity(selectedOpportunity);
+            setSelectedOpportunity(null);
+          }}
+          onCreateProject={() => {
+            onCreateProjectFromOpportunity(
+              opportunityProjectDraft(selectedOpportunity),
+            );
+            setSelectedOpportunity(null);
+          }}
+        />
+      ) : null}
       {selectedProject ? (
         <ProjectDetailModal
           project={selectedProject}
           onClose={() => setSelectedProject(null)}
-          onRecord={() => {
-            setProgressProject(selectedProject);
-            setSelectedProject(null);
-          }}
         />
       ) : null}
-      {progressProject ? (
+      {progressOpportunity && canRecordOpportunityProgress ? (
         <ProgressModal
           dashboard={dashboard}
-          initialProject={progressProject}
-          onClose={() => setProgressProject(null)}
+          initialOpportunity={progressOpportunity}
+          onClose={() => setProgressOpportunity(null)}
           onSaved={async () => {
-            setProgressProject(null);
+            setProgressOpportunity(null);
             await load(selectedWeek);
           }}
         />
       ) : null}
-      {relationOpen && canManageTasks ? (
+      {createOpportunityOpen && canCreateOpportunities ? (
+        <OpportunityCreateModal
+          currentUser={currentUser}
+          onClose={() => setCreateOpportunityOpen(false)}
+          onCreated={async () => {
+            setCreateOpportunityOpen(false);
+            await load(selectedWeek);
+          }}
+        />
+      ) : null}
+      {relationOpen && canEditTasks ? (
         <RelationModal
           dashboard={dashboard}
           onClose={() => setRelationOpen(false)}
@@ -341,22 +396,29 @@ export function DashboardView({
 
 function OpportunityPage({
   dashboard,
+  onSelectOpportunity,
   onSelectProject,
   onRecordProgress,
+  onCreateProject,
   onCreateRelation,
   canManageRelations,
 }: {
   dashboard: Dashboard;
+  onSelectOpportunity: (opportunity: DashboardOpportunity) => void;
   onSelectProject: (project: DashboardProject) => void;
-  onRecordProgress: (project: DashboardProject) => void;
+  onRecordProgress: (opportunity: DashboardOpportunity) => void;
+  onCreateProject: (draft: ProjectCreationDraft) => void;
   onCreateRelation: () => void;
   canManageRelations: boolean;
 }) {
   const [view, setView] = useState<OpportunityView>("list");
-  const [scope, setScope] = useState<"active" | "all">("active");
+  const [opportunityScope, setOpportunityScope] =
+    useState<"active" | "all">("all");
+  const [graphScope, setGraphScope] = useState<"active" | "all">("active");
   const [attention, setAttention] = useState<AttentionStatus | "all">("all");
   const [search, setSearch] = useState("");
   const [graphFullscreen, setGraphFullscreen] = useState(false);
+  const canViewWorkMetrics = dashboard.accessible_pages.includes("work");
   const canCreateRelation =
     canManageRelations &&
     dashboard.projects.filter(
@@ -365,8 +427,14 @@ function OpportunityPage({
   const projects = useMemo(
     () =>
       dashboard.projects.filter((project) => {
-        if (scope === "active" && !project.has_week_progress) return false;
-        if (attention !== "all" && project.attention_status !== attention) {
+        if (graphScope === "active" && !project.has_week_progress) return false;
+        const linkedOpportunity = dashboard.opportunities.find(
+          (opportunity) => opportunity.linked_project_id === project.id,
+        );
+        if (
+          attention !== "all" &&
+          linkedOpportunity?.attention_status !== attention
+        ) {
           return false;
         }
         if (
@@ -384,7 +452,44 @@ function OpportunityPage({
         }
         return true;
       }),
-    [attention, dashboard.projects, scope, search],
+    [
+      attention,
+      dashboard.opportunities,
+      dashboard.projects,
+      graphScope,
+      search,
+    ],
+  );
+  const opportunities = useMemo(
+    () =>
+      dashboard.opportunities.filter((opportunity) => {
+        if (opportunityScope === "active" && !opportunity.has_week_progress) {
+          return false;
+        }
+        if (
+          attention !== "all" &&
+          opportunity.attention_status !== attention
+        ) {
+          return false;
+        }
+        if (
+          search &&
+          ![
+            opportunity.name,
+            opportunity.code,
+            opportunity.customer_name ?? "",
+            opportunity.owner_display_name,
+            ...opportunity.people.map((person) => person.display_name),
+          ]
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(search.toLocaleLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [attention, dashboard.opportunities, opportunityScope, search],
   );
 
   return (
@@ -408,8 +513,12 @@ function OpportunityPage({
           tone="purple"
           icon={<Package size={20} />}
           label="新增交付物"
-          value={dashboard.metrics.deliverable_count}
-          note="来自真实工作记录"
+          value={
+            canViewWorkMetrics ? dashboard.metrics.deliverable_count : "—"
+          }
+          note={
+            canViewWorkMetrics ? "来自真实工作记录" : "工作产出未授权"
+          }
         />
         <MetricCard
           tone="orange"
@@ -432,12 +541,16 @@ function OpportunityPage({
             </div>
             <div className="war-panel-tools">
               <Segmented
-                value={scope}
+                value={view === "list" ? opportunityScope : graphScope}
                 options={[
                   ["active", "本周有进展"],
-                  ["all", "所有项目"],
+                  ["all", view === "list" ? "所有商机" : "所有项目"],
                 ]}
-                onChange={(value) => setScope(value as "active" | "all")}
+                onChange={(value) =>
+                  view === "list"
+                    ? setOpportunityScope(value as "active" | "all")
+                    : setGraphScope(value as "active" | "all")
+                }
               />
               <Segmented
                 value={view}
@@ -495,16 +608,19 @@ function OpportunityPage({
             </div>
           </header>
           {view === "list" ? (
-            <ProjectList
-              projects={projects}
-              onSelect={onSelectProject}
+            <OpportunityList
+              opportunities={opportunities}
+              onSelect={onSelectOpportunity}
               onRecord={onRecordProgress}
+              onCreateProject={(opportunity) =>
+                onCreateProject(opportunityProjectDraft(opportunity))
+              }
             />
-          ) : scope === "all" ? (
+          ) : graphScope === "all" ? (
             <GraphScopeHint
               projectCount={projects.length}
               onOpenFullscreen={() => setGraphFullscreen(true)}
-              onBackToActive={() => setScope("active")}
+              onBackToActive={() => setGraphScope("active")}
             />
           ) : (
             <ProjectGraph
@@ -539,7 +655,7 @@ function OpportunityPage({
                       }}
                     />
                     <div>
-                      <b>{event.project_name}</b>
+                      <b>{event.opportunity_name}</b>
                       <p>
                         进入 {stageLabel(event.business_stage)}：
                         {event.summary}
@@ -548,26 +664,26 @@ function OpportunityPage({
                     </div>
                   </article>
                 ))}
-              {dashboard.projects
+              {dashboard.opportunities
                 .filter(
-                  (project) =>
-                    project.attention_status === "coordinate",
+                  (opportunity) =>
+                    opportunity.attention_status === "coordinate",
                 )
                 .slice(0, 3)
-                .map((project) => (
-                  <article key={`risk-${project.id}`}>
+                .map((opportunity) => (
+                  <article key={`risk-${opportunity.id}`}>
                     <i style={{ background: "#e94f9b" }} />
                     <div>
-                      <b>{project.name}</b>
-                      <p>{project.work_summary}</p>
+                      <b>{opportunity.name}</b>
+                      <p>{opportunity.work_summary}</p>
                       <small>本周 · 风险待协调</small>
                     </div>
                   </article>
                 ))}
               {!dashboard.stage_timeline.length &&
-              !dashboard.projects.some(
-                (project) =>
-                  project.attention_status === "coordinate",
+              !dashboard.opportunities.some(
+                (opportunity) =>
+                  opportunity.attention_status === "coordinate",
               ) ? (
                 <p className="war-empty-copy">本周暂无阶段变动</p>
               ) : null}
@@ -579,8 +695,8 @@ function OpportunityPage({
         <GraphFullscreen
           projects={projects}
           links={dashboard.task_links}
-          scope={scope}
-          onScopeChange={(value) => setScope(value)}
+          scope={graphScope}
+          onScopeChange={(value) => setGraphScope(value)}
           onSelectProject={onSelectProject}
           onClose={() => setGraphFullscreen(false)}
           canCreateRelation={canCreateRelation}
@@ -591,16 +707,18 @@ function OpportunityPage({
   );
 }
 
-function ProjectList({
-  projects,
+function OpportunityList({
+  opportunities,
   onSelect,
   onRecord,
+  onCreateProject,
 }: {
-  projects: DashboardProject[];
-  onSelect: (project: DashboardProject) => void;
-  onRecord: (project: DashboardProject) => void;
+  opportunities: DashboardOpportunity[];
+  onSelect: (opportunity: DashboardOpportunity) => void;
+  onRecord: (opportunity: DashboardOpportunity) => void;
+  onCreateProject: (opportunity: DashboardOpportunity) => void;
 }) {
-  if (!projects.length) {
+  if (!opportunities.length) {
     return (
       <EmptyState
         title="没有符合条件的商机"
@@ -614,48 +732,70 @@ function ProjectList({
         <span>商机 / 阶段</span>
         <span>本周进展与交付</span>
         <span>当前状态</span>
-        <span>人员 / 工时</span>
+        <span>人员</span>
       </div>
-      {projects.map((project) => (
+      {opportunities.map((opportunity) => (
         <article
-          key={project.id}
+          key={opportunity.id}
           className="war-project-row"
-          onClick={() => onSelect(project)}
+          onClick={() => onSelect(opportunity)}
         >
           <div>
             <div className="war-project-name">
-              <i style={{ background: projectColor(project.id) }} />
+              <i style={{ background: projectColor(opportunity.id) }} />
               <span>
-                <b>{project.name}</b>
+                <b>{opportunity.name}</b>
                 <small>
-                  {project.type_label} ·{" "}
-                  {stageLabel(project.business_stage)}
+                  {opportunity.customer_name || opportunity.code} ·{" "}
+                  {stageLabel(opportunity.business_stage)}
                 </small>
               </span>
             </div>
-            <StageStepper current={project.business_stage} />
+            <StageStepper current={opportunity.business_stage} />
           </div>
           <div className="war-progress-copy">
-            <b>{project.work_summary}</b>
-            <small>输出：{project.output_summary}</small>
+            <b>{opportunity.work_summary}</b>
+            <small>输出：{opportunity.output_summary}</small>
           </div>
-          <AttentionPill value={project.attention_status} />
+          <AttentionPill value={opportunity.attention_status} />
           <div className="war-people-cell">
-            <AvatarStack people={project.people} />
-            <span>{formatHours(project.weekly_minutes)}h 本周</span>
-            {project.can_manage ? (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRecord(project);
-                }}
-                title="录入该项目进展"
-                aria-label={`录入${project.name}进展`}
-              >
-                <Plus size={13} />
-              </button>
-            ) : null}
+            <div className="war-people-summary">
+              <AvatarStack people={opportunity.people} />
+              <span>
+                {opportunity.people
+                  .map((person) => person.display_name)
+                  .join("、") || opportunity.owner_display_name}
+              </span>
+            </div>
+            <div className="war-people-actions">
+              {opportunity.can_convert ? (
+                <button
+                  type="button"
+                  className="war-convert-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCreateProject(opportunity);
+                  }}
+                  title="创建并关联项目"
+                  aria-label={`将${opportunity.name}创建并关联项目`}
+                >
+                  创建项目
+                </button>
+              ) : null}
+              {opportunity.can_manage ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRecord(opportunity);
+                  }}
+                  title="录入该商机进展"
+                  aria-label={`录入${opportunity.name}进展`}
+                >
+                  <Plus size={13} />
+                </button>
+              ) : null}
+            </div>
           </div>
         </article>
       ))}
@@ -837,8 +977,13 @@ const ProjectGraphNode = memo(function ProjectGraphNode({
       role="button"
       tabIndex={0}
     >
-      <circle
-        r="54"
+      <rect
+        x="-72"
+        y="-42"
+        width="144"
+        height="84"
+        rx="18"
+        ry="18"
         fill="#fff"
         stroke={projectColor(node.project.id)}
         filter="url(#war-node-shadow)"
@@ -847,7 +992,7 @@ const ProjectGraphNode = memo(function ProjectGraphNode({
         {node.project.name.slice(0, 7)}
       </text>
       <text textAnchor="middle" y="15" className="war-node-sub">
-        {stageLabel(node.project.business_stage)}
+        {projectStatusLabel(node.project.lifecycle_status)}
       </text>
     </g>
   );
@@ -938,7 +1083,7 @@ function GraphFullscreen({
           <strong>商机关系图谱</strong>
         </div>
         <p className="war-graph-fullscreen-sub">
-          拖拽节点重新排版 · 悬停节点聚焦本项目 · 拖动画布平移 · 滚轮缩放
+          拖拽节点重新排版 · 悬停节点聚焦本项目 · 拖动画布平移 · 按钮缩放
         </p>
         <div className="war-graph-fullscreen-tools">
           <Segmented
@@ -1227,28 +1372,6 @@ function ProjectGraph({
           panDrag.current = null;
           setPanning(false);
         }}
-        onWheel={(event) => {
-          event.preventDefault();
-          const rect = event.currentTarget.getBoundingClientRect();
-          const pointerX =
-            ((event.clientX - rect.left) / rect.width) * dims.width;
-          const pointerY =
-            ((event.clientY - rect.top) / rect.height) * dims.height;
-          setViewport((current) => {
-            const nextScale = clamp(
-              current.scale * (event.deltaY > 0 ? 0.9 : 1.1),
-              0.65,
-              1.8,
-            );
-            const worldX = (pointerX - current.x) / current.scale;
-            const worldY = (pointerY - current.y) / current.scale;
-            return {
-              x: pointerX - worldX * nextScale,
-              y: pointerY - worldY * nextScale,
-              scale: nextScale,
-            };
-          });
-        }}
       >
         <defs>
           <filter id="war-node-shadow">
@@ -1367,7 +1490,7 @@ function ProjectGraph({
         </button>
       </div>
       <div className="war-graph-hint">
-        <span>拖动画布平移 · 滚轮缩放 · 拖拽节点排版 · 悬停聚焦</span>
+        <span>拖动画布平移 · 按钮缩放 · 拖拽节点排版 · 悬停聚焦</span>
         {hasCustomLayout ? (
           <button type="button" onClick={() => setOffsets({})}>
             重置排版
@@ -1437,7 +1560,9 @@ function WorkPage({
                   <small>{member.submitted ? "已提交" : "待提交"}</small>
                   <em>
                     {member.submitted
-                      ? `${formatHours(member.weekly_minutes)}h 本周工时`
+                      ? member.weekly_minutes === null
+                        ? "工时不可见"
+                        : `${formatHours(member.weekly_minutes)}h 本周工时`
                       : "尚未形成正式版本"}
                   </em>
                 </span>
@@ -1506,10 +1631,7 @@ function WorkPage({
                 >
                   <header>
                     <b>{project.name}</b>
-                    <span>
-                      {stageLabel(project.business_stage)}
-                      <AttentionPill value={project.attention_status} />
-                    </span>
+                    <span>{projectStatusLabel(project.lifecycle_status)}</span>
                   </header>
                   <div className="war-project-column-body">
                     {project.work_items.length ? (
@@ -1530,18 +1652,12 @@ function WorkPage({
                     )}
                   </div>
                   <footer>
-                    <span>
-                      阶段进度 <b>{project.progress_percent}%</b>
-                    </span>
-                    <i>
-                      <em
-                        style={{ width: `${project.progress_percent}%` }}
-                      />
-                    </i>
                     <div>
                       <AvatarStack people={project.people} />
                       <b>
-                        {formatHours(project.weekly_minutes)}h 本周
+                        {project.weekly_minutes === null
+                          ? "工时不可见"
+                          : `${formatHours(project.weekly_minutes)}h 本周`}
                       </b>
                     </div>
                   </footer>
@@ -1687,9 +1803,8 @@ function OverviewPage({ dashboard }: { dashboard: Dashboard }) {
           icon={<AlertTriangle size={20} />}
           label="在推进商机"
           value={
-            dashboard.projects.filter(
-              (project) => project.attention_status !== "coordinate",
-            ).length
+            dashboard.metrics.tracking_count -
+            dashboard.metrics.coordinate_count
           }
           note="当前周口径"
         />
@@ -1761,7 +1876,7 @@ function OverviewPage({ dashboard }: { dashboard: Dashboard }) {
               <article key={event.id}>
                 <b>{dashboardWeekLabel(dashboard, event.week_start)}</b>
                 <span>
-                  {event.project_name}：进入{" "}
+                  {event.opportunity_name}：进入{" "}
                   {stageLabel(event.business_stage)}
                 </span>
               </article>
@@ -1910,38 +2025,112 @@ function StageDistribution({
   );
 }
 
-function ProjectDetailModal({
-  project,
+function OpportunityDetailModal({
+  opportunity,
   onClose,
   onRecord,
+  onCreateProject,
 }: {
-  project: DashboardProject;
+  opportunity: DashboardOpportunity;
   onClose: () => void;
   onRecord: () => void;
+  onCreateProject: () => void;
 }) {
   return (
     <Modal
-      title={project.name}
-      eyebrow={`${project.type_label} · ${ATTENTION[project.attention_status].label}`}
+      title={opportunity.name}
+      eyebrow={`${opportunity.code} · ${ATTENTION[opportunity.attention_status].label}`}
       onClose={onClose}
       wide
     >
       <div className="war-project-detail">
         <section>
           <header>
-            <h3>
-              当前阶段 · {stageLabel(project.business_stage)}
-            </h3>
-            <AttentionPill value={project.attention_status} />
+            <h3>当前阶段 · {stageLabel(opportunity.business_stage)}</h3>
+            <AttentionPill value={opportunity.attention_status} />
           </header>
-          <StageStepper current={project.business_stage} />
+          <StageStepper current={opportunity.business_stage} />
           <div className="war-detail-progress">
             <span>完成度</span>
-            <i>
-              <em style={{ width: `${project.progress_percent}%` }} />
-            </i>
-            <b>{project.progress_percent}%</b>
+            <i><em style={{ width: `${opportunity.progress_percent}%` }} /></i>
+            <b>{opportunity.progress_percent}%</b>
           </div>
+        </section>
+        <section>
+          <h3>商机信息</h3>
+          <p>客户：{opportunity.customer_name || "暂未填写"}</p>
+          <p>负责人：{opportunity.owner_display_name}</p>
+          <p>{opportunity.description || "暂无补充说明"}</p>
+        </section>
+        <section>
+          <h3>本周推进</h3>
+          <p>{opportunity.work_summary}</p>
+          <p>输出：{opportunity.output_summary}</p>
+        </section>
+        <section>
+          <h3>关联项目</h3>
+          <p>
+            {opportunity.linked_project_name
+              ? `${opportunity.linked_project_code} · ${opportunity.linked_project_name}`
+              : opportunity.can_convert
+                ? "尚未关联项目，可从当前商机创建并自动关联。"
+                : "进入方案交流阶段后可创建关联项目。"}
+          </p>
+        </section>
+        <section>
+          <h3>阶段历史</h3>
+          <div className="war-detail-history">
+            {opportunity.stage_history.map((event) => (
+              <article key={event.id}>
+                <b>{isoWeek(event.week_start)}</b>
+                <span>
+                  进入 {stageLabel(event.business_stage)} · {event.progress_percent}%
+                </span>
+              </article>
+            ))}
+            {!opportunity.stage_history.length ? <p>尚未录入阶段变化</p> : null}
+          </div>
+        </section>
+        <footer>
+          <button className="secondary-button" onClick={onClose}>关闭</button>
+          {opportunity.can_manage ? (
+            <button className="secondary-button" onClick={onRecord}>
+              录入本周进展
+            </button>
+          ) : null}
+          {opportunity.can_convert ? (
+            <button className="primary-button" onClick={onCreateProject}>
+              创建并关联项目
+            </button>
+          ) : null}
+        </footer>
+      </div>
+    </Modal>
+  );
+}
+
+function ProjectDetailModal({
+  project,
+  onClose,
+}: {
+  project: DashboardProject;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      title={project.name}
+      eyebrow={`${project.type_label} · ${projectStatusLabel(project.lifecycle_status)}`}
+      onClose={onClose}
+      wide
+    >
+      <div className="war-project-detail">
+        <section>
+          <header>
+            <h3>项目状态 · {projectStatusLabel(project.lifecycle_status)}</h3>
+          </header>
+          <p>
+            项目节点用于承载任务、工作记录与交付物；商业阶段在关联商机中独立维护。
+          </p>
         </section>
         <section>
           <h3>本周进展与交付</h3>
@@ -1969,67 +2158,154 @@ function ProjectDetailModal({
             {!project.tasks.length ? <p>暂无关联任务</p> : null}
           </div>
         </section>
-        <section>
-          <h3>阶段历史</h3>
-          <div className="war-detail-history">
-            {project.stage_history.map((event) => (
-              <article key={event.id}>
-                <b>{isoWeek(event.week_start)}</b>
-                <span>
-                  进入 {stageLabel(event.business_stage)} ·{" "}
-                  {event.progress_percent}%
-                </span>
-              </article>
-            ))}
-            {!project.stage_history.length ? <p>尚未录入阶段变化</p> : null}
-          </div>
-        </section>
         <footer>
           <button className="secondary-button" onClick={onClose}>
             关闭
           </button>
-          {project.can_manage ? (
-            <button className="primary-button" onClick={onRecord}>
-              录入本周进展
-            </button>
-          ) : null}
         </footer>
       </div>
     </Modal>
   );
 }
 
+function OpportunityCreateModal({
+  currentUser,
+  onClose,
+  onCreated,
+}: {
+  currentUser: User;
+  onClose: () => void;
+  onCreated: () => Promise<void>;
+}) {
+  const [users, setUsers] = useState<UserCandidate[]>([]);
+  const [ownerId, setOwnerId] = useState(
+    currentUser.role === "super_admin" ? "" : currentUser.id,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api.users
+      .candidates()
+      .then((rows) => {
+        if (!cancelled) setUsers(rows);
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(errorMessage(caught, "负责人列表加载失败"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await api.opportunities.create({
+        name: String(form.get("name") ?? "").trim(),
+        customer_name: optionalFormValue(form.get("customer_name")),
+        description: optionalFormValue(form.get("description")),
+        owner_id: ownerId || null,
+        member_ids: form.getAll("member_ids").map(String),
+      });
+      await onCreated();
+    } catch (caught) {
+      setError(errorMessage(caught, "商机创建失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="新建商机" eyebrow="NEW OPPORTUNITY" onClose={onClose} wide>
+      <form className="modal-form" onSubmit={submit}>
+        <div className="form-grid">
+          <label className="field field-span-two">
+            <span>商机名称 *</span>
+            <input name="name" required maxLength={200} autoFocus />
+          </label>
+          <label className="field">
+            <span>客户名称</span>
+            <input name="customer_name" maxLength={200} />
+          </label>
+          <label className="field">
+            <span>商机负责人 *</span>
+            <select
+              value={ownerId}
+              onChange={(event) => setOwnerId(event.target.value)}
+              required
+            >
+              <option value="" disabled>请选择负责人</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>{user.display_name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field field-span-two">
+            <span>商机说明</span>
+            <textarea name="description" rows={4} maxLength={10000} />
+          </label>
+          <fieldset className="tag-options field-span-two">
+            <legend>参与人员</legend>
+            {users
+              .filter((user) => user.id !== ownerId)
+              .map((user) => (
+                <label key={user.id}>
+                  <input type="checkbox" name="member_ids" value={user.id} />
+                  <span>{user.display_name}</span>
+                </label>
+              ))}
+          </fieldset>
+        </div>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={busy || !ownerId}>
+            {busy ? "正在创建…" : "创建商机"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 function ProgressModal({
   dashboard,
-  initialProject,
+  initialOpportunity,
   onClose,
   onSaved,
 }: {
   dashboard: Dashboard;
-  initialProject: DashboardProject;
+  initialOpportunity: DashboardOpportunity;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const [projectId, setProjectId] = useState(initialProject.id);
+  const [opportunityId, setOpportunityId] = useState(initialOpportunity.id);
   const [stage, setStage] = useState<BusinessStage>(
-    initialProject.business_stage,
+    initialOpportunity.business_stage,
   );
   const [attention, setAttention] = useState<AttentionStatus>(
-    initialProject.attention_status,
+    initialOpportunity.attention_status,
   );
-  const [percent, setPercent] = useState(initialProject.progress_percent);
+  const [percent, setPercent] = useState(initialOpportunity.progress_percent);
   const [summary, setSummary] = useState("");
   const [output, setOutput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  function selectProject(id: string) {
-    setProjectId(id);
-    const project = dashboard.projects.find((item) => item.id === id);
-    if (!project) return;
-    setStage(project.business_stage);
-    setAttention(project.attention_status);
-    setPercent(project.progress_percent);
+  function selectOpportunity(id: string) {
+    setOpportunityId(id);
+    const opportunity = dashboard.opportunities.find((item) => item.id === id);
+    if (!opportunity) return;
+    setStage(opportunity.business_stage);
+    setAttention(opportunity.attention_status);
+    setPercent(opportunity.progress_percent);
   }
 
   async function submit(event: FormEvent) {
@@ -2037,7 +2313,12 @@ function ProgressModal({
     setBusy(true);
     setError("");
     try {
-      await api.dashboard.recordProgress(projectId, {
+      const opportunity = dashboard.opportunities.find(
+        (item) => item.id === opportunityId,
+      );
+      if (!opportunity) throw new Error("商机不存在");
+      await api.dashboard.recordProgress(opportunityId, {
+        revision: opportunity.revision,
         week_start: dashboard.selected_week.week_start,
         business_stage: stage,
         attention_status: attention,
@@ -2047,7 +2328,7 @@ function ProgressModal({
       });
       await onSaved();
     } catch (caught) {
-      setError(errorMessage(caught, "项目进展保存失败"));
+      setError(errorMessage(caught, "商机进展保存失败"));
     } finally {
       setBusy(false);
     }
@@ -2055,22 +2336,22 @@ function ProgressModal({
 
   return (
     <Modal
-      title="录入项目周进展"
+      title="录入商机周进展"
       eyebrow={dashboard.selected_week.label}
       onClose={onClose}
     >
       <form className="war-progress-form" onSubmit={submit}>
         <label>
-          <span>项目</span>
+          <span>商机</span>
           <select
-            value={projectId}
-            onChange={(event) => selectProject(event.target.value)}
+            value={opportunityId}
+            onChange={(event) => selectOpportunity(event.target.value)}
           >
-            {dashboard.projects
-              .filter((project) => project.can_manage)
-              .map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
+            {dashboard.opportunities
+              .filter((opportunity) => opportunity.can_manage)
+              .map((opportunity) => (
+                <option key={opportunity.id} value={opportunity.id}>
+                  {opportunity.name}
                 </option>
               ))}
           </select>
@@ -2503,6 +2784,20 @@ function stageLabel(stage: BusinessStage) {
   return STAGES.find((item) => item.id === stage)?.label ?? stage;
 }
 
+function projectStatusLabel(status: DashboardProject["lifecycle_status"]) {
+  return (
+    {
+      pending: "待确认",
+      active: "进行中",
+      paused: "已暂停",
+      completed: "已完成",
+      archived: "已归档",
+      rejected: "已驳回",
+      merged: "已合并",
+    }[status] ?? status
+  );
+}
+
 function taskStatusLabel(task: DashboardTask) {
   return (
     {
@@ -2561,12 +2856,35 @@ function projectColor(value: string) {
 }
 
 function opportunitySummary(dashboard: Dashboard) {
-  return `${dashboard.selected_week.label} · 解决方案部商机摘要\n\n${dashboard.projects
+  return `${dashboard.selected_week.label} · 解决方案部商机摘要\n\n${dashboard.opportunities
     .map(
-      (project) =>
-        `【${ATTENTION[project.attention_status].label}】${project.name}（${stageLabel(project.business_stage)} · ${project.progress_percent}%）：${project.work_summary}`,
+      (opportunity) =>
+        `【${ATTENTION[opportunity.attention_status].label}】${opportunity.name}（${stageLabel(opportunity.business_stage)} · ${opportunity.progress_percent}%）：${opportunity.work_summary}`,
     )
     .join("\n")}`;
+}
+
+function opportunityProjectDraft(
+  opportunity: DashboardOpportunity,
+): ProjectCreationDraft {
+  return {
+    opportunity_id: opportunity.id,
+    opportunity_revision: opportunity.revision,
+    opportunity_code: opportunity.code,
+    name: opportunity.name,
+    description: [
+      opportunity.customer_name ? `客户：${opportunity.customer_name}` : "",
+      opportunity.description ?? "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    owner_id: opportunity.owner_id,
+  };
+}
+
+function optionalFormValue(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  return text || null;
 }
 
 function workSummary(dashboard: Dashboard) {
@@ -2575,7 +2893,9 @@ function workSummary(dashboard: Dashboard) {
       (member) =>
         `${member.display_name}：${
           member.submitted
-            ? `已提交，${formatHours(member.weekly_minutes)}h`
+            ? member.weekly_minutes === null
+              ? "已提交，工时不可见"
+              : `已提交，${formatHours(member.weekly_minutes)}h`
             : "本周未提交"
         }`,
     )

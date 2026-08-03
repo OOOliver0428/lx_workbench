@@ -6,13 +6,17 @@ export type UserRole =
 
 export type PermissionKey =
   | "dashboard.opportunity.view"
+  | "dashboard.opportunity.progress"
+  | "dashboard.opportunity.create"
   | "dashboard.work.view"
   | "dashboard.overview.view"
   | "dashboard.team_summary.generate"
   | "projects.view"
-  | "projects.manage"
+  | "projects.edit"
+  | "projects.create"
   | "tasks.view"
-  | "tasks.manage"
+  | "tasks.edit"
+  | "tasks.create"
   | "work_records.view"
   | "work_records.manage"
   | "weekly_reports.view"
@@ -34,6 +38,11 @@ export interface User {
   must_change_password: boolean;
   revision: number;
 }
+
+export type UserCandidate = Pick<
+  User,
+  "id" | "display_name" | "avatar_key"
+>;
 
 export interface AuthContext {
   user: User;
@@ -64,6 +73,7 @@ export interface PermissionDefinition {
   label: string;
   description: string;
   system_admin_assignable: boolean;
+  requires_team_scope: boolean;
 }
 
 export interface UserPermissions {
@@ -160,6 +170,29 @@ export interface DuplicateCandidate {
   match_type: string;
   similarity: number;
   status: string;
+}
+
+export interface ProjectMergePreview {
+  source_project_id: string;
+  target_project_id: string;
+  source_name: string;
+  target_name: string;
+  task_count: number;
+  work_record_count: number;
+  deliverable_count: number;
+  progress_count: number;
+  invalidated_task_relation_count: number;
+  child_project_count: number;
+  new_member_count: number;
+  new_tag_count: number;
+  aliases_to_move: string[];
+}
+
+export interface ProjectMergeResult {
+  merge_id: string;
+  source_project_id: string;
+  target_project_id: string;
+  moved_counts: Record<string, number>;
 }
 
 export type TaskStatus =
@@ -342,7 +375,7 @@ export interface DashboardMember {
   avatar_key: string | null;
   submitted: boolean;
   submitted_at: string | null;
-  weekly_minutes: number;
+  weekly_minutes: number | null;
   submitted_weeks: string[];
 }
 
@@ -394,7 +427,7 @@ export interface DashboardProject {
   business_stage: BusinessStage;
   attention_status: AttentionStatus;
   progress_percent: number;
-  weekly_minutes: number;
+  weekly_minutes: number | null;
   work_summary: string;
   output_summary: string;
   has_week_progress: boolean;
@@ -402,6 +435,51 @@ export interface DashboardProject {
   tasks: DashboardTask[];
   work_items: DashboardWorkItem[];
   stage_history: DashboardStageHistory[];
+}
+
+export type OpportunityStatus = "active" | "won" | "lost" | "archived";
+
+export interface DashboardOpportunity {
+  id: string;
+  code: string;
+  name: string;
+  customer_name: string | null;
+  description: string | null;
+  owner_id: string;
+  owner_display_name: string;
+  owner_avatar_key: string | null;
+  can_manage: boolean;
+  can_convert: boolean;
+  status: OpportunityStatus;
+  business_stage: BusinessStage;
+  attention_status: AttentionStatus;
+  progress_percent: number;
+  work_summary: string;
+  output_summary: string;
+  has_week_progress: boolean;
+  linked_project_id: string | null;
+  linked_project_code: string | null;
+  linked_project_name: string | null;
+  linked_project_status: ProjectStatus | null;
+  people: DashboardProjectMember[];
+  stage_history: DashboardStageHistory[];
+  revision: number;
+}
+
+export interface Opportunity extends DashboardOpportunity {
+  members: DashboardProjectMember[];
+  project_linked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCreationDraft {
+  opportunity_id: string;
+  opportunity_revision: number;
+  opportunity_code: string;
+  name: string;
+  description: string;
+  owner_id: string;
 }
 
 export interface DashboardDeliverable {
@@ -448,8 +526,8 @@ export interface DashboardStageCount {
 
 export interface DashboardTimelineEvent {
   id: string;
-  project_id: string;
-  project_name: string;
+  opportunity_id: string;
+  opportunity_name: string;
   week_start: string;
   business_stage: BusinessStage;
   attention_status: AttentionStatus;
@@ -478,6 +556,7 @@ export interface Dashboard {
   weeks: DashboardWeek[];
   metrics: DashboardMetrics;
   members: DashboardMember[];
+  opportunities: DashboardOpportunity[];
   projects: DashboardProject[];
   deliverables: DashboardDeliverable[];
   task_links: DashboardTaskLink[];

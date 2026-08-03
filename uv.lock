@@ -899,7 +899,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14,<2" },
     { name = "argon2-cffi", specifier = ">=23.1,<26" },
     { name = "cryptography", specifier = ">=45,<47" },
-    { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "fastapi", specifier = ">=0.140,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.8,<3" },
     { name = "sqlalchemy", specifier = ">=2.0.38,<3" },

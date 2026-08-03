@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,8 @@ WORK_RECORD_SNAPSHOT_FIELDS = (
     "delegated_edit_reason",
     "revision",
 )
+
+SHANGHAI = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
 def get_work_record(db: Session, record_id: str) -> WorkRecord:
@@ -77,6 +81,20 @@ def _add_deliverables(
         )
 
 
+def _active_deliverables_for_record(
+    db: Session,
+    record_id: str,
+) -> list[Deliverable]:
+    return list(
+        db.scalars(
+            select(Deliverable).where(
+                Deliverable.work_record_id == record_id,
+                Deliverable.deleted_at.is_(None),
+            )
+        ).all()
+    )
+
+
 def create_work_record(
     db: Session,
     payload: WorkRecordCreate,
@@ -120,6 +138,7 @@ def list_work_records(
     author_id: str | None = None,
     project_id: str | None = None,
     unassigned_only: bool = False,
+    current_week_only: bool = False,
 ) -> list[WorkRecord]:
     query = select(WorkRecord).where(WorkRecord.deleted_at.is_(None))
     if not is_super_admin(actor):
@@ -130,6 +149,13 @@ def list_work_records(
         query = query.where(WorkRecord.project_id == project_id)
     if unassigned_only:
         query = query.where(WorkRecord.project_id.is_(None))
+    if current_week_only:
+        today = datetime.now(SHANGHAI).date()
+        week_start = today - timedelta(days=today.weekday())
+        query = query.where(
+            WorkRecord.work_date >= week_start,
+            WorkRecord.work_date <= week_start + timedelta(days=6),
+        )
     return list(
         db.scalars(
             query.order_by(WorkRecord.work_date.desc(), WorkRecord.created_at.desc()).limit(1000)
@@ -151,24 +177,44 @@ def update_work_record(
     before = jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS)
     fields = payload.model_fields_set - {"revision", "delegated_edit_reason"}
 
-    project_id = payload.project_id if "project_id" in fields else record.project_id
     task_id = payload.task_id if "task_id" in fields else record.task_id
+    if "project_id" in fields:
+        project_id = payload.project_id
+    elif "task_id" in fields and task_id:
+        project_id = None
+    else:
+        project_id = record.project_id
     project_id = _validate_links(db, project_id=project_id, task_id=task_id)
+    linked_deliverables = _active_deliverables_for_record(db, record.id)
+    if linked_deliverables and not project_id:
+        raise AppError(
+            "DELIVERABLE_PROJECT_REQUIRED",
+            "有交付物的工作记录必须关联项目",
+        )
     for field in ("work_date", "content", "minutes", "risk", "next_action"):
         if field in fields:
             value = getattr(payload, field)
             if field == "content" and value:
                 value = value.strip()
             setattr(record, field, value)
+    now = utc_now()
+    moved_deliverable_count = 0
     if "project_id" in fields or "task_id" in fields:
         record.project_id = project_id
         record.task_id = task_id
+        for deliverable in linked_deliverables:
+            if deliverable.project_id == project_id:
+                continue
+            deliverable.project_id = project_id
+            deliverable.revision += 1
+            deliverable.updated_at = now
+            moved_deliverable_count += 1
     record.last_edited_by = actor.id
     record.delegated_edit_reason = (
         payload.delegated_edit_reason if actor.id != record.author_id else None
     )
     record.revision += 1
-    record.updated_at = utc_now()
+    record.updated_at = now
     record_audit(
         db,
         actor=actor,
@@ -177,7 +223,10 @@ def update_work_record(
         entity_id=record.id,
         before_data=before,
         after_data=jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS),
-        detail={"delegatedEditReason": record.delegated_edit_reason},
+        detail={
+            "delegatedEditReason": record.delegated_edit_reason,
+            "movedDeliverableCount": moved_deliverable_count,
+        },
     )
     return record
 
@@ -196,7 +245,14 @@ def delete_work_record(
         raise AppError("DELEGATED_DELETE_REASON_REQUIRED", "代删他人记录必须填写原因")
     assert_revision(record, revision, entity_name="work_record")
     before = jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS)
-    record.deleted_at = utc_now()
+    now = utc_now()
+    linked_deliverables = _active_deliverables_for_record(db, record.id)
+    for deliverable in linked_deliverables:
+        deliverable.deleted_at = now
+        deliverable.deleted_by = actor.id
+        deliverable.revision += 1
+        deliverable.updated_at = now
+    record.deleted_at = now
     record.deleted_by = actor.id
     record.revision += 1
     record_audit(
@@ -206,5 +262,8 @@ def delete_work_record(
         entity_type="work_record",
         entity_id=record.id,
         before_data=before,
-        detail={"reason": reason},
+        detail={
+            "reason": reason,
+            "deletedDeliverableCount": len(linked_deliverables),
+        },
     )

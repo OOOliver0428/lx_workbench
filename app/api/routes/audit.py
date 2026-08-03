@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
@@ -18,7 +18,7 @@ def list_audit_events(
     entity_id: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     actor: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> list[AuditEventOut]:
     permission_service.assert_permission(db, actor, PermissionKey.AUDIT_VIEW)
     query = select(AuditEvent)
@@ -30,7 +30,10 @@ def list_audit_events(
         )
         query = query.where(
             AuditEvent.entity_type != "work_record",
-            AuditEvent.actor_id.not_in(super_admin_ids),
+            or_(
+                AuditEvent.actor_id.is_(None),
+                AuditEvent.actor_id.not_in(super_admin_ids),
+            ),
         )
     if entity_type:
         query = query.where(AuditEvent.entity_type == entity_type)

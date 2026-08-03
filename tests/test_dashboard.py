@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 
-from app.models import User, WeeklyReport, utc_now
+from app.models import PermissionKey, User, UserPermission, WeeklyReport, utc_now
 from app.schemas import AIChatOut
 from app.services import dashboard as dashboard_service
 from tests.conftest import login
@@ -15,6 +17,45 @@ def _create_project(client: TestClient, csrf: str, name: str) -> dict:
         "/api/v1/projects",
         headers={"X-CSRF-Token": csrf},
         json={"name": name},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _create_opportunity(client: TestClient, csrf: str, name: str) -> dict:
+    response = client.post(
+        "/api/v1/opportunities",
+        headers={"X-CSRF-Token": csrf},
+        json={"name": name, "customer_name": f"{name}客户"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _record_opportunity_progress(
+    client: TestClient,
+    csrf: str,
+    opportunity: dict,
+    week_start,
+    *,
+    stage: str,
+    attention: str,
+    percent: int,
+    summary: str,
+    output: str | None = None,
+) -> dict:
+    response = client.post(
+        f"/api/v1/opportunities/{opportunity['id']}/progress",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "revision": opportunity["revision"],
+            "week_start": week_start.isoformat(),
+            "business_stage": stage,
+            "attention_status": attention,
+            "progress_percent": percent,
+            "summary": summary,
+            "output_summary": output,
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -42,11 +83,34 @@ def _create_task(
     return response.json()
 
 
+def _set_dashboard_permissions(
+    api: dict,
+    user_id: str,
+    *permissions: PermissionKey,
+) -> None:
+    with api["app"].state.session_factory.begin() as db:
+        db.execute(
+            delete(UserPermission).where(
+                UserPermission.user_id == user_id,
+                UserPermission.permission_key.like("dashboard.%"),
+            )
+        )
+        db.add_all(
+            UserPermission(
+                user_id=user_id,
+                permission_key=permission.value,
+                granted_by=api["users"]["super_admin"],
+            )
+            for permission in permissions
+        )
+
+
 def test_dashboard_aggregates_real_project_work_and_progress(api: dict) -> None:
     client: TestClient = api["client"]
-    csrf = login(client, "member")
+    csrf = login(client, "leader")
     week_start = dashboard_service.normalize_week_start()
     project = _create_project(client, csrf, "航天移动平台替代")
+    opportunity = _create_opportunity(client, csrf, "航天移动平台替代商机")
     task = _create_task(
         client,
         csrf,
@@ -68,6 +132,17 @@ def test_dashboard_aggregates_real_project_work_and_progress(api: dict) -> None:
         },
     )
     assert progress_response.status_code == 201, progress_response.text
+    _record_opportunity_progress(
+        client,
+        csrf,
+        opportunity,
+        week_start,
+        stage="solution_confirm",
+        attention="focus",
+        percent=62,
+        summary="完成信创终端适配方案确认，启动认证联调",
+        output="适配确认单",
+    )
 
     work_response = client.post(
         "/api/v1/work-records",
@@ -94,11 +169,15 @@ def test_dashboard_aggregates_real_project_work_and_progress(api: dict) -> None:
     )
     assert dashboard.status_code == 200, dashboard.text
     payload = dashboard.json()
-    assert payload["accessible_pages"] == ["opp", "work"]
+    assert payload["accessible_pages"] == ["opp", "work", "overview"]
     assert payload["metrics"]["tracking_count"] == 1
     assert payload["metrics"]["focus_count"] == 1
     assert payload["metrics"]["deliverable_count"] == 1
     assert payload["metrics"]["total_minutes"] == 180
+    opportunity_row = payload["opportunities"][0]
+    assert opportunity_row["business_stage"] == "solution_confirm"
+    assert opportunity_row["progress_percent"] == 62
+    assert opportunity_row["work_summary"].startswith("完成信创终端适配")
     row = payload["projects"][0]
     assert row["can_manage"] is True
     assert row["business_stage"] == "solution_confirm"
@@ -108,6 +187,180 @@ def test_dashboard_aggregates_real_project_work_and_progress(api: dict) -> None:
     assert row["tasks"][0]["title"] == "OIDC 认证联调"
     assert row["work_items"][0]["content"] == "完成 OIDC 认证接口联调"
     assert payload["deliverables"][0]["name"] == "OIDC 联调记录"
+
+
+def test_dashboard_payload_is_restricted_to_accessible_views(api: dict) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member2")
+    week_start = dashboard_service.normalize_week_start()
+    project_a = _create_project(client, csrf, "Dashboard 权限隔离项目 A")
+    opportunity_a = _create_opportunity(
+        client,
+        csrf,
+        "Dashboard 权限隔离商机 A",
+    )
+    project_b = _create_project(client, csrf, "异构系统安全评审")
+    task_a = _create_task(
+        client,
+        csrf,
+        project_id=project_a["id"],
+        owner_id=api["users"]["member2"],
+        title="权限隔离任务 A",
+    )
+    task_b = _create_task(
+        client,
+        csrf,
+        project_id=project_b["id"],
+        owner_id=api["users"]["member2"],
+        title="权限隔离任务 B",
+    )
+    relation = client.post(
+        "/api/v1/tasks/relations",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "source_task_id": task_a["id"],
+            "target_task_id": task_b["id"],
+            "label": "仅商机视图可见的关系",
+        },
+    )
+    assert relation.status_code == 201, relation.text
+    progress = client.post(
+        f"/api/v1/projects/{project_a['id']}/progress",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "week_start": week_start.isoformat(),
+            "business_stage": "solution_exchange",
+            "attention_status": "steady",
+            "progress_percent": 40,
+            "output_summary": "OPPORTUNITY_OUTPUT_SENTINEL",
+            "summary": "权限隔离测试进展",
+        },
+    )
+    assert progress.status_code == 201, progress.text
+    _record_opportunity_progress(
+        client,
+        csrf,
+        opportunity_a,
+        week_start,
+        stage="solution_exchange",
+        attention="steady",
+        percent=40,
+        summary="权限隔离测试商机进展",
+        output="OPPORTUNITY_OUTPUT_SENTINEL",
+    )
+    work = client.post(
+        "/api/v1/work-records",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "work_date": week_start.isoformat(),
+            "content": "仅工作视图可见的工作明细",
+            "minutes": 60,
+            "project_id": project_a["id"],
+            "task_id": task_a["id"],
+            "deliverables": [
+                {
+                    "name": "仅工作视图可见的交付物",
+                    "url": "https://example.com/dashboard-permission",
+                }
+            ],
+        },
+    )
+    assert work.status_code == 201, work.text
+
+    _set_dashboard_permissions(
+        api,
+        api["users"]["member2"],
+        PermissionKey.DASHBOARD_OPPORTUNITY_VIEW,
+    )
+    opportunity = client.get("/api/v1/dashboard").json()
+    opportunity_raw = json.dumps(opportunity, ensure_ascii=False)
+    assert opportunity["accessible_pages"] == ["opp"]
+    assert opportunity["projects"]
+    assert opportunity["projects"][0]["tasks"]
+    assert all(not project["work_items"] for project in opportunity["projects"])
+    assert all(project["weekly_minutes"] is None for project in opportunity["projects"])
+    assert work.json()["content"] not in opportunity_raw
+    assert work.json()["deliverables"][0]["name"] not in opportunity_raw
+    assert "https://example.com/dashboard-permission" not in opportunity_raw
+    assert opportunity["task_links"]
+    assert opportunity["stage_distribution"]
+    assert opportunity["stage_timeline"]
+    assert opportunity["members"] == []
+    assert opportunity["deliverables"] == []
+    assert opportunity["trends"] == []
+    assert opportunity["metrics"]["total_minutes"] == 0
+    assert opportunity["metrics"]["deliverable_count"] == 0
+    assert opportunity["metrics"]["submitted_count"] == 0
+    assert opportunity["metrics"]["member_count"] == 0
+    assert opportunity["latest_team_summary"] is None
+
+    _set_dashboard_permissions(
+        api,
+        api["users"]["leader"],
+        PermissionKey.DASHBOARD_WORK_VIEW,
+    )
+    leader_csrf = login(client, "leader")
+    leader_work = client.post(
+        "/api/v1/work-records",
+        headers={"X-CSRF-Token": leader_csrf},
+        json={
+            "work_date": week_start.isoformat(),
+            "content": "负责人本周工作视图记录",
+            "minutes": 30,
+            "project_id": project_a["id"],
+            "task_id": task_a["id"],
+            "deliverables": [
+                {
+                    "name": "负责人可见交付物",
+                    "url": "https://example.com/leader-deliverable",
+                }
+            ],
+        },
+    )
+    assert leader_work.status_code == 201, leader_work.text
+    work_view = client.get("/api/v1/dashboard").json()
+    work_view_raw = json.dumps(work_view, ensure_ascii=False)
+    assert work_view["accessible_pages"] == ["work"]
+    assert work_view["members"]
+    assert work_view["deliverables"][0]["name"] == "负责人可见交付物"
+    assert any(project["work_items"] for project in work_view["projects"])
+    assert all(not project["tasks"] for project in work_view["projects"])
+    assert all(not project["stage_history"] for project in work_view["projects"])
+    assert all(project["can_manage"] is False for project in work_view["projects"])
+    assert work_view["task_links"] == []
+    assert work_view["trends"] == []
+    assert work_view["stage_distribution"] == []
+    assert work_view["stage_timeline"] == []
+    assert work_view["metrics"]["tracking_count"] == 0
+    assert work_view["metrics"]["focus_count"] == 0
+    assert work_view["metrics"]["stage_advanced_count"] == 0
+    assert work_view["metrics"]["deliverable_count"] == 1
+    assert work_view["metrics"]["coordinate_count"] == 0
+    assert work_view["metrics"]["total_minutes"] == 30
+    assert progress.json()["summary"] not in work_view_raw
+    assert "OPPORTUNITY_OUTPUT_SENTINEL" not in work_view_raw
+
+    _set_dashboard_permissions(
+        api,
+        api["users"]["member2"],
+        PermissionKey.DASHBOARD_OVERVIEW_VIEW,
+    )
+    login(client, "member2")
+    overview = client.get("/api/v1/dashboard").json()
+    assert overview["accessible_pages"] == ["overview"]
+    assert overview["projects"] == []
+    assert overview["deliverables"] == []
+    assert overview["task_links"] == []
+    assert overview["members"]
+    assert all(member["weekly_minutes"] is None for member in overview["members"])
+    assert len(overview["trends"]) == 5
+    assert overview["stage_distribution"]
+    assert overview["stage_timeline"]
+    assert overview["metrics"]["tracking_count"] == 1
+    assert overview["metrics"]["total_minutes"] == 0
+    assert overview["metrics"]["submitted_count"] == 0
+    assert overview["metrics"]["member_count"] == 0
+    assert overview["latest_team_summary"] is None
 
 
 def test_dashboard_never_exposes_other_users_work_records(api: dict) -> None:

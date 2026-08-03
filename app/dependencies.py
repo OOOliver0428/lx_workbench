@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.errors import AppError, PermissionDeniedError
 from app.models import AuthSession, User
@@ -30,6 +31,13 @@ def get_db(request: Request) -> Iterator[Session]:
     try:
         yield db
         db.commit()
+    except StaleDataError as error:
+        db.rollback()
+        raise AppError(
+            "REVISION_CONFLICT",
+            "数据已被其他操作更新，请刷新后重试",
+            status_code=409,
+        ) from error
     except Exception:
         db.rollback()
         raise
@@ -39,7 +47,7 @@ def get_db(request: Request) -> Iterator[Session]:
 
 def get_current_session(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> tuple[AuthSession, User]:
     cookie_name = request.app.state.settings.session_cookie_name
     token = request.cookies.get(cookie_name)

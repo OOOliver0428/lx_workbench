@@ -19,6 +19,7 @@ class PermissionDefinition:
     label: str
     description: str
     system_admin_assignable: bool = True
+    requires_team_scope: bool = False
 
 
 PERMISSION_CATALOG = (
@@ -30,11 +31,26 @@ PERMISSION_CATALOG = (
         "查看作战台的商机清单、阶段分布和项目关系图。",
     ),
     PermissionDefinition(
+        PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS,
+        "dashboard",
+        "作战台视图",
+        "录入商机进展",
+        "查看商机追踪，并为有权限管理的商机录入阶段进展。",
+    ),
+    PermissionDefinition(
+        PermissionKey.DASHBOARD_OPPORTUNITY_CREATE,
+        "dashboard",
+        "作战台视图",
+        "新建商机",
+        "查看商机追踪、录入进展并创建新的商机。",
+    ),
+    PermissionDefinition(
         PermissionKey.DASHBOARD_WORK_VIEW,
         "dashboard",
         "作战台视图",
         "工作管理",
-        "查看作战台的成员提交、交付物和项目工作摘要。",
+        "查看成员提交、交付物和项目工作摘要；仅团队负责人及以上且有直属成员时生效。",
+        requires_team_scope=True,
     ),
     PermissionDefinition(
         PermissionKey.DASHBOARD_OVERVIEW_VIEW,
@@ -48,7 +64,8 @@ PERMISSION_CATALOG = (
         "dashboard",
         "作战台视图",
         "生成团队 AI 总结",
-        "使用已正式提交的周报生成团队总结，并查看自己生成的历史团队周报。",
+        "查看工作管理并使用已提交周报生成团队总结；仅有直属成员的团队负责人及以上可用。",
+        requires_team_scope=True,
     ),
     PermissionDefinition(
         PermissionKey.PROJECTS_VIEW,
@@ -58,11 +75,18 @@ PERMISSION_CATALOG = (
         "进入项目模块并读取项目主数据。",
     ),
     PermissionDefinition(
-        PermissionKey.PROJECTS_MANAGE,
+        PermissionKey.PROJECTS_EDIT,
         "projects",
         "项目管理",
-        "管理项目",
-        "创建、编辑、流转、合并项目并维护成员、标签和进展。",
+        "编辑项目",
+        "编辑、流转、合并项目并维护成员、标签和进展。",
+    ),
+    PermissionDefinition(
+        PermissionKey.PROJECTS_CREATE,
+        "projects",
+        "项目管理",
+        "创建项目",
+        "创建项目，同时包含项目编辑和查看权限。",
     ),
     PermissionDefinition(
         PermissionKey.TASKS_VIEW,
@@ -72,11 +96,18 @@ PERMISSION_CATALOG = (
         "进入任务模块并读取任务与协作信息。",
     ),
     PermissionDefinition(
-        PermissionKey.TASKS_MANAGE,
+        PermissionKey.TASKS_EDIT,
         "tasks",
         "任务管理",
-        "管理任务",
-        "创建、编辑、流转、改派任务并建立跨项目任务关联。",
+        "编辑任务",
+        "编辑、流转、改派任务并建立跨项目任务关联。",
+    ),
+    PermissionDefinition(
+        PermissionKey.TASKS_CREATE,
+        "tasks",
+        "任务管理",
+        "创建任务",
+        "创建任务，同时包含任务编辑和查看权限。",
     ),
     PermissionDefinition(
         PermissionKey.WORK_RECORDS_VIEW,
@@ -155,15 +186,27 @@ SYSTEM_ADMIN_ASSIGNABLE_KEYS = {
     if definition.system_admin_assignable
 }
 PERMISSION_IMPLICATIONS = {
+    PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS.value: {
+        PermissionKey.DASHBOARD_OPPORTUNITY_VIEW.value,
+    },
+    PermissionKey.DASHBOARD_OPPORTUNITY_CREATE.value: {
+        PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS.value,
+    },
     PermissionKey.DASHBOARD_TEAM_SUMMARY.value: {
         PermissionKey.DASHBOARD_WORK_VIEW.value,
         PermissionKey.WEEKLY_REPORTS_VIEW.value,
     },
-    PermissionKey.PROJECTS_MANAGE.value: {
+    PermissionKey.PROJECTS_EDIT.value: {
         PermissionKey.PROJECTS_VIEW.value,
     },
-    PermissionKey.TASKS_MANAGE.value: {
+    PermissionKey.PROJECTS_CREATE.value: {
+        PermissionKey.PROJECTS_EDIT.value,
+    },
+    PermissionKey.TASKS_EDIT.value: {
         PermissionKey.TASKS_VIEW.value,
+    },
+    PermissionKey.TASKS_CREATE.value: {
+        PermissionKey.TASKS_EDIT.value,
     },
     PermissionKey.TASKS_VIEW.value: {
         PermissionKey.PROJECTS_VIEW.value,
@@ -174,6 +217,21 @@ PERMISSION_IMPLICATIONS = {
     PermissionKey.WEEKLY_REPORTS_MANAGE.value: {
         PermissionKey.WEEKLY_REPORTS_VIEW.value,
     },
+}
+
+TEAM_SCOPE_PERMISSION_KEYS = {
+    PermissionKey.DASHBOARD_WORK_VIEW.value,
+    PermissionKey.DASHBOARD_TEAM_SUMMARY.value,
+}
+
+DEFAULT_NEW_USER_PERMISSION_KEYS = {
+    PermissionKey.PROJECTS_VIEW.value,
+    PermissionKey.TASKS_VIEW.value,
+    PermissionKey.WORK_RECORDS_VIEW.value,
+    PermissionKey.WORK_RECORDS_MANAGE.value,
+    PermissionKey.WEEKLY_REPORTS_VIEW.value,
+    PermissionKey.WEEKLY_REPORTS_MANAGE.value,
+    PermissionKey.AI_USE.value,
 }
 
 
@@ -192,10 +250,41 @@ def assigned_permission_keys(db: Session, user_id: str) -> set[str]:
     return assigned
 
 
+def has_team_scope(db: Session, user: User) -> bool:
+    if user.role not in {
+        UserRole.TEAM_LEADER.value,
+        UserRole.SYSTEM_ADMIN.value,
+        UserRole.SUPER_ADMIN.value,
+    }:
+        return False
+    return db.scalar(
+        select(User.id)
+        .where(
+            User.leader_id == user.id,
+            User.is_active.is_(True),
+        )
+        .limit(1)
+    ) is not None
+
+
+def _eligible_assigned_permissions(
+    db: Session,
+    user: User,
+    assigned: set[str],
+) -> set[str]:
+    if has_team_scope(db, user):
+        return assigned
+    return assigned - TEAM_SCOPE_PERMISSION_KEYS
+
+
 def effective_permission_keys(db: Session, user: User) -> list[str]:
     if is_super_admin(user):
         return list(ALL_PERMISSION_KEYS)
-    assigned = assigned_permission_keys(db, user.id)
+    assigned = _eligible_assigned_permissions(
+        db,
+        user,
+        assigned_permission_keys(db, user.id),
+    )
     effective = _expand_permissions(assigned)
     return [key for key in ALL_PERMISSION_KEYS if key in effective]
 
@@ -204,7 +293,11 @@ def has_permission(db: Session, user: User, key: PermissionKey | str) -> bool:
     if is_super_admin(user):
         return True
     permission_key = key.value if isinstance(key, PermissionKey) else key
-    assigned = assigned_permission_keys(db, user.id)
+    assigned = _eligible_assigned_permissions(
+        db,
+        user,
+        assigned_permission_keys(db, user.id),
+    )
     return permission_key in _expand_permissions(assigned)
 
 
@@ -292,7 +385,12 @@ def replace_user_permissions(
         )
 
     existing = assigned_permission_keys(db, target.id)
-    desired = set(requested_keys)
+    desired = _expand_permissions(set(requested_keys))
+    if desired & TEAM_SCOPE_PERMISSION_KEYS and not has_team_scope(db, target):
+        raise AppError(
+            "TEAM_SCOPE_PERMISSION_INELIGIBLE",
+            "工作管理权限仅可授予有直属成员的团队负责人或系统管理员",
+        )
     if not is_super_admin(actor):
         protected_existing = existing - SYSTEM_ADMIN_ASSIGNABLE_KEYS
         protected_requested = desired - SYSTEM_ADMIN_ASSIGNABLE_KEYS
@@ -331,5 +429,25 @@ def replace_user_permissions(
             "revision": target.revision,
         },
     )
+    db.flush()
+    return [key for key in ALL_PERMISSION_KEYS if key in desired]
+
+
+def grant_initial_permissions(
+    db: Session,
+    *,
+    user: User,
+    actor: User,
+) -> list[str]:
+    desired = _expand_permissions(set(DEFAULT_NEW_USER_PERMISSION_KEYS))
+    for key in desired:
+        db.add(
+            UserPermission(
+                user_id=user.id,
+                permission_key=key,
+                granted_by=actor.id,
+            )
+        )
+    db.info.setdefault("permission_keys_by_user", {})[user.id] = frozenset(desired)
     db.flush()
     return [key for key in ALL_PERMISSION_KEYS if key in desired]

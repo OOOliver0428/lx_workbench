@@ -2,21 +2,38 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { api, ApiClientError } from "../api";
-import type { ProjectSummary, Task, TaskStatus, User } from "../types";
+import { api, apiErrorMessage, ApiClientError } from "../api";
+import { canManageTaskObject } from "../object-permissions";
+import type {
+  ProjectSummary,
+  Task,
+  TaskStatus,
+  User,
+  UserCandidate,
+} from "../types";
 import { AvatarImage } from "./avatar";
 import { Plus } from "./icons";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
 
-export function TasksView({ canManage }: { canManage: boolean }) {
+export function TasksView({
+  canEdit,
+  canCreate,
+  currentUser,
+}: {
+  canEdit: boolean;
+  canCreate: boolean;
+  currentUser: User;
+}) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<UserCandidate[]>([]);
   const [status, setStatus] = useState("");
   const [projectId, setProjectId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [reassigningTask, setReassigningTask] = useState<Task | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -27,7 +44,7 @@ export function TasksView({ canManage }: { canManage: boolean }) {
       const [taskRows, projectRows, userRows] = await Promise.all([
         api.tasks.list(params),
         api.projects.list(),
-        api.users.list(),
+        api.users.candidates(),
       ]);
       setTasks(taskRows);
       setProjects(projectRows);
@@ -48,6 +65,10 @@ export function TasksView({ canManage }: { canManage: boolean }) {
 
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects],
+  );
+  const projectOwners = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.owner_id])),
     [projects],
   );
   const userNames = useMemo(
@@ -94,7 +115,7 @@ export function TasksView({ canManage }: { canManage: boolean }) {
           <h1>任务</h1>
           <p>围绕项目组织可执行事项，清楚记录负责人、阻塞与完成结果。</p>
         </div>
-        {canManage ? (
+        {canCreate ? (
           <button className="primary-button" onClick={() => setCreateOpen(true)}>
             <Plus size={14} /> 新建任务
           </button>
@@ -176,8 +197,27 @@ export function TasksView({ canManage }: { canManage: boolean }) {
                 <div className="blocker-note">阻塞：{task.blocker_reason}</div>
               ) : null}
               <footer>
-                {canManage
-                  ? nextTaskActions(task.status).map((action) => (
+                {canManageTaskObject(
+                  canEdit,
+                  currentUser,
+                  task,
+                  projectOwners.get(task.project_id),
+                )
+                  ? (
+                    <>
+                      <button
+                        className="text-button"
+                        onClick={() => setEditingTask(task)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={() => setReassigningTask(task)}
+                      >
+                        转派
+                      </button>
+                      {nextTaskActions(task.status).map((action) => (
                       <button
                         key={action.status}
                         className={
@@ -187,7 +227,9 @@ export function TasksView({ canManage }: { canManage: boolean }) {
                       >
                         {action.label}
                       </button>
-                    ))
+                      ))}
+                    </>
+                  )
                   : null}
               </footer>
             </article>
@@ -202,13 +244,37 @@ export function TasksView({ canManage }: { canManage: boolean }) {
         )}
       </section>
 
-      {createOpen && canManage ? (
+      {createOpen && canCreate ? (
         <TaskCreateModal
           projects={projects}
           users={users}
           onClose={() => setCreateOpen(false)}
           onCreated={async () => {
             setCreateOpen(false);
+            await load();
+          }}
+        />
+      ) : null}
+
+      {editingTask ? (
+        <TaskEditModal
+          task={editingTask}
+          users={users}
+          onClose={() => setEditingTask(null)}
+          onSaved={async () => {
+            setEditingTask(null);
+            await load();
+          }}
+        />
+      ) : null}
+
+      {reassigningTask ? (
+        <TaskReassignModal
+          task={reassigningTask}
+          users={users}
+          onClose={() => setReassigningTask(null)}
+          onSaved={async () => {
+            setReassigningTask(null);
             await load();
           }}
         />
@@ -224,7 +290,7 @@ function TaskCreateModal({
   onCreated,
 }: {
   projects: ProjectSummary[];
-  users: User[];
+  users: UserCandidate[];
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -330,6 +396,198 @@ function TaskCreateModal({
           </button>
           <button className="primary-button" disabled={submitting}>
             {submitting ? "正在创建…" : "创建任务"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function TaskEditModal({
+  task,
+  users,
+  onClose,
+  onSaved,
+}: {
+  task: Task;
+  users: UserCandidate[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await api.tasks.update(task.id, {
+        revision: task.revision,
+        title: String(form.get("title")).trim(),
+        description: optional(form.get("description")),
+        priority: String(form.get("priority")),
+        due_date: optional(form.get("due_date")),
+        collaborator_ids: form
+          .getAll("collaborator_ids")
+          .map(String)
+          .filter((userId) => userId !== task.owner_id),
+      });
+      await onSaved();
+    } catch (caught) {
+      setError(apiErrorMessage(caught, "任务编辑失败，请稍后重试。"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title="编辑任务" eyebrow="EDIT TASK" onClose={onClose} wide>
+      <form className="modal-form" onSubmit={submit}>
+        <div className="form-grid">
+          <label className="field field-span-two">
+            <span>任务标题 *</span>
+            <input
+              name="title"
+              defaultValue={task.title}
+              required
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>优先级</span>
+            <select name="priority" defaultValue={task.priority}>
+              <option value="p0">P0 · 紧急</option>
+              <option value="p1">P1 · 正常</option>
+              <option value="p2">P2 · 较低</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>截止日期</span>
+            <input
+              name="due_date"
+              type="date"
+              defaultValue={task.due_date ?? ""}
+            />
+          </label>
+          <label className="field field-span-two">
+            <span>任务说明</span>
+            <textarea
+              name="description"
+              rows={4}
+              defaultValue={task.description ?? ""}
+            />
+          </label>
+          <fieldset className="people-options field-span-two">
+            <legend>协作成员</legend>
+            {users
+              .filter((user) => user.id !== task.owner_id)
+              .map((user) => (
+                <label key={user.id}>
+                  <input
+                    type="checkbox"
+                    name="collaborator_ids"
+                    value={user.id}
+                    defaultChecked={task.collaborator_ids.includes(user.id)}
+                  />
+                  <AvatarImage
+                    avatarKey={user.avatar_key}
+                    displayName={user.display_name}
+                    decorative
+                  />
+                  <strong>{user.display_name}</strong>
+                </label>
+              ))}
+          </fieldset>
+        </div>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在保存…" : "保存任务"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function TaskReassignModal({
+  task,
+  users,
+  onClose,
+  onSaved,
+}: {
+  task: Task;
+  users: UserCandidate[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const ownerId = String(form.get("owner_id"));
+    const reason = String(form.get("reason") ?? "").trim();
+    if (!reason) {
+      setError("请填写转派原因。");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.tasks.reassign(task.id, {
+        revision: task.revision,
+        owner_id: ownerId,
+        reason,
+      });
+      await onSaved();
+    } catch (caught) {
+      setError(apiErrorMessage(caught, "任务转派失败，请稍后重试。"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title="转派任务" eyebrow="REASSIGN TASK" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <label className="field">
+          <span>新负责人 *</span>
+          <select name="owner_id" required defaultValue="">
+            <option value="" disabled>
+              选择新负责人
+            </option>
+            {users
+              .filter((user) => user.id !== task.owner_id)
+              .map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.display_name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>转派原因 *</span>
+          <textarea
+            name="reason"
+            rows={4}
+            placeholder="说明职责调整、工作交接或其他转派原因"
+            required
+          />
+        </label>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在转派…" : "确认转派"}
           </button>
         </footer>
       </form>

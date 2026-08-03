@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from app.audit import record_audit
+from app.audit import record_audit, record_audit_committed
 from app.dependencies import get_current_session, get_db, require_csrf_session
 from app.errors import AppError
 from app.identity import normalize_user_identifier
@@ -18,6 +18,7 @@ from app.security import (
     hash_password,
     hash_session_token,
     verify_password,
+    verify_password_for_login,
 )
 from app.services.permissions import effective_permission_keys
 
@@ -29,13 +30,12 @@ def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AuthContextOut:
     throttle = request.app.state.login_throttle
     client_ip = request.client.host if request.client else "unknown"
     login_identifier = normalize_user_identifier(payload.login_name)
-    key = f"{client_ip}:{login_identifier}"
-    if throttle.is_blocked(key):
+    if throttle.is_login_blocked(client_ip, login_identifier):
         raise AppError("LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试", status_code=429)
 
     user = db.scalar(
@@ -46,14 +46,24 @@ def login(
             )
         )
     )
-    if not user or not user.is_active or not verify_password(user.password_hash, payload.password):
-        throttle.record_failure(key)
-        record_audit(
-            db,
-            actor=user,
+    can_authenticate = bool(user and user.is_active)
+    password_matches = verify_password_for_login(
+        user.password_hash if can_authenticate and user else None,
+        payload.password,
+    )
+    if not can_authenticate or not password_matches:
+        throttle.record_login_failure(client_ip, login_identifier)
+        actor_id = user.id if user else None
+        entity_id = user.id if user else None
+        db.rollback()
+        record_audit_committed(
+            request.app.state.session_factory,
+            actor_id=actor_id,
             action="auth.login",
             entity_type="user",
-            entity_id=user.id if user else None,
+            entity_id=entity_id,
+            request_id=getattr(request.state, "request_id", None),
+            client_ip=client_ip,
             result="failure",
             detail={"loginIdentifier": payload.login_name},
         )
@@ -63,7 +73,7 @@ def login(
             status_code=401,
         )
 
-    throttle.clear(key)
+    throttle.clear_login(client_ip, login_identifier)
     token = generate_session_token()
     csrf_token = generate_csrf_token()
     expires_at = utc_now() + timedelta(hours=request.app.state.settings.session_ttl_hours)
@@ -105,7 +115,7 @@ def login(
 def logout(
     request: Request,
     auth: tuple[AuthSession, User] = Depends(require_csrf_session),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> Response:
     auth_session, user = auth
     auth_session.revoked_at = utc_now()
@@ -124,7 +134,7 @@ def logout(
 @router.get("/me", response_model=AuthContextOut)
 def me(
     auth: tuple[AuthSession, User] = Depends(get_current_session),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> AuthContextOut:
     auth_session, user = auth
     return AuthContextOut(
@@ -139,7 +149,7 @@ def me(
 def change_password(
     payload: PasswordChange,
     auth: tuple[AuthSession, User] = Depends(require_csrf_session),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> Response:
     auth_session, user = auth
     if not verify_password(user.password_hash, payload.current_password):

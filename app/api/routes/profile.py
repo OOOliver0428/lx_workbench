@@ -22,7 +22,7 @@ def list_avatar_options(
 def update_my_avatar(
     payload: ProfileAvatarUpdate,
     actor: User = Depends(require_csrf),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ) -> UserOut:
     if payload.revision != actor.revision:
         raise ConflictError(

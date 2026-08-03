@@ -45,14 +45,15 @@ export function AdminView({ context }: { context: AuthContext }) {
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [createTagOpen, setCreateTagOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editingTag, setEditingTag] = useState<ProjectTag | null>(null);
   const [permissionUser, setPermissionUser] = useState<User | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
       const [userRows, tagRows, auditRows] = await Promise.all([
-        showUsers ? api.users.list() : Promise.resolve([]),
-        canManageTags ? api.tags.list() : Promise.resolve([]),
+        showUsers ? api.users.list(true) : Promise.resolve([]),
+        canManageTags ? api.tags.list(true) : Promise.resolve([]),
         canViewAudit ? api.audit.list() : Promise.resolve([]),
       ]);
       setUsers(userRows);
@@ -197,7 +198,16 @@ export function AdminView({ context }: { context: AuthContext }) {
                 <p>{tag.description || "暂未填写标签说明。"}</p>
               </div>
               <span className={`tag tag-${tag.name}`}>{tag.name}</span>
-              <small>{tag.is_active ? "使用中" : "已停用"}</small>
+              <div className="user-card-actions">
+                <small>{tag.is_active ? "使用中" : "已停用"}</small>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setEditingTag(tag)}
+                >
+                  编辑
+                </button>
+              </div>
             </article>
           ))}
         </section>
@@ -253,6 +263,16 @@ export function AdminView({ context }: { context: AuthContext }) {
           }}
         />
       ) : null}
+      {editingTag && canManageTags ? (
+        <TagEditModal
+          tag={editingTag}
+          onClose={() => setEditingTag(null)}
+          onUpdated={async () => {
+            setEditingTag(null);
+            await load();
+          }}
+        />
+      ) : null}
       {editingUser && canManageUsers ? (
         <UserEditModal
           user={editingUser}
@@ -269,6 +289,10 @@ export function AdminView({ context }: { context: AuthContext }) {
         <PermissionModal
           user={permissionUser}
           actorRole={context.user.role}
+          hasDirectReports={users.some(
+            (candidate) =>
+              candidate.is_active && candidate.leader_id === permissionUser.id,
+          )}
           onClose={() => setPermissionUser(null)}
           onSaved={async () => {
             setPermissionUser(null);
@@ -548,14 +572,46 @@ function UserEditModal({
   );
 }
 
+const PERMISSION_DEPENDENCIES: Partial<
+  Record<PermissionKey, PermissionKey[]>
+> = {
+  "dashboard.opportunity.progress": ["dashboard.opportunity.view"],
+  "dashboard.opportunity.create": ["dashboard.opportunity.progress"],
+  "dashboard.team_summary.generate": [
+    "dashboard.work.view",
+    "weekly_reports.view",
+  ],
+  "projects.edit": ["projects.view"],
+  "projects.create": ["projects.edit"],
+  "tasks.edit": ["tasks.view"],
+  "tasks.create": ["tasks.edit"],
+  "tasks.view": ["projects.view"],
+  "work_records.manage": ["work_records.view"],
+  "weekly_reports.manage": ["weekly_reports.view"],
+};
+
+function permissionClosure(permission: PermissionKey): Set<PermissionKey> {
+  const result = new Set<PermissionKey>();
+  const pending = [permission];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current || result.has(current)) continue;
+    result.add(current);
+    pending.push(...(PERMISSION_DEPENDENCIES[current] ?? []));
+  }
+  return result;
+}
+
 function PermissionModal({
   user,
   actorRole,
+  hasDirectReports,
   onClose,
   onSaved,
 }: {
   user: User;
   actorRole: UserRole;
+  hasDirectReports: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -576,7 +632,7 @@ function PermissionModal({
         if (cancelled) return;
         setCatalog(definitions);
         setDetails(current);
-        setSelected(new Set(current.assigned_permissions));
+        setSelected(new Set(current.effective_permissions));
       })
       .catch((caught) => {
         if (cancelled) return;
@@ -612,8 +668,21 @@ function PermissionModal({
   function toggle(permission: PermissionKey, checked: boolean) {
     setSelected((current) => {
       const next = new Set(current);
-      if (checked) next.add(permission);
-      else next.delete(permission);
+      if (checked) {
+        for (const implied of permissionClosure(permission)) next.add(implied);
+      } else {
+        next.delete(permission);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const selectedPermission of Array.from(next)) {
+            if (permissionClosure(selectedPermission).has(permission)) {
+              next.delete(selectedPermission);
+              changed = true;
+            }
+          }
+        }
+      }
       return next;
     });
   }
@@ -648,7 +717,7 @@ function PermissionModal({
     >
       <form className="modal-form permission-modal-form" onSubmit={submit}>
         <InlineNotice>
-          角色不再自动附带业务功能。勾选结果会同时控制页面、按钮和后端接口；管理类权限会自动包含对应的查看权限。
+          权限按层级递增：勾选较高权限会同步勾选其查看和编辑前置权限；取消低级权限会同步取消依赖它的高级权限。
         </InlineNotice>
         {actorRole === "system_admin" ? (
           <InlineNotice tone="warning">
@@ -677,9 +746,14 @@ function PermissionModal({
                 </header>
                 <div>
                   {group.permissions.map((permission) => {
-                    const assignable =
+                    const roleAssignable =
                       actorRole === "super_admin" ||
                       permission.system_admin_assignable;
+                    const teamScopeEligible =
+                      !permission.requires_team_scope ||
+                      (["team_leader", "system_admin"].includes(user.role) &&
+                        hasDirectReports);
+                    const assignable = roleAssignable && teamScopeEligible;
                     return (
                       <label
                         className={`permission-option${
@@ -699,7 +773,11 @@ function PermissionModal({
                           <strong>{permission.label}</strong>
                           <small>{permission.description}</small>
                         </span>
-                        {!assignable ? <em>仅超级管理员</em> : null}
+                        {!roleAssignable ? (
+                          <em>仅超级管理员</em>
+                        ) : !teamScopeEligible ? (
+                          <em>需团队负责人及直属成员</em>
+                        ) : null}
                       </label>
                     );
                   })}
@@ -781,6 +859,117 @@ function TagCreateModal({
       </form>
     </Modal>
   );
+}
+
+function TagEditModal({
+  tag,
+  onClose,
+  onUpdated,
+}: {
+  tag: ProjectTag;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const isActive = form.get("is_active") === "on";
+    if (
+      tag.is_active &&
+      !isActive &&
+      !window.confirm(`确认停用标签“${tag.name}”？已有项目关联会保留。`)
+    ) {
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.tags.update(tag.id, {
+        revision: tag.revision,
+        name: String(form.get("name")),
+        description: optionalText(form.get("description")),
+        color: optionalText(form.get("color")),
+        sort_order: Number(form.get("sort_order")),
+        is_active: isActive,
+      });
+      onUpdated();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "标签更新失败",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title={`编辑项目标签 · ${tag.name}`} eyebrow="EDIT TAG" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <label className="field">
+          <span>标签名称 *</span>
+          <input name="name" defaultValue={tag.name} required autoFocus />
+        </label>
+        <label className="field">
+          <span>说明</span>
+          <textarea
+            name="description"
+            rows={4}
+            defaultValue={tag.description ?? ""}
+          />
+        </label>
+        <div className="form-grid">
+          <label className="field color-field">
+            <span>标识颜色</span>
+            <input
+              name="color"
+              type="color"
+              defaultValue={
+                /^#[0-9a-f]{6}$/i.test(tag.color ?? "")
+                  ? tag.color ?? "#2563eb"
+                  : "#2563eb"
+              }
+            />
+          </label>
+          <label className="field">
+            <span>排序值</span>
+            <input
+              name="sort_order"
+              type="number"
+              min="-10000"
+              max="10000"
+              defaultValue={tag.sort_order}
+              required
+            />
+          </label>
+        </div>
+        <label className="toggle-filter">
+          <input name="is_active" type="checkbox" defaultChecked={tag.is_active} />
+          <span />
+          启用此标签
+        </label>
+        <InlineNotice>
+          停用后不会出现在新项目的标签选择中，已有项目关联仍会保留。
+        </InlineNotice>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在保存…" : "保存修改"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function optionalText(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  return text || null;
 }
 
 function roleLabel(role: string) {

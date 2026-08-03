@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
+import { localDateInputValue } from "../date-utils";
 import type { ProjectSummary, Task, WorkRecord } from "../types";
 import { AvatarImage } from "./avatar";
 import { ArrowUpRight, Plus } from "./icons";
@@ -22,9 +23,37 @@ export function RecordsView({
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projectId, setProjectId] = useState("");
   const [unassignedOnly, setUnassignedOnly] = useState(false);
+  const [currentWeekOnly, setCurrentWeekOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<WorkRecord | null>(null);
+  const [deletingRecordId, setDeletingRecordId] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+
+  useEffect(() => {
+    if (!canManage) {
+      return;
+    }
+    let cancelled = false;
+    api.auth
+      .me()
+      .then((context) => {
+        if (!cancelled) setCurrentUserId(context.user.id);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(
+            caught instanceof ApiClientError
+              ? caught.message
+              : "当前用户信息加载失败",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canManage]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -33,6 +62,7 @@ export function RecordsView({
       const params = new URLSearchParams();
       if (projectId) params.set("project_id", projectId);
       if (unassignedOnly) params.set("unassigned_only", "true");
+      if (currentWeekOnly) params.set("current_week_only", "true");
       const [recordRows, projectRows, taskRows] = await Promise.all([
         api.records.list(params),
         canViewProjects ? api.projects.list() : Promise.resolve([]),
@@ -48,7 +78,7 @@ export function RecordsView({
     } finally {
       setLoading(false);
     }
-  }, [canViewProjects, canViewTasks, projectId, unassignedOnly]);
+  }, [canViewProjects, canViewTasks, currentWeekOnly, projectId, unassignedOnly]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
@@ -64,6 +94,32 @@ export function RecordsView({
     [tasks],
   );
   const totalMinutes = records.reduce((sum, record) => sum + record.minutes, 0);
+
+  async function deleteRecord(record: WorkRecord) {
+    if (!window.confirm(`确认删除 ${record.work_date} 的这条工作记录？`)) {
+      return;
+    }
+    let reason: string | null = null;
+    if (record.author_id !== currentUserId) {
+      reason = window.prompt("代删他人记录必须填写原因：")?.trim() || null;
+      if (!reason) {
+        setError("已取消删除：代删他人记录必须填写原因。");
+        return;
+      }
+    }
+    setDeletingRecordId(record.id);
+    setError("");
+    try {
+      await api.records.delete(record.id, record.revision, reason);
+      await load();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "工作记录删除失败",
+      );
+    } finally {
+      setDeletingRecordId("");
+    }
+  }
 
   return (
     <div className="view-shell">
@@ -104,6 +160,15 @@ export function RecordsView({
           />
           <span />
           仅看待归集
+        </label>
+        <label className="toggle-filter">
+          <input
+            type="checkbox"
+            checked={currentWeekOnly}
+            onChange={(event) => setCurrentWeekOnly(event.target.checked)}
+          />
+          <span />
+          仅显示本周记录
         </label>
         <div className="toolbar-meta">
           <strong>{formatHours(totalMinutes)}</strong>
@@ -152,7 +217,31 @@ export function RecordsView({
                           记录人：{record.author_display_name}
                         </span>
                       </div>
-                      <strong>{formatHours(record.minutes)}</strong>
+                      <div className="user-card-actions">
+                        <strong>{formatHours(record.minutes)}</strong>
+                        {canManage && currentUserId ? (
+                          <>
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => setEditingRecord(record)}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="text-button"
+                              disabled={deletingRecordId === record.id}
+                              style={{ color: "var(--red)" }}
+                              onClick={() => deleteRecord(record)}
+                            >
+                              {deletingRecordId === record.id
+                                ? "删除中…"
+                                : "删除"}
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                     <p>{record.content}</p>
                     {record.task_id ? (
@@ -219,6 +308,19 @@ export function RecordsView({
           onClose={() => setCreateOpen(false)}
           onCreated={async () => {
             setCreateOpen(false);
+            await load();
+          }}
+        />
+      ) : null}
+      {editingRecord && canManage && currentUserId ? (
+        <RecordEditModal
+          record={editingRecord}
+          projects={projects}
+          tasks={tasks}
+          currentUserId={currentUserId}
+          onClose={() => setEditingRecord(null)}
+          onUpdated={async () => {
+            setEditingRecord(null);
             await load();
           }}
         />
@@ -290,7 +392,7 @@ function RecordCreateModal({
             <input
               name="work_date"
               type="date"
-              defaultValue={new Date().toISOString().slice(0, 10)}
+              defaultValue={localDateInputValue()}
               required
             />
           </label>
@@ -385,6 +487,188 @@ function RecordCreateModal({
           </button>
           <button className="primary-button" disabled={submitting}>
             {submitting ? "正在保存…" : "保存记录"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function RecordEditModal({
+  record,
+  projects,
+  tasks,
+  currentUserId,
+  onClose,
+  onUpdated,
+}: {
+  record: WorkRecord;
+  projects: ProjectSummary[];
+  tasks: Task[];
+  currentUserId: string;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const [selectedProject, setSelectedProject] = useState(
+    record.project_id ?? "",
+  );
+  const [selectedTask, setSelectedTask] = useState(record.task_id ?? "");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const delegated = record.author_id !== currentUserId;
+  const visibleTasks = selectedProject
+    ? tasks.filter((task) => task.project_id === selectedProject)
+    : tasks;
+
+  function changeProject(value: string) {
+    setSelectedProject(value);
+    const task = tasks.find((item) => item.id === selectedTask);
+    if (task && task.project_id !== value) setSelectedTask("");
+  }
+
+  function changeTask(value: string) {
+    setSelectedTask(value);
+    const task = tasks.find((item) => item.id === value);
+    if (task) setSelectedProject(task.project_id);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const task = tasks.find((item) => item.id === selectedTask);
+    const projectId = task?.project_id ?? optional(selectedProject);
+    try {
+      await api.records.update(record.id, {
+        revision: record.revision,
+        work_date: String(form.get("work_date")),
+        content: String(form.get("content")),
+        minutes: Math.round(Number(form.get("hours")) * 60),
+        project_id: projectId,
+        task_id: optional(selectedTask),
+        risk: optional(form.get("risk")),
+        next_action: optional(form.get("next_action")),
+        delegated_edit_reason: delegated
+          ? optional(form.get("delegated_edit_reason"))
+          : null,
+      });
+      onUpdated();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "工作记录更新失败",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`编辑工作记录 · ${record.author_display_name}`}
+      eyebrow="EDIT WORK LOG"
+      onClose={onClose}
+      wide
+    >
+      <form className="modal-form" onSubmit={submit}>
+        <div className="form-grid">
+          <label className="field">
+            <span>工作日期 *</span>
+            <input
+              name="work_date"
+              type="date"
+              defaultValue={record.work_date}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>投入时长（小时）*</span>
+            <input
+              name="hours"
+              type="number"
+              min="0.5"
+              max="24"
+              step="0.5"
+              defaultValue={record.minutes / 60}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>关联项目</span>
+            <select
+              name="project_id"
+              value={selectedProject}
+              onChange={(event) => changeProject(event.target.value)}
+            >
+              <option value="">暂不归集</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>关联任务</span>
+            <select
+              name="task_id"
+              value={selectedTask}
+              onChange={(event) => changeTask(event.target.value)}
+            >
+              <option value="">不关联具体任务</option>
+              {visibleTasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field-span-two">
+            <span>工作内容 *</span>
+            <textarea
+              name="content"
+              rows={5}
+              defaultValue={record.content}
+              required
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>风险或阻塞</span>
+            <textarea name="risk" rows={3} defaultValue={record.risk ?? ""} />
+          </label>
+          <label className="field">
+            <span>下一步行动</span>
+            <textarea
+              name="next_action"
+              rows={3}
+              defaultValue={record.next_action ?? ""}
+            />
+          </label>
+          {delegated ? (
+            <label className="field field-span-two">
+              <span>代编辑原因 *</span>
+              <textarea
+                name="delegated_edit_reason"
+                rows={3}
+                required
+                placeholder="说明代为修改他人记录的原因"
+              />
+            </label>
+          ) : null}
+        </div>
+        {record.deliverables.length ? (
+          <InlineNotice>
+            已关联的 {record.deliverables.length} 个产出物会保留，并随项目归属同步调整。
+          </InlineNotice>
+        ) : null}
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在保存…" : "保存修改"}
           </button>
         </footer>
       </form>

@@ -19,13 +19,15 @@ import { ProfileSettingsView } from "./components/profile-settings-view";
 import { RecordsView } from "./components/records-view";
 import { TasksView } from "./components/tasks-view";
 import { WeeklyReportsView } from "./components/weekly-reports-view";
-import type { AuthContext } from "./types";
+import type { AuthContext, ProjectCreationDraft } from "./types";
 
 export function WorkspaceApp() {
   const [auth, setAuth] = useState<AuthContext | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
   const [loginNotice, setLoginNotice] = useState("");
+  const [projectCreationDraft, setProjectCreationDraft] =
+    useState<ProjectCreationDraft | null>(null);
 
   const invalidateSession = useCallback((message: string) => {
     setCsrfToken("");
@@ -124,13 +126,30 @@ export function WorkspaceApp() {
       onLogout={logout}
     >
       {activeView === "dashboard" ? (
-        <DashboardView permissions={permissions} />
+        <DashboardView
+          permissions={permissions}
+          currentUser={auth.user}
+          onCreateProjectFromOpportunity={(draft) => {
+            setProjectCreationDraft(draft);
+            setActiveView("projects");
+          }}
+        />
       ) : null}
       {activeView === "projects" ? (
-        <ProjectsView canManage={permissions.includes("projects.manage")} />
+        <ProjectsView
+          canEdit={permissions.includes("projects.edit")}
+          canCreate={permissions.includes("projects.create")}
+          currentUser={auth.user}
+          creationDraft={projectCreationDraft}
+          onCreationDraftHandled={() => setProjectCreationDraft(null)}
+        />
       ) : null}
       {activeView === "tasks" ? (
-        <TasksView canManage={permissions.includes("tasks.manage")} />
+        <TasksView
+          canEdit={permissions.includes("tasks.edit")}
+          canCreate={permissions.includes("tasks.create")}
+          currentUser={auth.user}
+        />
       ) : null}
       {activeView === "records" ? (
         <RecordsView

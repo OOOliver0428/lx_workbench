@@ -184,6 +184,7 @@ export function AppShell({
               type="button"
               className="ai-entry"
               onClick={() => setAiOpen(true)}
+              aria-label="打开 AI 助手"
               title="打开 AI 助手"
             >
               <span className="ai-orbit" aria-hidden="true">

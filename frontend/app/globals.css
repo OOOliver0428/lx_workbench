@@ -35,7 +35,7 @@
 }
 
 html {
-  min-width: 320px;
+  min-width: 0;
   background: var(--canvas);
 }
 
@@ -2247,6 +2247,7 @@ a {
 .task-card footer {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 15px;
 }
@@ -3871,22 +3872,87 @@ a {
   }
 
   .sidebar-head,
-  .sidebar-bottom,
   .nav-caption {
     display: none;
   }
 
   .primary-nav {
     display: flex;
-    justify-content: space-around;
+    flex: 1 1 auto;
+    gap: 3px;
+    justify-content: flex-start;
     margin: 0;
-    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    touch-action: pan-x;
+    width: auto;
   }
 
   .primary-nav button {
+    display: flex;
+    flex: 0 0 58px;
+    justify-content: center;
     margin: 0;
     min-height: 45px;
-    width: 55px;
+    padding: 6px 4px;
+    width: 58px;
+  }
+
+  .primary-nav button > span:nth-child(2) {
+    align-items: center;
+    display: flex;
+  }
+
+  .primary-nav strong {
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .primary-nav small,
+  .primary-nav .nav-index,
+  .primary-nav .nav-arrow {
+    display: none;
+  }
+
+  .sidebar-bottom {
+    border-left: 1px solid var(--panel-line);
+    display: flex;
+    flex-direction: row;
+    flex: 0 0 auto;
+    gap: 0;
+    padding-left: 6px;
+  }
+
+  .sidebar-bottom .account-profile-button {
+    display: none;
+  }
+
+  .sidebar-bottom .ai-entry {
+    border-color: transparent;
+    box-shadow: none;
+    display: flex;
+    height: 44px;
+    padding: 6px;
+    width: 44px;
+  }
+
+  .sidebar-bottom .ai-entry > span:last-child {
+    display: none;
+  }
+
+  .sidebar-bottom .account-summary {
+    border: 0;
+    display: block;
+    padding: 0;
+  }
+
+  .sidebar-bottom .account-summary .account-logout-button,
+  .sidebar-collapsed .sidebar-bottom .account-summary .account-logout-button {
+    display: inline-flex;
+    height: 44px;
+    width: 44px;
   }
 
   .view-shell {
@@ -4460,7 +4526,7 @@ a {
 .war-project-row {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(220px, 1.25fr) minmax(260px, 1.85fr) minmax(105px, 0.62fr) minmax(170px, 0.82fr);
+  grid-template-columns: minmax(220px, 1.25fr) minmax(260px, 1.85fr) minmax(105px, 0.62fr) minmax(220px, 1fr);
 }
 
 .war-project-table-head {
@@ -4620,17 +4686,35 @@ a {
 
 .war-people-cell {
   align-items: center;
-  display: flex;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
 }
 
-.war-people-cell > span {
+.war-people-summary {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.war-people-summary > span {
   color: #6e849b;
   font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.war-people-cell > button {
+.war-people-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.war-people-actions > button {
   align-items: center;
   background: #eef6ff;
   border: 0;
@@ -4639,12 +4723,18 @@ a {
   display: inline-flex;
   height: 26px;
   justify-content: center;
-  margin-left: auto;
   width: 26px;
 }
 
-.war-people-cell > button:hover {
+.war-people-actions > button:hover {
   background: #dcebff;
+}
+
+.war-people-actions > .war-convert-button {
+  height: 28px;
+  padding: 0 9px;
+  white-space: nowrap;
+  width: auto;
 }
 
 .war-avatar-stack {
@@ -4844,7 +4934,7 @@ a {
   cursor: pointer;
 }
 
-.war-project-node:focus circle {
+.war-project-node:focus rect {
   outline: none;
   stroke-width: 4;
 }
@@ -4916,9 +5006,9 @@ a {
 
 .war-graph-legend i.project {
   border: 2px solid #1677ff;
-  border-radius: 50%;
-  height: 11px;
-  width: 11px;
+  border-radius: 3px;
+  height: 9px;
+  width: 14px;
 }
 
 .war-graph-legend i.task {

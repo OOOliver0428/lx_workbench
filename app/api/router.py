@@ -6,6 +6,7 @@ from app.api.routes import (
     auth,
     dashboard,
     health,
+    opportunities,
     profile,
     project_tags,
     projects,
@@ -22,6 +23,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(profile.router)
 api_router.include_router(users.router)
 api_router.include_router(project_tags.router)
+api_router.include_router(opportunities.router)
 api_router.include_router(projects.router)
 api_router.include_router(tasks.router)
 api_router.include_router(work_records.router)

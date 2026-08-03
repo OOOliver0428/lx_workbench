@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
@@ -14,6 +14,10 @@ from app.models import (
     AttentionStatus,
     BusinessStage,
     Deliverable,
+    Opportunity,
+    OpportunityMember,
+    OpportunityProgress,
+    OpportunityStatus,
     PermissionKey,
     Project,
     ProjectMember,
@@ -36,6 +40,7 @@ from app.schemas import (
     DashboardDeliverableOut,
     DashboardMemberOut,
     DashboardMetricsOut,
+    DashboardOpportunityOut,
     DashboardOut,
     DashboardProjectMemberOut,
     DashboardProjectOut,
@@ -55,6 +60,7 @@ from app.schemas import (
     TeamWeeklySummaryOut,
 )
 from app.services import ai as ai_service
+from app.services import opportunities as opportunity_service
 from app.services import permissions as permission_service
 from app.services import projects as project_service
 
@@ -68,6 +74,10 @@ TRACKED_PROJECT_STATUSES = {
     ProjectStatus.ACTIVE.value,
     ProjectStatus.PAUSED.value,
     ProjectStatus.COMPLETED.value,
+}
+TRACKED_OPPORTUNITY_STATUSES = {
+    OpportunityStatus.ACTIVE.value,
+    OpportunityStatus.WON.value,
 }
 STAGE_ORDER = tuple(stage.value for stage in BusinessStage)
 STAGE_BASE_PROGRESS = {
@@ -240,8 +250,8 @@ def _default_progress(project: Project, tasks: list[Task]) -> tuple[str, str, in
 
 
 def _changed_stage_events(
-    events: list[ProjectProgress],
-) -> list[ProjectProgress]:
+    events: list[ProjectProgress] | list[OpportunityProgress],
+) -> list[ProjectProgress] | list[OpportunityProgress]:
     last_stage = BusinessStage.LEAD.value
     changed: list[ProjectProgress] = []
     for event in events:
@@ -252,7 +262,7 @@ def _changed_stage_events(
 
 
 def _stage_advanced(
-    events: list[ProjectProgress],
+    events: list[ProjectProgress] | list[OpportunityProgress],
     week_start: date,
 ) -> bool:
     before = [event for event in events if event.week_start < week_start]
@@ -414,11 +424,15 @@ def _dashboard_projects(
             Deliverable.project_id.in_(project_ids),
             Deliverable.deleted_at.is_(None),
             or_(
-                WorkRecord.work_date.between(week_start, week_end),
-                (
-                    (Deliverable.work_record_id.is_(None))
-                    & (Deliverable.created_at >= start_at)
-                    & (Deliverable.created_at < end_at)
+                and_(
+                    WorkRecord.id.is_not(None),
+                    WorkRecord.deleted_at.is_(None),
+                    WorkRecord.work_date.between(week_start, week_end),
+                ),
+                and_(
+                    Deliverable.work_record_id.is_(None),
+                    Deliverable.created_at >= start_at,
+                    Deliverable.created_at < end_at,
                 ),
             ),
         )
@@ -541,8 +555,8 @@ def _dashboard_projects(
             timeline.append(
                 DashboardTimelineEventOut(
                     id=event.id,
-                    project_id=project.id,
-                    project_name=project.name,
+                    opportunity_id=project.id,
+                    opportunity_name=project.name,
                     week_start=event.week_start,
                     business_stage=event.business_stage,
                     attention_status=event.attention_status,
@@ -560,7 +574,7 @@ def _dashboard_projects(
                     permission_service.has_permission(
                         db,
                         actor,
-                        PermissionKey.PROJECTS_MANAGE,
+                        PermissionKey.PROJECTS_EDIT,
                     )
                     and project_service.can_manage_project(actor, project)
                 ),
@@ -632,6 +646,200 @@ def _dashboard_projects(
     )
 
 
+def _dashboard_opportunities(
+    db: Session,
+    *,
+    actor: User,
+    week_start: date,
+) -> tuple[
+    list[DashboardOpportunityOut],
+    list[DashboardTimelineEventOut],
+    int,
+]:
+    opportunities = list(
+        db.scalars(
+            select(Opportunity)
+            .where(
+                Opportunity.deleted_at.is_(None),
+                Opportunity.status.in_(TRACKED_OPPORTUNITY_STATUSES),
+            )
+            .order_by(Opportunity.updated_at.desc(), Opportunity.name)
+        ).all()
+    )
+    if not opportunities:
+        return [], [], 0
+
+    opportunity_ids = [opportunity.id for opportunity in opportunities]
+    user_rows = list(db.scalars(select(User).where(User.is_active.is_(True))).all())
+    users = {user.id: user for user in user_rows}
+    membership_rows = db.execute(
+        select(OpportunityMember.opportunity_id, OpportunityMember.user_id)
+        .where(OpportunityMember.opportunity_id.in_(opportunity_ids))
+        .order_by(OpportunityMember.added_at)
+    ).all()
+    member_ids_by_opportunity: dict[str, list[str]] = defaultdict(list)
+    for opportunity_id, user_id in membership_rows:
+        member_ids_by_opportunity[opportunity_id].append(user_id)
+
+    progress_rows = list(
+        db.scalars(
+            select(OpportunityProgress)
+            .where(
+                OpportunityProgress.opportunity_id.in_(opportunity_ids),
+                OpportunityProgress.week_start <= week_start,
+            )
+            .order_by(
+                OpportunityProgress.opportunity_id,
+                OpportunityProgress.week_start,
+                OpportunityProgress.created_at,
+            )
+        ).all()
+    )
+    progress_by_opportunity: dict[str, list[OpportunityProgress]] = defaultdict(list)
+    for progress in progress_rows:
+        progress_by_opportunity[progress.opportunity_id].append(progress)
+
+    linked_project_ids = {
+        opportunity.linked_project_id
+        for opportunity in opportunities
+        if opportunity.linked_project_id
+    }
+    linked_projects = {
+        project.id: project
+        for project in db.scalars(
+            select(Project).where(Project.id.in_(linked_project_ids))
+        ).all()
+    } if linked_project_ids else {}
+
+    can_record_progress = permission_service.has_permission(
+        db,
+        actor,
+        PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS,
+    )
+    can_create_project = permission_service.has_permission(
+        db,
+        actor,
+        PermissionKey.PROJECTS_CREATE,
+    )
+    timeline: list[DashboardTimelineEventOut] = []
+    result: list[DashboardOpportunityOut] = []
+    stage_advanced_count = 0
+    trend_floor = week_start - timedelta(weeks=4)
+    for opportunity in opportunities:
+        events = progress_by_opportunity[opportunity.id]
+        latest = events[-1] if events else None
+        business_stage = (
+            latest.business_stage if latest else opportunity.business_stage
+        )
+        attention_status = (
+            latest.attention_status if latest else opportunity.attention_status
+        )
+        progress_percent = (
+            latest.progress_percent if latest else opportunity.progress_percent
+        )
+        if _stage_advanced(events, week_start):
+            stage_advanced_count += 1
+        week_events = [event for event in events if event.week_start == week_start]
+        changed_events = _changed_stage_events(events)
+        for event in changed_events:
+            if event.week_start < trend_floor:
+                continue
+            timeline.append(
+                DashboardTimelineEventOut(
+                    id=event.id,
+                    opportunity_id=opportunity.id,
+                    opportunity_name=opportunity.name,
+                    week_start=event.week_start,
+                    business_stage=event.business_stage,
+                    attention_status=event.attention_status,
+                    summary=event.summary,
+                    created_at=event.created_at,
+                )
+            )
+        owner = users.get(opportunity.owner_id)
+        people_ids = list(
+            dict.fromkeys(
+                [opportunity.owner_id, *member_ids_by_opportunity[opportunity.id]]
+            )
+        )
+        linked_project = linked_projects.get(opportunity.linked_project_id or "")
+        can_manage = can_record_progress and opportunity_service.can_manage_opportunity(
+            actor,
+            opportunity,
+        )
+        result.append(
+            DashboardOpportunityOut(
+                id=opportunity.id,
+                code=opportunity.code,
+                name=opportunity.name,
+                customer_name=opportunity.customer_name,
+                description=opportunity.description,
+                owner_id=opportunity.owner_id,
+                owner_display_name=owner.display_name if owner else "未知用户",
+                owner_avatar_key=owner.avatar_key if owner else None,
+                can_manage=can_manage,
+                can_convert=(
+                    can_manage
+                    and can_create_project
+                    and opportunity_service.can_convert_opportunity(
+                        actor,
+                        opportunity,
+                    )
+                ),
+                status=opportunity.status,
+                business_stage=business_stage,
+                attention_status=attention_status,
+                progress_percent=progress_percent,
+                work_summary="；".join(
+                    dict.fromkeys(
+                        event.summary.strip()
+                        for event in week_events
+                        if event.summary.strip()
+                    )
+                )
+                or "本周暂无商机进展",
+                output_summary="；".join(
+                    dict.fromkeys(
+                        event.output_summary.strip()
+                        for event in week_events
+                        if event.output_summary and event.output_summary.strip()
+                    )
+                )
+                or "本周暂无商机输出",
+                has_week_progress=bool(week_events),
+                linked_project_id=(linked_project.id if linked_project else None),
+                linked_project_code=(linked_project.code if linked_project else None),
+                linked_project_name=(linked_project.name if linked_project else None),
+                linked_project_status=(
+                    linked_project.status if linked_project else None
+                ),
+                people=[
+                    DashboardProjectMemberOut(
+                        id=user_id,
+                        display_name=users[user_id].display_name,
+                        avatar_key=users[user_id].avatar_key,
+                    )
+                    for user_id in people_ids
+                    if user_id in users
+                ],
+                stage_history=[
+                    DashboardStageHistoryOut(
+                        id=event.id,
+                        week_start=event.week_start,
+                        business_stage=event.business_stage,
+                        progress_percent=event.progress_percent,
+                        created_at=event.created_at,
+                    )
+                    for event in changed_events
+                ],
+                revision=opportunity.revision,
+            )
+        )
+
+    timeline.sort(key=lambda item: (item.week_start, item.created_at), reverse=True)
+    return result, timeline, stage_advanced_count
+
+
 def _week_trends(
     db: Session,
     weeks: list[date],
@@ -699,6 +907,9 @@ def build_dashboard(
     pages = accessible_pages(db, actor)
     if not pages:
         raise PermissionDeniedError("当前账号没有可见的作战台视图")
+    can_view_opportunity = "opp" in pages
+    can_view_work = "work" in pages
+    can_view_overview = "overview" in pages
     current_week = normalize_week_start()
     selected_week = normalize_week_start(selected_week_start)
     weeks = [selected_week - timedelta(weeks=index) for index in range(4, -1, -1)]
@@ -746,7 +957,12 @@ def build_dashboard(
                 if user.id in submission_by_author
                 else None
             ),
-            weekly_minutes=weekly_minutes.get(user.id, 0),
+            weekly_minutes=(
+                weekly_minutes.get(user.id, 0)
+                if can_view_work
+                and (is_super_admin(actor) or user.id == actor.id)
+                else None
+            ),
             submitted_weeks=submitted_weeks_by_author[user.id],
         )
         for user in scope_users
@@ -756,18 +972,26 @@ def build_dashboard(
         projects,
         deliverables,
         task_links,
-        stage_timeline,
-        stage_advanced_count,
+        _project_stage_timeline,
+        _project_stage_advanced_count,
     ) = _dashboard_projects(
         db,
         actor=actor,
         week_start=selected_week,
         submitted_reports=submissions,
     )
+    opportunities, stage_timeline, stage_advanced_count = _dashboard_opportunities(
+        db,
+        actor=actor,
+        week_start=selected_week,
+    )
     stage_distribution = [
         DashboardStageCountOut(
             business_stage=stage,
-            count=sum(project.business_stage == stage for project in projects),
+            count=sum(
+                opportunity.business_stage == stage
+                for opportunity in opportunities
+            ),
         )
         for stage in STAGE_ORDER
     ]
@@ -789,36 +1013,131 @@ def build_dashboard(
         )
         else None
     )
+    project_ids = [project.id for project in projects]
+    progress_summaries: dict[str, list[str]] = defaultdict(list)
+    progress_outputs: dict[str, list[str]] = defaultdict(list)
+    if can_view_opportunity and not can_view_work and project_ids:
+        selected_progress = list(
+            db.scalars(
+                select(ProjectProgress)
+                .where(
+                    ProjectProgress.project_id.in_(project_ids),
+                    ProjectProgress.week_start == selected_week,
+                )
+                .order_by(ProjectProgress.created_at)
+            ).all()
+        )
+        for progress in selected_progress:
+            if progress.summary.strip():
+                progress_summaries[progress.project_id].append(
+                    progress.summary.strip()
+                )
+            if progress.output_summary and progress.output_summary.strip():
+                progress_outputs[progress.project_id].append(
+                    progress.output_summary.strip()
+                )
+
+    deliverable_names: dict[str, list[str]] = defaultdict(list)
+    if can_view_work and not can_view_opportunity:
+        for deliverable in deliverables:
+            deliverable_names[deliverable.project_id].append(deliverable.name)
+
+    projects_for_response = []
+    if can_view_opportunity or can_view_work:
+        for project in projects:
+            updates: dict[str, object] = {}
+            if not can_view_opportunity:
+                work_summaries = [
+                    item.content.strip()
+                    for item in project.work_items
+                    if item.content.strip()
+                ]
+                updates.update(
+                    can_manage=False,
+                    business_stage=BusinessStage.LEAD.value,
+                    attention_status=AttentionStatus.STEADY.value,
+                    progress_percent=0,
+                    work_summary="；".join(dict.fromkeys(work_summaries))
+                    or "本周暂无工作记录",
+                    output_summary="；".join(
+                        dict.fromkeys(deliverable_names[project.id])
+                    )
+                    or "本周暂无交付物记录",
+                    has_week_progress=bool(
+                        project.work_items or deliverable_names[project.id]
+                    ),
+                    tasks=[],
+                    stage_history=[],
+                )
+            if not can_view_work:
+                safe_summaries = progress_summaries[project.id]
+                safe_outputs = progress_outputs[project.id]
+                updates.update(
+                    weekly_minutes=None,
+                    work_summary="；".join(dict.fromkeys(safe_summaries))
+                    or "本周暂无项目进展记录",
+                    output_summary="；".join(dict.fromkeys(safe_outputs))
+                    or "本周暂无项目进展产出",
+                    has_week_progress=bool(safe_summaries or safe_outputs),
+                    work_items=[],
+                )
+            projects_for_response.append(project.model_copy(update=updates))
+    trends = (
+        _week_trends(db, weeks, member_ids, work_author_ids)
+        if can_view_overview
+        else []
+    )
     return DashboardOut(
         accessible_pages=pages,
         selected_week=week_out(selected_week, current_week=current_week),
         weeks=[week_out(item, current_week=current_week) for item in weeks],
         metrics=DashboardMetricsOut(
-            tracking_count=len(projects),
-            focus_count=sum(
-                project.attention_status == AttentionStatus.FOCUS.value
-                for project in projects
+            tracking_count=(
+                len(opportunities)
+                if can_view_opportunity or can_view_overview
+                else 0
             ),
-            stage_advanced_count=stage_advanced_count,
-            deliverable_count=len(deliverables),
-            coordinate_count=sum(
-                project.attention_status == AttentionStatus.COORDINATE.value
-                for project in projects
+            focus_count=(
+                sum(
+                    opportunity.attention_status == AttentionStatus.FOCUS.value
+                    for opportunity in opportunities
+                )
+                if can_view_opportunity
+                else 0
             ),
-            total_minutes=total_minutes,
-            submitted_count=len(submissions),
-            member_count=len(members),
+            stage_advanced_count=stage_advanced_count if can_view_opportunity else 0,
+            deliverable_count=len(deliverables) if can_view_work else 0,
+            coordinate_count=(
+                sum(
+                    opportunity.attention_status == AttentionStatus.COORDINATE.value
+                    for opportunity in opportunities
+                )
+                if can_view_opportunity or can_view_overview
+                else 0
+            ),
+            total_minutes=total_minutes if can_view_work else 0,
+            submitted_count=len(submissions) if can_view_work else 0,
+            member_count=len(members) if can_view_work else 0,
         ),
-        members=members,
-        projects=projects,
-        deliverables=deliverables,
-        task_links=task_links,
-        trends=_week_trends(db, weeks, member_ids, work_author_ids),
-        stage_distribution=stage_distribution,
-        stage_timeline=stage_timeline,
+        members=members if can_view_work or can_view_overview else [],
+        opportunities=opportunities if can_view_opportunity else [],
+        projects=projects_for_response,
+        deliverables=deliverables if can_view_work else [],
+        task_links=task_links if can_view_opportunity else [],
+        trends=trends,
+        stage_distribution=(
+            stage_distribution
+            if can_view_opportunity or can_view_overview
+            else []
+        ),
+        stage_timeline=(
+            stage_timeline
+            if can_view_opportunity or can_view_overview
+            else []
+        ),
         latest_team_summary=(
             TeamWeeklySummaryOut.model_validate(latest_summary)
-            if latest_summary
+            if latest_summary and can_view_work
             else None
         ),
     )
