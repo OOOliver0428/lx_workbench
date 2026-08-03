@@ -68,17 +68,19 @@ readonly PYTHON_BIN="${PROJECT_DIR}/.venv/bin/python"
 readonly ALEMBIC_BIN="${PROJECT_DIR}/.venv/bin/alembic"
 readonly NODE_BIN_DIR="$(dirname -- "${NODE_BIN}")"
 readonly APP_GROUP="$(id -gn "${APP_USER}")"
-export PATH="${NODE_BIN_DIR}:/usr/local/bin:/usr/bin:/bin"
+export PATH="${NODE_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+readonly RUNUSER_BIN="$(command -v runuser || true)"
+[[ -x "${RUNUSER_BIN}" ]] || fail "runuser is required; install the util-linux package"
 
 run_as_app() {
-  runuser -u "${APP_USER}" -- env \
+  "${RUNUSER_BIN}" -u "${APP_USER}" -- env \
     HOME="${APP_HOME}" \
     PATH="${PATH}" \
     bash -c 'umask 0077; exec "$@"' bash "$@"
 }
 
 run_app_env() {
-  runuser -u "${APP_USER}" -- env \
+  "${RUNUSER_BIN}" -u "${APP_USER}" -- env \
     HOME="${APP_HOME}" \
     PATH="${PATH}" \
     bash -c '

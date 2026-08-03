@@ -351,6 +351,17 @@ sudo ufw deny 8787/tcp
 
 ## 10. 故障排查
 
+### `runuser: command not found`
+
+新版本已经把 `/usr/sbin` 加入运维脚本的固定系统路径，并在安装时校验 `util-linux` 提供的
+`runuser`。旧安装可以先修复已安装的脚本，再执行更新：
+
+```bash
+sudo sed -i 's#/usr/local/bin:/usr/bin:/bin#/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin#' /usr/local/sbin/solution-workspace
+sudo apt-get install -y util-linux
+sudo solution-workspace update
+```
+
 ### 页面打不开
 
 ```bash

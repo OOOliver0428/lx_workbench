@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 0022
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly DEFAULT_SOURCE_DIR="$(realpath -- "${SCRIPT_DIR}/../..")"
@@ -153,6 +154,11 @@ done
 # shellcheck disable=SC1091
 source /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || fail "this installer supports Ubuntu only"
+for bootstrap_command in realpath git systemctl; do
+  command -v "${bootstrap_command}" >/dev/null 2>&1 || {
+    fail "${bootstrap_command} is required before installation can start"
+  }
+done
 
 SOURCE_DIR="$(realpath -- "${SOURCE_DIR}")"
 PROJECT_DIR="$(realpath --canonicalize-missing -- "${PROJECT_DIR}")"
@@ -189,6 +195,7 @@ if [[ -d "${PROJECT_DIR}/.git" ]]; then
     }
   done
   if [[ -f "${CONFIG_DIR}/ops.lock" ]]; then
+    command -v flock >/dev/null 2>&1 || fail "flock is required to repair an installation"
     exec 9>>"${CONFIG_DIR}/ops.lock"
     flock --wait 300 9 || fail "another deployment or backup operation is still running"
   fi
@@ -264,7 +271,7 @@ if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
   fi
 fi
 
-for required_command in git uv node npm curl flock; do
+for required_command in git uv node npm curl flock openssl runuser systemctl; do
   command -v "${required_command}" >/dev/null 2>&1 || fail "${required_command} is required"
 done
 node_version="$(node --version | sed 's/^v//')"

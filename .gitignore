@@ -8,6 +8,7 @@ Thumbs.db
 .agents/
 .archive/
 .codex/
+.codex-ci-repro-*/
 .pytest_cache/
 .ruff_cache/
 .run/

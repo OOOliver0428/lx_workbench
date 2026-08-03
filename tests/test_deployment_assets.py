@@ -23,6 +23,8 @@ def test_ubuntu_install_keeps_runtime_state_outside_the_checkout() -> None:
     assert 'readonly FRONTEND_USER="solution-workspace-web"' in installer
     assert "uv sync --frozen --no-dev --python 3.12" in installer
     assert "npm ci --no-audit --no-fund" in installer
+    assert "curl flock openssl runuser systemctl" in installer
+    assert "bootstrap_command in realpath git systemctl" in installer
     assert 'chown -R root:root "${PROJECT_DIR}"' in installer
 
 
@@ -59,6 +61,8 @@ def test_ops_database_switch_has_backup_validation_and_rollback_guards() -> None
     assert "promote-db" in operations
     assert "rollback_switch" in operations
     assert "new database failed service startup or health checks" in operations
+    assert "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" in operations
+    assert '"${RUNUSER_BIN}" -u "${APP_USER}"' in operations
 
 
 def test_deployment_manual_covers_both_trial_database_outcomes() -> None:
