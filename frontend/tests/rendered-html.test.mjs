@@ -398,6 +398,21 @@ test("formats work-record defaults in local time near the UTC day boundary", asy
   assert.equal(localDateInputValue(shanghaiJustAfterMidnight), "2026-07-31");
 });
 
+test("creates AI message IDs when HTTP does not expose randomUUID", async () => {
+  const { createClientMessageId } = await import(
+    new URL("../app/client-id.ts", import.meta.url)
+  );
+  assert.equal(
+    createClientMessageId({ randomUUID: () => "secure-message-id" }),
+    "secure-message-id",
+  );
+
+  const firstFallback = createClientMessageId({});
+  const secondFallback = createClientMessageId({});
+  assert.match(firstFallback, /^message-[a-z0-9]+-[a-z0-9]+$/);
+  assert.notEqual(secondFallback, firstFallback);
+});
+
 test("ships the normalized preset avatar catalog", async () => {
   const catalog = JSON.parse(
     await readFile(

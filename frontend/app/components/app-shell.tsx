@@ -10,6 +10,7 @@ import type {
   PermissionKey,
   WeeklyReport,
 } from "../types";
+import { createClientMessageId } from "../client-id";
 import { InlineNotice } from "./ui";
 import { AvatarImage } from "./avatar";
 import {
@@ -308,7 +309,7 @@ function AIDrawer({
     event.preventDefault();
     const question = prompt.trim();
     if (!question || submitting) return;
-    const questionId = crypto.randomUUID();
+    const questionId = createClientMessageId();
     setPrompt("");
     setMessages((current) => [
       ...current,
@@ -660,6 +661,7 @@ function AIDrawer({
               Enter 发送，Shift + Enter 换行；关闭窗口后清空本次对话
             </small>
             <button
+              type="submit"
               className="primary-button compact"
               disabled={submitting || !status?.configured}
             >
