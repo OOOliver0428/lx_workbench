@@ -1,6 +1,6 @@
 [Unit]
 Description=Solution Workspace MVP
-Documentation=file:///etc/systemd/system/solution-workspace.target
+Documentation=file:///etc/solution-workspace/deploy.conf
 Wants=solution-workspace-backend.service solution-workspace-frontend.service
 After=network-online.target
 

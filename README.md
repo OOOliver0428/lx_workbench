@@ -100,9 +100,9 @@ uv run python server.py --reload
 uv run python server.py --host 0.0.0.0 --port 8787
 ```
 
-Linux 服务器建议使用仓库内的
-[systemd 部署配置](deploy/systemd/README.md)，以 `appuser` 身份分别托管前后端，并通过
-`solution-workspace.target` 统一启停。
+Ubuntu 服务器使用仓库内的[一键部署脚本](deploy/ubuntu/install.sh)，脚本会准备锁定依赖、
+生产构建、systemd 服务、每日校验备份和统一运维命令。完整步骤、网络边界、升级回滚及试用库
+切换正式库方法见 [Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。
 
 API 文档位于：
 

@@ -9,15 +9,16 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=@@APP_USER@@
-Group=@@APP_USER@@
+User=@@BACKEND_USER@@
+Group=@@BACKEND_GROUP@@
 WorkingDirectory=@@PROJECT_DIR@@
 
+EnvironmentFile=@@ENV_FILE@@
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 
 ExecStartPre=@@PROJECT_DIR@@/.venv/bin/alembic upgrade head
-ExecStart=@@PROJECT_DIR@@/.venv/bin/python server.py --host 127.0.0.1 --port 8787
+ExecStart=@@PROJECT_DIR@@/.venv/bin/python server.py --host 127.0.0.1 --port @@BACKEND_PORT@@
 
 Restart=on-failure
 RestartSec=5s
@@ -37,7 +38,7 @@ ProtectKernelTunables=true
 ProtectSystem=strict
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=true
-ReadWritePaths=@@PROJECT_DIR@@/data @@PROJECT_DIR@@/backups
+ReadWritePaths=@@DATA_DIR@@
 
 [Install]
 WantedBy=solution-workspace.target

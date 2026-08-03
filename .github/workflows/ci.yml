@@ -19,7 +19,10 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --all-groups
-      - run: bash -n deploy/systemd/install.sh
+      - name: Validate deployment shell scripts
+        run: find deploy -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: Validate rendered systemd units
+        run: bash deploy/systemd/verify-templates.sh
       - run: uv run ruff check app tests
       - run: uv run pytest
 

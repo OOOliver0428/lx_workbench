@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,7 +37,7 @@ def create_backup(output_dir: Path) -> tuple[Path, Path]:
 
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     target_path = output_dir / f"mvp-{timestamp}.db"
     temporary_path = output_dir / f".{target_path.name}.tmp"
     manifest_path = output_dir / f"{target_path.name}.manifest.json"
@@ -72,13 +73,35 @@ def create_backup(output_dir: Path) -> tuple[Path, Path]:
     return target_path, manifest_path
 
 
+def prune_old_backups(output_dir: Path, retention_days: int) -> list[Path]:
+    if retention_days < 1:
+        raise ValueError("本机备份保留天数必须至少为 1")
+    output_dir = output_dir.expanduser().resolve()
+    cutoff = time.time() - retention_days * 24 * 60 * 60
+    removed: list[Path] = []
+    for backup_path in output_dir.glob("mvp-*.db"):
+        if not backup_path.is_file() or backup_path.stat().st_mtime >= cutoff:
+            continue
+        manifest_path = backup_path.with_name(f"{backup_path.name}.manifest.json")
+        backup_path.unlink()
+        removed.append(backup_path)
+        if manifest_path.is_file():
+            manifest_path.unlink()
+            removed.append(manifest_path)
+    return removed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="创建一致的 SQLite 在线备份")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--retention-days", type=int)
     args = parser.parse_args()
     backup_path, manifest_path = create_backup(args.output_dir)
     print(f"备份完成：{backup_path}")
     print(f"校验清单：{manifest_path}")
+    if args.retention_days is not None:
+        removed = prune_old_backups(args.output_dir, args.retention_days)
+        print(f"已清理过期本机备份文件：{len(removed)} 个")
 
 
 if __name__ == "__main__":

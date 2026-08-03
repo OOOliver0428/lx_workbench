@@ -9,14 +9,15 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=@@APP_USER@@
-Group=@@APP_USER@@
+User=@@FRONTEND_USER@@
+Group=@@FRONTEND_GROUP@@
 WorkingDirectory=@@PROJECT_DIR@@/frontend
 
 Environment=NODE_ENV=production
 Environment=PATH=@@NODE_BIN_DIR@@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=MVP_INTERNAL_API_BASE_URL=http://127.0.0.1:@@BACKEND_PORT@@
 
-ExecStart=@@NODE_BIN@@ @@PROJECT_DIR@@/frontend/node_modules/vinext/dist/cli.js start --hostname 0.0.0.0 --port 5174
+ExecStart=@@NODE_BIN@@ @@PROJECT_DIR@@/frontend/node_modules/vinext/dist/cli.js start --hostname 0.0.0.0 --port @@FRONTEND_PORT@@
 
 Restart=on-failure
 RestartSec=5s

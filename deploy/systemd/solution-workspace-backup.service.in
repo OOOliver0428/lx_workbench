@@ -1,0 +1,27 @@
+[Unit]
+Description=Solution Workspace verified SQLite backup
+Documentation=file://@@PROJECT_DIR@@/docs/UBUNTU_DEPLOYMENT.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=@@BACKEND_USER@@
+Group=@@BACKEND_GROUP@@
+WorkingDirectory=@@PROJECT_DIR@@
+EnvironmentFile=@@ENV_FILE@@
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/flock --wait 600 @@LOCK_FILE@@ @@PROJECT_DIR@@/.venv/bin/python -m app.backup --output-dir @@BACKUP_DIR@@ --retention-days 30
+UMask=0077
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+ReadWritePaths=@@DATA_DIR@@ @@BACKUP_DIR@@ @@LOCK_FILE@@

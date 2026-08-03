@@ -5,6 +5,7 @@
 - [MVP_RELEASE.md](MVP_RELEASE.md)：阶段范围、暂缓项和交付检查。
 - [API_CONTRACT.md](API_CONTRACT.md)：前后端接口、权限和安全边界。
 - [PRODUCT_REQUIREMENTS_V2.md](PRODUCT_REQUIREMENTS_V2.md)：本轮重构的产品需求基线。
+- [UBUNTU_DEPLOYMENT.md](UBUNTU_DEPLOYMENT.md)：Ubuntu 一键部署、运维、备份恢复和数据库切换手册。
 
 旧静态原型及针对旧实现的审查材料保存在本地 `.archive/`，不进入远程仓库，避免与当前
 FastAPI + React 实现混淆。

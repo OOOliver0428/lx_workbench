@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Solution Workspace SQLite backup
+Documentation=file:///etc/systemd/system/solution-workspace-backup.timer
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 Asia/Shanghai
+RandomizedDelaySec=30m
+Persistent=true
+Unit=solution-workspace-backup.service
+
+[Install]
+WantedBy=timers.target

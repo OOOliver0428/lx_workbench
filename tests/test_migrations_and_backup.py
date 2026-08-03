@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
+import time
 from contextlib import closing
 from pathlib import Path
 
 from alembic.config import Config
 
 from alembic import command
-from app.backup import create_backup
+from app.backup import create_backup, prune_old_backups
 from app.config import get_settings
 from app.database import create_database_engine
 
@@ -342,3 +344,25 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
             == display_name
         )
     get_settings.cache_clear()
+
+
+def test_backup_retention_only_prunes_expired_mvp_snapshots(tmp_path: Path) -> None:
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    expired_db = backup_dir / "mvp-20260101T000000000000Z.db"
+    expired_manifest = backup_dir / f"{expired_db.name}.manifest.json"
+    recent_db = backup_dir / "mvp-20261231T000000000000Z.db"
+    unrelated = backup_dir / "keep-me.db"
+    for path in (expired_db, expired_manifest, recent_db, unrelated):
+        path.write_bytes(b"test")
+    expired_time = time.time() - 31 * 24 * 60 * 60
+    os.utime(expired_db, (expired_time, expired_time))
+    os.utime(expired_manifest, (expired_time, expired_time))
+
+    removed = prune_old_backups(backup_dir, retention_days=30)
+
+    assert set(removed) == {expired_db, expired_manifest}
+    assert not expired_db.exists()
+    assert not expired_manifest.exists()
+    assert recent_db.exists()
+    assert unrelated.exists()
