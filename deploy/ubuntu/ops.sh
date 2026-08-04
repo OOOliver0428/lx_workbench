@@ -68,6 +68,9 @@ readonly PYTHON_BIN="${PROJECT_DIR}/.venv/bin/python"
 readonly ALEMBIC_BIN="${PROJECT_DIR}/.venv/bin/alembic"
 readonly NODE_BIN_DIR="$(dirname -- "${NODE_BIN}")"
 readonly APP_GROUP="$(id -gn "${APP_USER}")"
+readonly FRONTEND_GROUP="$(id -gn "${FRONTEND_USER}")"
+readonly FRONTEND_HOME="/var/lib/solution-workspace-web-home"
+readonly NPM_CACHE_DIR="/var/cache/solution-workspace/npm"
 export PATH="${NODE_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 readonly RUNUSER_BIN="$(command -v runuser || true)"
 [[ -x "${RUNUSER_BIN}" ]] || fail "runuser is required; install the util-linux package"
@@ -77,6 +80,16 @@ run_as_app() {
     HOME="${APP_HOME}" \
     PATH="${PATH}" \
     bash -c 'umask 0077; exec "$@"' bash "$@"
+}
+
+run_as_frontend() {
+  "${RUNUSER_BIN}" -u "${FRONTEND_USER}" -- env -i \
+    HOME="${FRONTEND_HOME}" \
+    LANG=C.UTF-8 \
+    PATH="${PATH}" \
+    npm_config_cache="${NPM_CACHE_DIR}" \
+    npm_config_update_notifier=false \
+    "$@"
 }
 
 run_app_env() {
@@ -227,7 +240,7 @@ new_operation_dir() {
   local timestamp output_dir
   timestamp="$(date -u +%Y%m%dT%H%M%S%NZ)"
   output_dir="${BACKUP_DIR}/${category}/${timestamp}"
-  install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${output_dir}"
+  install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${output_dir}" || return 1
   printf '%s\n' "${output_dir}"
 }
 
@@ -242,14 +255,14 @@ backup_file_in() {
 }
 
 stop_for_maintenance() {
-  systemctl stop solution-workspace-backup.timer
+  systemctl stop solution-workspace-backup.timer || return 1
   systemctl stop solution-workspace-backup.service || true
-  systemctl stop solution-workspace.target
+  systemctl stop solution-workspace.target || return 1
 }
 
 start_after_maintenance() {
-  systemctl start solution-workspace.target
-  systemctl start solution-workspace-backup.timer
+  systemctl start solution-workspace.target || return 1
+  systemctl start solution-workspace-backup.timer || return 1
 }
 
 clone_sqlite_database() {
@@ -335,7 +348,7 @@ rollback_switch() {
 }
 
 switch_error_trap() {
-  local status=$?
+  local status="$1"
   if [[ "${SWITCH_ACTIVE}" == "true" ]]; then
     rollback_switch "unexpected command failure or interruption"
   fi
@@ -394,7 +407,9 @@ switch_database() {
   SWITCH_PRESERVED_TARGET=""
   SWITCH_SWAPPED="false"
   SWITCH_ACTIVE="true"
-  trap switch_error_trap ERR INT TERM
+  trap 'switch_error_trap $?' ERR
+  trap 'switch_error_trap 130' INT
+  trap 'switch_error_trap 143' TERM
 
   if [[ "${mode}" == "promote" ]]; then
     source_path="${rollback_db}"
@@ -531,6 +546,99 @@ case "${COMMAND}" in
   update)
     remote="${1:-origin}"
     branch="${2:-mvp}"
+    frontend_stage_dir=""
+    frontend_runtime_swapped="false"
+    cleanup_frontend_stage() {
+      local candidate="${frontend_stage_dir:-}"
+      local canonical_parent canonical_candidate expected_prefix
+      [[ -n "${candidate}" ]] || return 0
+      [[ -d "${candidate}" && ! -L "${candidate}" ]] || return 1
+      canonical_parent="$(realpath -- "$(dirname -- "${PROJECT_DIR}")")" || return 1
+      canonical_candidate="$(realpath -- "${candidate}")" || return 1
+      expected_prefix="${canonical_parent}/$(basename -- "${PROJECT_DIR}").frontend-update."
+      [[ "${canonical_candidate}" == "${expected_prefix}"* ]] || {
+        printf 'refusing to remove unexpected frontend staging path: %s\n' \
+          "${canonical_candidate}" >&2
+        return 1
+      }
+      rm -rf -- "${canonical_candidate}" || return 1
+      frontend_stage_dir=""
+    }
+    validate_staged_frontend() {
+      local staged_frontend="${frontend_stage_dir}/frontend"
+      local candidate_path expected_path
+      [[ -d "${staged_frontend}" && ! -L "${staged_frontend}" ]] || return 1
+      expected_path="$(realpath -- "${frontend_stage_dir}")/frontend"
+      [[ "$(realpath -- "${staged_frontend}")" == "${expected_path}" ]] || return 1
+      for candidate_path in node_modules dist; do
+        [[ -d "${staged_frontend}/${candidate_path}" ]] || return 1
+        [[ ! -L "${staged_frontend}/${candidate_path}" ]] || return 1
+        [[ "$(realpath -- "${staged_frontend}/${candidate_path}")" == \
+          "${expected_path}/${candidate_path}" ]] || return 1
+      done
+      [[ -f "${staged_frontend}/node_modules/vinext/dist/cli.js" ]] || return 1
+      [[ ! -L "${staged_frontend}/node_modules/vinext/dist/cli.js" ]] || return 1
+      [[ "$(realpath -- "${staged_frontend}/node_modules/vinext/dist/cli.js")" == \
+        "${expected_path}/node_modules/vinext/dist/cli.js" ]] || return 1
+      [[ -f "${staged_frontend}/dist/server/index.js" ]] || return 1
+      [[ ! -L "${staged_frontend}/dist/server/index.js" ]] || return 1
+      [[ "$(realpath -- "${staged_frontend}/dist/server/index.js")" == \
+        "${expected_path}/dist/server/index.js" ]] || return 1
+    }
+    set_frontend_runtime_state() {
+      local state="$1"
+      case "${state}" in
+        false|in_progress|true) ;;
+        *) return 1 ;;
+      esac
+      sed -i "s/^FRONTEND_RUNTIME_SWAPPED=.*$/FRONTEND_RUNTIME_SWAPPED=${state}/" \
+        "${update_dir}/update.env" || return 1
+      sync -f "${update_dir}/update.env" || return 1
+      sync -f "${update_dir}" || return 1
+      frontend_runtime_swapped="${state}"
+    }
+    swap_frontend_runtime() {
+      local staged_frontend="${frontend_stage_dir}/frontend"
+      local live_frontend="${PROJECT_DIR}/frontend"
+      local previous_frontend="${frontend_stage_dir}/previous"
+      local had_node_modules=0
+      local had_dist=0
+
+      validate_staged_frontend || return 1
+      install -d -m 0700 "${previous_frontend}"
+      if [[ -e "${live_frontend}/node_modules" ]]; then
+        mv -- "${live_frontend}/node_modules" "${previous_frontend}/node_modules"
+        had_node_modules=1
+      fi
+      if [[ -e "${live_frontend}/dist" ]]; then
+        if ! mv -- "${live_frontend}/dist" "${previous_frontend}/dist"; then
+          if ((had_node_modules)); then
+            mv -- "${previous_frontend}/node_modules" "${live_frontend}/node_modules"
+          fi
+          return 1
+        fi
+        had_dist=1
+      fi
+      if ! mv -- "${staged_frontend}/node_modules" "${live_frontend}/node_modules"; then
+        if ((had_node_modules)); then
+          mv -- "${previous_frontend}/node_modules" "${live_frontend}/node_modules"
+        fi
+        if ((had_dist)); then
+          mv -- "${previous_frontend}/dist" "${live_frontend}/dist"
+        fi
+        return 1
+      fi
+      if ! mv -- "${staged_frontend}/dist" "${live_frontend}/dist"; then
+        mv -- "${live_frontend}/node_modules" "${staged_frontend}/node_modules"
+        if ((had_node_modules)); then
+          mv -- "${previous_frontend}/node_modules" "${live_frontend}/node_modules"
+        fi
+        if ((had_dist)); then
+          mv -- "${previous_frontend}/dist" "${live_frontend}/dist"
+        fi
+        return 1
+      fi
+    }
     project_status=""
     if ! project_status="$(git -C "${PROJECT_DIR}" status --porcelain)"; then
       fail "cannot inspect the managed release checkout"
@@ -545,18 +653,79 @@ case "${COMMAND}" in
     }
     old_commit="$(git -C "${PROJECT_DIR}" rev-parse HEAD)"
     new_commit="$(git -C "${PROJECT_DIR}" rev-parse FETCH_HEAD)"
-    update_dir="$(new_operation_dir updates)"
-    stop_for_maintenance
+    [[ "$(git -C "${PROJECT_DIR}" cat-file -t "${new_commit}:frontend")" == "tree" ]] || {
+      fail "candidate commit does not contain a frontend tree"
+    }
+    frontend_symlinks="$(
+      git -C "${PROJECT_DIR}" ls-tree -r "${new_commit}" frontend \
+        | awk '$1 == "120000" { print }'
+    )"
+    [[ -z "${frontend_symlinks}" ]] || {
+      fail "candidate frontend must not contain tracked symbolic links"
+    }
+    install -d -m 0750 -o "${FRONTEND_USER}" -g "${FRONTEND_GROUP}" \
+      "${NPM_CACHE_DIR}"
+    if [[ ! -d "${NPM_CACHE_DIR}/_cacache" && -d /root/.npm/_cacache ]]; then
+      cp -a -- /root/.npm/_cacache "${NPM_CACHE_DIR}/_cacache"
+      chown -R "${FRONTEND_USER}:${FRONTEND_GROUP}" "${NPM_CACHE_DIR}/_cacache"
+    fi
+    frontend_stage_dir="$(mktemp -d "${PROJECT_DIR}.frontend-update.XXXXXXXX")"
+    frontend_archive="${frontend_stage_dir}/frontend.tar"
+    log "Installing and building the candidate frontend while the current version is online"
+    if ! (
+      umask 0022 &&
+      git -C "${PROJECT_DIR}" archive --format=tar \
+        --output="${frontend_archive}" "${new_commit}" frontend &&
+      tar --no-same-owner --no-same-permissions \
+        -xf "${frontend_archive}" -C "${frontend_stage_dir}" &&
+      rm -f -- "${frontend_archive}" &&
+      test -d "${frontend_stage_dir}/frontend" &&
+      test ! -L "${frontend_stage_dir}/frontend" &&
+      chown -R "${FRONTEND_USER}:${FRONTEND_GROUP}" "${frontend_stage_dir}" &&
+      run_as_frontend npm --prefix "${frontend_stage_dir}/frontend" \
+        ci --include=dev --prefer-offline --no-audit --no-fund &&
+      run_as_frontend npm --prefix "${frontend_stage_dir}/frontend" run build &&
+      validate_staged_frontend &&
+      chown -R root:root "${frontend_stage_dir}" &&
+      chmod -R u=rwX,go=rX "${frontend_stage_dir}" &&
+      chmod 0700 "${frontend_stage_dir}" &&
+      validate_staged_frontend
+    ); then
+      cleanup_frontend_stage || true
+      fail "candidate frontend install/build failed; the current version is still online"
+    fi
+    [[ "$(stat -c '%d' "${frontend_stage_dir}")" == \
+      "$(stat -c '%d' "${PROJECT_DIR}/frontend")" ]] || {
+      cleanup_frontend_stage || true
+      fail "frontend staging and release checkout must be on the same filesystem"
+    }
+    if ! update_dir="$(new_operation_dir updates)"; then
+      cleanup_frontend_stage || true
+      fail "cannot create update rollback directory; the current version is still online"
+    fi
+    if ! stop_for_maintenance; then
+      cleanup_frontend_stage || true
+      start_after_maintenance || true
+      fail "cannot enter maintenance mode; current services were restarted"
+    fi
     if ! create_backup "${update_dir}"; then
+      cleanup_frontend_stage || true
       start_after_maintenance || true
       fail "offline backup failed; update was not applied and services were restarted"
     fi
     if ! update_backup="$(backup_file_in "${update_dir}")"; then
+      cleanup_frontend_stage || true
       start_after_maintenance || true
       fail "cannot locate update rollback snapshot; update was not applied"
     fi
+    if ! chown root:"${APP_GROUP}" "${update_dir}" \
+      || ! chmod 0750 "${update_dir}"; then
+      cleanup_frontend_stage || true
+      start_after_maintenance || true
+      fail "cannot seal update rollback directory; update was not applied"
+    fi
     update_failed() {
-      local status=$?
+      local status="$1"
       trap - ERR INT TERM
       systemctl stop solution-workspace.target || true
       systemctl stop solution-workspace-backend.service solution-workspace-frontend.service || true
@@ -565,29 +734,43 @@ case "${COMMAND}" in
       printf '\nUPDATE FAILED. Application and backup timer remain stopped.\n' >&2
       printf 'Old commit: %s\nNew commit: %s\nRollback snapshot: %s\n' \
         "${old_commit}" "${new_commit}" "${update_backup}" >&2
+      printf 'Frontend staging/rollback directory: %s\n' \
+        "${frontend_stage_dir}" >&2
+      printf 'Frontend runtime swapped: %s\n' \
+        "${frontend_runtime_swapped}" >&2
+      if [[ -f "${update_dir}/update.env" ]]; then
+        set_frontend_runtime_state "${frontend_runtime_swapped}" || true
+      fi
       printf 'Follow the version-aware rollback procedure in docs/UBUNTU_DEPLOYMENT.md.\n' >&2
       exit "${status}"
     }
-    trap update_failed ERR INT TERM
+    trap 'update_failed $?' ERR
+    trap 'update_failed 130' INT
+    trap 'update_failed 143' TERM
     cat >"${update_dir}/update.env" <<EOF
 OLD_COMMIT=${old_commit}
 NEW_COMMIT=${new_commit}
 DATABASE_BACKUP=${update_backup}
+FRONTEND_RUNTIME_BACKUP=${frontend_stage_dir}/previous
+FRONTEND_RUNTIME_SWAPPED=false
 EOF
-    chown "${APP_USER}:${APP_GROUP}" "${update_dir}/update.env"
+    chown root:"${APP_GROUP}" "${update_dir}/update.env"
+    chmod 0640 "${update_dir}/update.env"
     git -C "${PROJECT_DIR}" merge --ff-only FETCH_HEAD
     export UV_PYTHON_INSTALL_DIR UV_CACHE_DIR
     (
       cd "${PROJECT_DIR}"
       uv sync --frozen --no-dev --python 3.12
     )
-    (
-      cd "${PROJECT_DIR}/frontend"
-      npm ci --no-audit --no-fund
-      npm run build
-    )
+    set_frontend_runtime_state in_progress
+    swap_frontend_runtime
+    set_frontend_runtime_state true
     chown -R root:root "${PROJECT_DIR}"
     chmod -R go-w "${PROJECT_DIR}"
+    "${RUNUSER_BIN}" -u "${FRONTEND_USER}" -- \
+      test -r "${PROJECT_DIR}/frontend/node_modules/vinext/dist/cli.js"
+    "${RUNUSER_BIN}" -u "${FRONTEND_USER}" -- \
+      test -r "${PROJECT_DIR}/frontend/dist/server/index.js"
     run_app_env "${ALEMBIC_BIN}" upgrade head
     bash "${PROJECT_DIR}/deploy/systemd/install.sh" \
       "${PROJECT_DIR}" "${APP_USER}" "${FRONTEND_USER}" "${NODE_BIN}" \
@@ -595,6 +778,9 @@ EOF
       "${FRONTEND_PORT}" "${BACKEND_PORT}"
     health_check 12 2
     trap - ERR INT TERM
+    if ! cleanup_frontend_stage; then
+      printf 'warning: could not remove frontend staging directory after success\n' >&2
+    fi
     printf 'update completed: %s -> %s\n' "${old_commit}" "${new_commit}"
     printf 'offline rollback snapshot: %s\n' "${update_backup}"
     ;;

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +25,11 @@ def test_ubuntu_install_keeps_runtime_state_outside_the_checkout() -> None:
     assert 'readonly BACKEND_USER="solution-workspace"' in installer
     assert 'readonly FRONTEND_USER="solution-workspace-web"' in installer
     assert "uv sync --frozen --no-dev --python 3.12" in installer
-    assert "npm ci --no-audit --no-fund" in installer
+    assert "ci --include=dev --prefer-offline --no-audit --no-fund" in installer
+    assert 'runuser -u "${FRONTEND_USER}"' in installer
+    assert 'env -i' in installer
+    assert 'npm_config_cache="${NPM_CACHE_DIR}"' in installer
+    assert "/root/.npm/_cacache" in installer
     assert "curl flock openssl runuser systemctl" in installer
     assert "bootstrap_command in realpath git systemctl" in installer
     assert 'chown -R root:root "${PROJECT_DIR}"' in installer
@@ -60,9 +67,89 @@ def test_ops_database_switch_has_backup_validation_and_rollback_guards() -> None
     assert "move_database_bundle" in operations
     assert "promote-db" in operations
     assert "rollback_switch" in operations
+    assert "trap 'switch_error_trap 130' INT" in operations
+    assert "trap 'switch_error_trap 143' TERM" in operations
+    assert "systemctl stop solution-workspace-backup.timer || return 1" in operations
+    assert "systemctl start solution-workspace.target || return 1" in operations
     assert "new database failed service startup or health checks" in operations
     assert "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" in operations
     assert '"${RUNUSER_BIN}" -u "${APP_USER}"' in operations
+
+
+def test_update_stages_frontend_before_stopping_the_running_release() -> None:
+    operations = read("deploy/ubuntu/ops.sh")
+
+    stage_message = (
+        "Installing and building the candidate frontend while the current version is online"
+    )
+    update_case = operations.index("  update)")
+    stage_position = operations.index(stage_message, update_case)
+    stop_position = operations.index("stop_for_maintenance", stage_position)
+
+    assert stage_position < stop_position
+    assert "ci --include=dev --prefer-offline --no-audit --no-fund" in operations
+    assert "run_as_frontend npm" in operations
+    assert '"${FRONTEND_USER}" -- env -i' in operations
+    assert 'npm_config_cache="${NPM_CACHE_DIR}"' in operations
+    assert "/root/.npm/_cacache" in operations
+    assert "umask 0022" in operations[stage_position:stop_position]
+    assert "validate_staged_frontend" in operations
+    assert "tar --no-same-owner --no-same-permissions" in operations
+    assert (
+        "candidate frontend install/build failed; the current version is still online"
+        in operations
+    )
+    assert "swap_frontend_runtime" in operations
+    assert "FRONTEND_RUNTIME_BACKUP=" in operations
+    assert "FRONTEND_RUNTIME_SWAPPED=false" in operations
+    assert "set_frontend_runtime_state in_progress" in operations
+    assert "set_frontend_runtime_state true" in operations
+    assert 'sync -f "${update_dir}/update.env"' in operations
+    assert 'sync -f "${update_dir}"' in operations
+    assert "trap 'update_failed 130' INT" in operations
+    assert "trap 'update_failed 143' TERM" in operations
+    assert '"${RUNUSER_BIN}" -u "${FRONTEND_USER}"' in operations
+    assert 'frontend/dist/server/index.js"' in operations
+
+
+def test_candidate_build_chain_does_not_continue_after_install_failure(tmp_path: Path) -> None:
+    if os.name == "nt":
+        return
+    bash = shutil.which("bash")
+    if bash is None:
+        return
+
+    fake_npm = tmp_path / "npm"
+    fake_npm.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ \"${1:-}\" == ci ]]; then exit 23; fi\n"
+        "touch \"${BUILD_MARKER}\"\n",
+        encoding="utf-8",
+    )
+    fake_npm.chmod(0o755)
+    build_marker = tmp_path / "build-ran"
+    success_marker = tmp_path / "candidate-succeeded"
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "BUILD_MARKER": str(build_marker),
+            "FAKE_NPM": str(fake_npm),
+            "SUCCESS_MARKER": str(success_marker),
+        }
+    )
+    subprocess.run(
+        [
+            bash,
+            "-c",
+            'if ! ( "$FAKE_NPM" ci && "$FAKE_NPM" run build '
+            '&& touch "$SUCCESS_MARKER" ); then :; fi',
+        ],
+        check=True,
+        env=environment,
+    )
+
+    assert not build_marker.exists()
+    assert not success_marker.exists()
 
 
 def test_deployment_manual_covers_both_trial_database_outcomes() -> None:
@@ -73,3 +160,17 @@ def test_deployment_manual_covers_both_trial_database_outcomes() -> None:
     assert "当前版本只完成了 SQLite" in manual
     assert "MVP_LLM_CONFIG_SECRET" in manual
     assert "严禁试用库和正式库同时开放写入" in manual
+
+
+def test_deployment_manual_covers_bundle_and_dependency_escape_paths() -> None:
+    manual = read("docs/UBUNTU_DEPLOYMENT.md")
+
+    assert "GitHub 不可达时使用增量 bundle" in manual
+    assert "bundle 只替代 GitHub 代码传输" in manual
+    assert "服务器当前提交号..mvp" in manual
+    assert "solution-workspace.next" in manual
+    assert 'test -s "$candidate"' in manual
+    assert '/usr/local/sbin/solution-workspace update "$bundle" mvp' in manual
+    assert "不能直接调用旧版 `update`" in manual
+    assert "FRONTEND_RUNTIME_SWAPPED" in manual
+    assert "--include=dev --prefer-offline" in manual

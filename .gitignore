@@ -24,6 +24,10 @@ venv/
 # Frontend build caches
 *.tsbuildinfo
 
+# Offline deployment artifacts
+*.bundle
+*.bundle.sha256
+
 # Local secrets
 .env
 .env.*

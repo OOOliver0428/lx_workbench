@@ -13,7 +13,8 @@
   NAS、同步盘或源码目录。
 - 当前版本只完成了 SQLite 的迁移、备份和恢复验证。不能只把 URL 改成 PostgreSQL/MySQL；
   跨数据库上线需要另做驱动、迁移、备份恢复和并发验收。
-- 当前一键安装在 root 持有的发布目录中执行锁定的 `uv sync` 与 `npm ci`。只允许部署已评审、CI
+- 当前一键安装在 root 持有的发布目录中执行锁定的 `uv sync`；前端依赖安装和构建在独立暂存目录
+  中由无密钥服务账号执行，固定使用 `npm ci --include=dev --prefer-offline`。只允许部署已评审、CI
   通过的提交和官方依赖源，不得在服务器直接构建未审查的 PR；后续正式发布流水线应改为独立构建
   账号生成制品，再由 root 原子安装制品。
 - 这是内网 MVP 部署，不应直接暴露到互联网。公网、跨网或扩大用户规模前必须增加 HTTPS、
@@ -27,7 +28,9 @@
 | `/etc/solution-workspace/app.env` | 运行配置和加密主密钥 | `0640 root:solution-workspace`，前端账号不可读 |
 | `/etc/solution-workspace/deploy.conf` | 运维脚本使用的部署元数据 | `0640 root:solution-workspace` |
 | `/var/lib/solution-workspace/` | SQLite 数据库和服务账号 HOME | 不由 Web 服务暴露 |
+| `/var/lib/solution-workspace/releases/` | 人工转入的 bundle/离线发布文件 | `0700 root:root`，发布后清理 |
 | `/var/backups/solution-workspace/` | 本机一致性备份和校验清单 | 仍需复制到异机 |
+| `/var/cache/solution-workspace/npm/` | 无特权前端构建账号的 npm 内容缓存 | 不包含 `.npmrc` 或部署凭据 |
 | `/usr/local/sbin/solution-workspace` | 统一运维命令 | root 执行 |
 
 systemd 服务：
@@ -293,7 +296,8 @@ sudo solution-workspace switch-db \
 ## 8. 版本更新与回滚
 
 正常更新先在线获取版本；进入维护窗口并停止写入后再生成最终回滚快照，只接受 Git fast-forward，
-然后按锁文件重新安装、构建、迁移和健康检查：
+然后按锁文件重新安装、构建、迁移和健康检查。候选前端会先在独立暂存目录中安装和构建；如果 npm
+依赖或构建失败，当前线上版本保持运行，不会清空正在使用的 `node_modules`：
 
 ```bash
 sudo solution-workspace update origin mvp
@@ -307,6 +311,76 @@ sudo solution-workspace update origin mvp
 - Alembic 迁移和旧版本兼容性已评审；
 - 已安排维护窗口。
 
+### 8.1 GitHub 不可达时使用增量 bundle
+
+`update` 的第一个参数既可以是远程名称，也可以是本地 Git bundle。先在服务器记录当前提交：
+
+```bash
+sudo git -C /opt/solution-workspace rev-parse HEAD
+```
+
+在能访问 GitHub 的受信任电脑上更新 `mvp`，用上一步提交号生成并校验增量包：
+
+```bash
+git fetch origin mvp
+git switch mvp
+git merge --ff-only origin/mvp
+git bundle create solution-workspace-update.bundle 服务器当前提交号..mvp
+git bundle verify solution-workspace-update.bundle
+sha256sum solution-workspace-update.bundle
+```
+
+将 bundle 通过 SCP、堡垒机或批准的介质先传到服务器临时目录，通过独立可信通道核对 SHA-256
+和目标提交号，再转存为 root 持有的发布文件并验证 bundle：
+
+```bash
+sudo install -d -m 0700 -o root -g root /var/lib/solution-workspace/releases
+sudo install -m 0600 -o root -g root \
+  /tmp/solution-workspace-update.bundle \
+  /var/lib/solution-workspace/releases/solution-workspace-update.bundle
+sudo git -C /opt/solution-workspace bundle verify \
+  /var/lib/solution-workspace/releases/solution-workspace-update.bundle
+sudo solution-workspace update \
+  /var/lib/solution-workspace/releases/solution-workspace-update.bundle mvp
+sudo solution-workspace health
+```
+
+bundle 只替代 GitHub 代码传输，不自动携带 npm/Python 依赖。更新器会优先复用本机缓存，但缓存缺失
+时仍需访问配置的软件源。完全断网环境必须另外制作并校验依赖缓存/制品，不能把 Git bundle 当作
+完整离线安装包。首次升级到无特权构建流程时，更新器会把旧 root npm 内容缓存迁移到前端构建
+账号的专用缓存目录，但不会复制 `.npmrc` 或凭据。前端候选构建失败时，脚本会在停服前退出并
+保留当前版本；不要反复执行更新。
+
+如果服务器当前版本不晚于 `4fe59b1`，旧更新器既可能漏装 `devDependencies`，也会用仅 root 可读
+的 umask 构建前端。不能直接调用旧版 `update`。先从已经校验的 bundle 中只取出新版运维脚本，
+校验 Bash 语法并备份旧脚本：
+
+```bash
+sudo bash -c '
+  set -Eeuo pipefail
+  umask 0022
+  bundle=/var/lib/solution-workspace/releases/solution-workspace-update.bundle
+  project=/opt/solution-workspace
+  candidate=/usr/local/sbin/solution-workspace.next
+  git -C "$project" bundle verify "$bundle"
+  git -C "$project" fetch "$bundle" mvp
+  git -C "$project" show FETCH_HEAD:deploy/ubuntu/ops.sh >"$candidate"
+  test -s "$candidate"
+  bash -n "$candidate"
+  cp -a /usr/local/sbin/solution-workspace \
+    /usr/local/sbin/solution-workspace.before-staged-update
+  install -m 0755 -o root -g root "$candidate" /usr/local/sbin/solution-workspace
+  /usr/local/sbin/solution-workspace update "$bundle" mvp
+  /usr/local/sbin/solution-workspace health
+'
+```
+
+更新成功后，新版 systemd 安装过程会再次安装同一份运维脚本。确认健康检查和备份 timer 正常后，
+删除 `.next`、旧脚本备份和发布 bundle。候选 npm 生命周期与前端构建由无密钥的前端服务账号执行，
+不会以 root 身份读取 `app.env` 或部署凭据。
+
+### 8.2 更新失败与版本感知回滚
+
 如果更新在构建或迁移阶段失败，脚本会保持应用和备份定时器停止，输出旧/新提交以及准确的离线
 回滚快照。不要在新代码下对该快照执行 `switch-db`，否则它会再次迁移到新 schema。版本感知回滚：
 
@@ -314,7 +388,10 @@ sudo solution-workspace update origin mvp
 2. 使用当前运维命令 `verify-db` 校验输出的升级前快照；
 3. 把快照复制成 `/var/lib/solution-workspace/rollback-日期.db` 并设置 `0600 solution-workspace`；
 4. 直接编辑 `/etc/solution-workspace/app.env`，把 `MVP_DATABASE_URL` 指向该回滚库；此时不要启动；
-5. 使用 root 在 `/opt/solution-workspace` 检出旧提交，并按旧提交的锁文件重新构建：
+5. 检查 `update.env` 中的 `FRONTEND_RUNTIME_SWAPPED`：`false` 表示交换尚未开始；`true` 表示交换
+   完整结束；`in_progress` 表示交换被中断，必须保持停服并检查 live/previous 两组目录，不得自动
+   选择任一组。只有值为 `true`，且 `FRONTEND_RUNTIME_BACKUP` 下同时存在 `node_modules` 和 `dist`
+   时，才执行下列恢复块。不要以 root 运行 npm 生命周期脚本：
 
    ```bash
    sudo git -C /opt/solution-workspace switch --detach 旧提交
@@ -322,9 +399,29 @@ sudo solution-workspace update origin mvp
      UV_PYTHON_INSTALL_DIR=/opt/solution-workspace-runtime/python \
      UV_CACHE_DIR=/var/cache/solution-workspace/uv \
      uv sync --project /opt/solution-workspace --frozen --no-dev --python 3.12
-   sudo npm --prefix /opt/solution-workspace/frontend ci --no-audit --no-fund
-   sudo npm --prefix /opt/solution-workspace/frontend run build
+   sudo bash -c '
+     set -Eeuo pipefail
+     metadata=/var/backups/solution-workspace/updates/具体时间/update.env
+     swapped=$(sed -n "s/^FRONTEND_RUNTIME_SWAPPED=\\(false\\|in_progress\\|true\\)$/\\1/p" "$metadata")
+     backup=$(sed -n "s#^FRONTEND_RUNTIME_BACKUP=\\(/opt/solution-workspace\\.frontend-update\\.[A-Za-z0-9]*/previous\\)$#\\1#p" "$metadata")
+     test "$swapped" = true
+     test -n "$backup"
+     live=/opt/solution-workspace/frontend
+     test "$(realpath -- "$backup")" = "$backup"
+     test -d "$backup/node_modules"
+     test -d "$backup/dist"
+     mv "$live/node_modules" "$live/node_modules.failed"
+     mv "$live/dist" "$live/dist.failed"
+     mv "$backup/node_modules" "$live/node_modules"
+     mv "$backup/dist" "$live/dist"
+     chown -R root:root "$live/node_modules" "$live/dist"
+     chmod -R u=rwX,go=rX "$live/node_modules" "$live/dist"
+   '
    ```
+
+   如果状态为 `in_progress`、运行时备份不完整或路径校验失败，保持停服并人工核对；不得继续执行
+   `mv`。如果运行时备份不存在，必须取得对应旧提交的已审核制品或由无特权构建账号重新生成；
+   不要临时改成 root 执行 `npm ci`。
 
 6. 确认旧提交的 Alembic `head` 与回滚快照 revision 一致，然后启动现有 systemd target；
 7. 完成健康检查和业务对账后恢复备份 timer。若任一步无法确认，保持停服并联系发布负责人取得

@@ -11,8 +11,10 @@ readonly DATA_DIR="/var/lib/solution-workspace"
 readonly BACKUP_DIR="/var/backups/solution-workspace"
 readonly PYTHON_RUNTIME_DIR="/opt/solution-workspace-runtime/python"
 readonly UV_CACHE_DIR="/var/cache/solution-workspace/uv"
+readonly NPM_CACHE_DIR="/var/cache/solution-workspace/npm"
 readonly BACKEND_USER="solution-workspace"
 readonly FRONTEND_USER="solution-workspace-web"
+readonly FRONTEND_HOME="/var/lib/solution-workspace-web-home"
 readonly UV_VERSION="0.11.32"
 readonly NODE_VERSION="22.23.1"
 
@@ -283,14 +285,21 @@ version_at_least "${uv_version}" "0.11.0" || fail "uv >= 0.11.0 is required"
 
 log "Creating dedicated service accounts"
 ensure_service_account "${BACKEND_USER}" "/var/lib/solution-workspace-home"
-ensure_service_account "${FRONTEND_USER}" "/var/lib/solution-workspace-web-home"
+ensure_service_account "${FRONTEND_USER}" "${FRONTEND_HOME}"
 BACKEND_GROUP="$(id -gn "${BACKEND_USER}")"
+FRONTEND_GROUP="$(id -gn "${FRONTEND_USER}")"
 
 log "Preparing configuration and runtime directories"
 install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" \
   "${DATA_DIR}" "${BACKUP_DIR}"
 install -d -m 0755 -o root -g root \
   "${PYTHON_RUNTIME_DIR}" "${UV_CACHE_DIR}" "$(dirname -- "${PROJECT_DIR}")"
+install -d -m 0750 -o "${FRONTEND_USER}" -g "${FRONTEND_GROUP}" \
+  "${NPM_CACHE_DIR}"
+if [[ ! -d "${NPM_CACHE_DIR}/_cacache" && -d /root/.npm/_cacache ]]; then
+  cp -a -- /root/.npm/_cacache "${NPM_CACHE_DIR}/_cacache"
+  chown -R "${FRONTEND_USER}:${FRONTEND_GROUP}" "${NPM_CACHE_DIR}/_cacache"
+fi
 install -d -m 0750 -o root -g "${BACKEND_GROUP}" "${CONFIG_DIR}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -357,11 +366,61 @@ uv python install 3.12
 )
 
 log "Installing and building the locked frontend"
-(
-  cd "${PROJECT_DIR}/frontend"
-  npm ci --no-audit --no-fund
-  npm run build
-)
+[[ "$(git -C "${PROJECT_DIR}" cat-file -t "${source_commit}:frontend")" == "tree" ]] || {
+  fail "source commit does not contain a frontend tree"
+}
+frontend_symlinks="$(
+  git -C "${PROJECT_DIR}" ls-tree -r "${source_commit}" frontend \
+    | awk '$1 == "120000" { print }'
+)"
+[[ -z "${frontend_symlinks}" ]] || fail "frontend must not contain tracked symbolic links"
+frontend_stage_dir="$(mktemp -d "${PROJECT_DIR}.frontend-install.XXXXXXXX")"
+frontend_archive="${frontend_stage_dir}/frontend.tar"
+if ! (
+  git -C "${PROJECT_DIR}" archive --format=tar \
+    --output="${frontend_archive}" "${source_commit}" frontend &&
+  tar --no-same-owner --no-same-permissions \
+    -xf "${frontend_archive}" -C "${frontend_stage_dir}" &&
+  rm -f -- "${frontend_archive}" &&
+  test -d "${frontend_stage_dir}/frontend" &&
+  test ! -L "${frontend_stage_dir}/frontend" &&
+  chown -R "${FRONTEND_USER}:${FRONTEND_GROUP}" "${frontend_stage_dir}" &&
+  runuser -u "${FRONTEND_USER}" -- env -i \
+    HOME="${FRONTEND_HOME}" LANG=C.UTF-8 PATH="${PATH}" \
+    npm_config_cache="${NPM_CACHE_DIR}" npm_config_update_notifier=false \
+    npm --prefix "${frontend_stage_dir}/frontend" \
+      ci --include=dev --prefer-offline --no-audit --no-fund &&
+  runuser -u "${FRONTEND_USER}" -- env -i \
+    HOME="${FRONTEND_HOME}" LANG=C.UTF-8 PATH="${PATH}" \
+    npm_config_cache="${NPM_CACHE_DIR}" npm_config_update_notifier=false \
+    npm --prefix "${frontend_stage_dir}/frontend" run build &&
+  test -d "${frontend_stage_dir}/frontend/node_modules" &&
+  test ! -L "${frontend_stage_dir}/frontend/node_modules" &&
+  test "$(realpath -- "${frontend_stage_dir}/frontend/node_modules")" = \
+    "$(realpath -- "${frontend_stage_dir}/frontend")/node_modules" &&
+  test -d "${frontend_stage_dir}/frontend/dist" &&
+  test ! -L "${frontend_stage_dir}/frontend/dist" &&
+  test "$(realpath -- "${frontend_stage_dir}/frontend/dist")" = \
+    "$(realpath -- "${frontend_stage_dir}/frontend")/dist" &&
+  test -f "${frontend_stage_dir}/frontend/node_modules/vinext/dist/cli.js" &&
+  test ! -L "${frontend_stage_dir}/frontend/node_modules/vinext/dist/cli.js" &&
+  test "$(realpath -- "${frontend_stage_dir}/frontend/node_modules/vinext/dist/cli.js")" = \
+    "$(realpath -- "${frontend_stage_dir}/frontend")/node_modules/vinext/dist/cli.js" &&
+  test -f "${frontend_stage_dir}/frontend/dist/server/index.js" &&
+  test ! -L "${frontend_stage_dir}/frontend/dist/server/index.js" &&
+  test "$(realpath -- "${frontend_stage_dir}/frontend/dist/server/index.js")" = \
+    "$(realpath -- "${frontend_stage_dir}/frontend")/dist/server/index.js" &&
+  chown -R root:root "${frontend_stage_dir}" &&
+  chmod -R u=rwX,go=rX "${frontend_stage_dir}" &&
+  chmod 0700 "${frontend_stage_dir}"
+); then
+  rm -rf -- "${frontend_stage_dir}"
+  fail "frontend dependency installation or build failed"
+fi
+rm -rf -- "${PROJECT_DIR}/frontend/node_modules" "${PROJECT_DIR}/frontend/dist"
+mv -- "${frontend_stage_dir}/frontend/node_modules" "${PROJECT_DIR}/frontend/node_modules"
+mv -- "${frontend_stage_dir}/frontend/dist" "${PROJECT_DIR}/frontend/dist"
+rm -rf -- "${frontend_stage_dir}"
 chown -R root:root "${PROJECT_DIR}"
 chmod -R go-w "${PROJECT_DIR}"
 
@@ -370,6 +429,14 @@ runuser -u "${BACKEND_USER}" -- test -r "${PROJECT_DIR}/server.py" || {
 }
 runuser -u "${FRONTEND_USER}" -- test -r "${PROJECT_DIR}/frontend/package.json" || {
   fail "frontend service account cannot read the installed release"
+}
+runuser -u "${FRONTEND_USER}" -- \
+  test -r "${PROJECT_DIR}/frontend/node_modules/vinext/dist/cli.js" || {
+  fail "frontend service account cannot read the Vinext runtime"
+}
+runuser -u "${FRONTEND_USER}" -- \
+  test -r "${PROJECT_DIR}/frontend/dist/server/index.js" || {
+  fail "frontend service account cannot read the production build"
 }
 
 log "Installing systemd services and the operations command"
