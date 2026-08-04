@@ -1,241 +1,244 @@
-# 协作工作台 MVP
+# 解决方案团队协作工作台
 
-这是面向售前与解决方案团队的轻量协作工作台。作战台是默认入口和核心产品界面。商机
-独立记录商业推进，项目承载任务、工作记录与交付物；商机追踪、工作管理和周期总览均由
-后端按自然周实时聚合。
+面向售前与解决方案团队的轻量协作系统，把商机推进、项目执行、任务协同、工作记录、周报和
+AI 辅助放在同一个工作台中。
 
-## 工程结构
+> 当前版本：**0.1.0** · 发布基线：`mvp` · 状态：可进入受控试运行部署
+
+[查看更新日志](CHANGELOG.md) · [Ubuntu 部署与运维](docs/UBUNTU_DEPLOYMENT.md) ·
+[版本发布规范](docs/RELEASING.md) · [API 契约](docs/API_CONTRACT.md)
+
+## 核心业务闭环
 
 ```text
-app/                 FastAPI 应用与领域服务
-alembic/             数据库迁移
-docs/                当前产品、接口与阶段说明
-frontend/            React 19 + Vinext 前端
-tests/               后端自动化测试
-.env.example         后端配置模板
-pyproject.toml        Python 依赖与工具配置
-server.py             本地/内网启动入口
+商机追踪 → 方案交流 → 转为项目 → 项目/任务执行 → 工作记录 → 个人/团队周报
+                                      └──────────────→ AI 助手
 ```
 
-运行数据库、模型密钥、缓存、原始头像和旧原型均为本地文件，不进入 Git。系统实际使用的
-头像是 `frontend/public/avatars/` 中经过压缩和校验的 WebP。
+- **商机追踪**：商机清单、关系图、追加式推进记录，以及方案交流阶段一键预填创建项目。
+- **作战台**：自然周视角的工作管理、跨周趋势、提交矩阵、阶段时间线和团队周报。
+- **项目与任务**：标签、父子层级、成员、状态流转、查重、合并、分派、阻塞和跨项目关联。
+- **工作记录与周报**：待归集、项目/任务关联、本周筛选、个人周报和基于已提交周报的团队汇总。
+- **AI 能力**：支持 DeepSeek、GLM、Kimi、MiniMax；密钥由后端加密保存，AI 结果不会自动修改业务数据。
+- **权限体系**：按功能递增授权，商机、项目、任务、作战台、工作记录、周报和系统设置相互隔离。
+- **安全与审计**：本地账号、服务端 Session、CSRF、乐观锁、软删除和操作审计。
 
-当前阶段边界与交付检查见 [MVP 阶段说明](docs/MVP_RELEASE.md)，接口及权限契约见
-[API 契约](docs/API_CONTRACT.md)。
+## 0.1.0 运行基线
 
-## 已实现
+| 项目 | 当前基线 |
+|---|---|
+| 后端 | Python 3.12、FastAPI、SQLAlchemy、Alembic |
+| 前端 | Node.js ≥ 22.13、React 19、Vinext |
+| 数据库 | 单节点本机 SQLite，WAL、外键约束、在线一致性备份 |
+| Ubuntu 入口 | 前端 `0.0.0.0:5174` |
+| 内部 API | 后端 `127.0.0.1:8787`，只由前端同源代理访问 |
+| 部署范围 | Ubuntu 22.04/24.04 LTS 受控内网或 VPN 单节点试运行 |
 
-- 默认作战台：商机清单/关系图、工作管理、跨周趋势、提交矩阵和阶段时间线。
-- 独立商机档案与追加式商机周进展；进入方案交流后可预填、创建并原子关联唯一项目。
-- 跨项目任务关联，以及基于已提交个人周报的 AI 团队周报。
-- 本地独立账号、服务端 Session、CSRF，以及按用户显式分配的权限与作战台可见性。
-- 项目标签；初始标签为“商机”和“改造”。
-- 项目父子层级，标签与层级相互独立。
-- 项目建议、状态流转、负责人、成员和时间范围。
-- 项目标准名称、别名、精确查重和模糊重复提示。
-- 项目合并预览及事务化合并。
-- 基础任务、分派/转派、阻塞、完成和取消规则。
-- 工作记录、待归集、任务反向推导项目和产出物链接。
-- 全角色个人设置、本人密码修改和系统预置头像选择。
-- `revision` 乐观锁、软删除和操作审计。
-- SQLite WAL、外键约束、Alembic 迁移和一致性在线备份。
+生产拓扑：
 
-## 本地安装
+```text
+浏览器
+  │ HTTP/HTTPS :5174
+  ▼
+Vinext 前端 ── 同源 /api ──► FastAPI :8787 ──► 本机 SQLite
+                                  │
+                                  └──────────► 大模型厂商 HTTPS API
+```
 
-需要 Python 3.12 或更高版本以及 `uv`。
+## 本地开发
+
+### 环境要求
+
+- Python 3.12 或更高版本；
+- [`uv`](https://docs.astral.sh/uv/)；
+- Node.js 22.13 或更高版本；
+- npm。
+
+### 后端
 
 ```powershell
 uv sync --all-groups
 Copy-Item .env.example .env
 uv run python -m app.cli upgrade-db
+uv run python -m app.cli create-user admin "系统管理员" --role system_admin
+uv run python server.py --reload
 ```
 
-创建应急超级管理员：
+创建用户命令会安全提示输入密码。后端默认访问地址为 `http://127.0.0.1:8787`。
+
+### 前端
 
 ```powershell
-uv run python -m app.cli create-user developer "开发者" --role super_admin
+Set-Location frontend
+npm ci
+npm run dev
 ```
 
-命令会安全地提示输入初始密码。超级管理员不可以通过业务 API 创建。
+前端默认访问地址为 `http://127.0.0.1:5174`。浏览器只访问同源 `/api`，前端服务内部通过
+`MVP_INTERNAL_API_BASE_URL` 转发到后端。
 
-启动开发服务。默认端口由 `.env` 中的 `MVP_SERVER_PORT` 控制，前端开发端口固定为
-`5174`，后端默认使用 `8787`：
-
-Windows 功能测试推荐使用统一启停脚本：
+Windows 联调推荐使用统一脚本，它会启动前后端、执行迁移、检查端口并等待健康检查：
 
 ```powershell
 .\scripts\windows-test.cmd start
 .\scripts\windows-test.cmd status
-.\scripts\windows-test.cmd restart
 .\scripts\windows-test.cmd stop
 ```
 
-脚本会在后台启动前后端、自动执行数据库迁移、等待健康检查，并把 PID 和日志写入已忽略的
-`.run/windows-test/`。停止时只会结束由该脚本启动且启动时间匹配的进程，不会按端口误杀其他服务。
-启动前若端口已被占用，脚本会报告占用进程的 PID、名称和可执行文件路径，而不是把已有服务误判为
-本次启动成功。
-
-需要与本机已有服务并行运行时，可指定端口，或让脚本从请求端口开始自动选择可用端口：
+端口冲突时可以自动选择可用端口：
 
 ```powershell
-.scripts\windows-test.cmd start -BackendPort 8788 -FrontendPort 5175
-.scripts\windows-test.cmd start -AutoSelectPorts
+.\scripts\windows-test.cmd start -AutoSelectPorts
 ```
 
-使用统一脚本时，前端会在启动时自动把 `MVP_INTERNAL_API_BASE_URL` 指向本次后端端口，不会修改
-`frontend/.env.local`。`status` 会显示实际使用的端口及对应监听进程。
+### 演示数据
 
-也可以分别手动启动：
-
-```powershell
-uv run python server.py --reload
-```
-
-如需长期更换默认后端端口，可在 `.env` 中修改 `MVP_SERVER_PORT`。手动分别启动前后端时，还需同步
-修改 `frontend/.env.local` 中的 `MVP_INTERNAL_API_BASE_URL`；命令行参数 `--port` 可用于单次覆盖。
-
-受控内网试运行时，将 `.env` 中的 `MVP_ALLOWED_HOSTS_CSV` 设置为服务器 IP，并运行：
-
-```powershell
-uv run python server.py --host 0.0.0.0 --port 8787
-```
-
-Ubuntu 服务器使用仓库内的[一键部署脚本](deploy/ubuntu/install.sh)，脚本会准备锁定依赖、
-生产构建、systemd 服务、每日校验备份和统一运维命令。完整步骤、网络边界、升级回滚及试用库
-切换正式库方法见 [Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。
-
-API 文档位于：
-
-```text
-http://服务器IP:8787/docs
-```
-
-前端启动：
-
-```powershell
-Set-Location frontend
-npm install
-npm run dev
-```
-
-本地地址为 `http://127.0.0.1:5174`。浏览器通过同源 `/api` 访问后端，前端服务内部转发到
-`MVP_INTERNAL_API_BASE_URL`。内网部署时需要调整后端 `MVP_ALLOWED_HOSTS_CSV`，不需要向终端
-开放后端端口或配置跨域访问。
-
-## 大模型 AI
-
-超级管理员，或被超级管理员授予“大模型配置”权限的账号，可在“系统设置 →
-大模型接入”中配置 DeepSeek、GLM、Kimi 或 MiniMax。连接测试会发送一条最小请求并
-消耗少量 Token；只有测试通过后，同一组服务商、模型和 API Key 才能写入系统配置。
-
-MiniMax 需要额外选择接入方式：
-
-- `Token Plan`：使用 `sk-cp-` 开头的 Token Plan Key，通过
-  `https://api.minimaxi.com/anthropic` 的 Anthropic 兼容协议接入。连接测试会占用一次
-  Token Plan 请求额度。
-- `按量计费`：使用开放平台普通 API Key，通过
-  `https://api.minimaxi.com/v1` 的 OpenAI 兼容协议接入，按实际 Token 计费。
-
-两类 Key 不可互换；后端会在发起厂商请求前校验密钥类型，避免走错计费链路。
-
-浏览器不会保存或回显模型密钥。API Key 由后端加密后存入数据库，部署时必须在未提交的
-`.env` 中配置独立的高强度加密密钥：
-
-```text
-MVP_LLM_CONFIG_SECRET=使用密码管理器生成的高熵随机值
-MVP_LLM_TIMEOUT_SECONDS=60
-MVP_LLM_TEST_TOKEN_TTL_SECONDS=600
-```
-
-该主密钥必须与数据库备份一起保管；丢失或更换后，已保存的 API Key 将无法解密，需要管理员重新测试并配置。
-
-原有 `MVP_MINIMAX_*` 环境变量只作为升级期间的兼容回退；通过设置页保存后，数据库配置
-优先。`MVP_MINIMAX_ACCESS_MODE=auto` 会根据 `sk-cp-` 前缀自动选择 Token Plan，
-也可显式设置为 `token_plan` 或 `pay_as_you_go`。前端仅调用工作台自己的 AI 接口，
-AI 建议不会自动修改业务数据。
-
-## 初始化业务账号
-
-先通过服务器命令创建第一个系统管理员：
-
-```powershell
-uv run python -m app.cli create-user admin "系统管理员" --role system_admin
-```
-
-超级管理员登录后可以通过 `POST /api/v1/users` 创建其他账号；被超级管理员授予“管理用户
-与角色”权限的系统管理员只能创建团队负责人和团队成员。创建时只填写姓名、角色和初始
-密码，登录名由系统自动生成并在创建结果中展示。普通用户首次登录后必须修改初始密码。
-显示名称全系统唯一，用户可在登录页选择使用登录名或显示名称登录。
-登录会话默认12小时失效，可通过 `MVP_SESSION_TTL_HOURS` 调整；失效后浏览器会自动返回登录页。
-
-所有角色都可以在“个人设置”中修改自己的密码和选择系统头像。系统不接受头像上传或外部
-图片地址；头像文件及命名规则见 `frontend/public/avatars/README.md`。
-
-## 全量功能测试数据
-
-可使用内置命令创建一套可重复执行的演示数据：
+测试数据库可写入覆盖主要功能和权限组合的演示数据：
 
 ```powershell
 uv run python -m app.cli seed-demo-data --password "Demo-Password-2026!"
 ```
 
-数据覆盖全部角色、权限组合、作战台视图、项目状态、任务状态、五周工作趋势和周报提交矩阵。
-账号清单和覆盖说明见 [docs/DEMO_DATA.md](docs/DEMO_DATA.md)。
+账号与场景说明见 [演示数据手册](docs/DEMO_DATA.md)。
 
-## 权限与可见性
+## Ubuntu 一键部署
 
-- 超级管理员始终拥有全部权限，但不出现在任何用户目录、负责人候选、项目成员或权限配置
-  目标中；对其他用户而言它永久不可见。
-- 角色本身不自动附带管理权限。新建账号默认拥有项目只读、任务只读、工作记录全部功能、
-  个人周报全部功能、AI 助手和个人设置；项目/任务编辑与创建、作战台及系统设置需另行授权。
-- 超级管理员可配置所有普通账号。系统管理员具备权限配置入口，但只能调整团队负责人和
-  团队成员的业务权限与作战台视图，不能配置系统管理员、超级管理员或系统级权限。
-- 商机权限按“查看 → 录入进展 → 新建商机”递增；项目、任务按“查看 → 编辑 → 创建”
-  递增，高级权限自动包含低级权限。工作管理按“查看 → 生成团队周报”递增，仅对至少为
-  团队负责人且有有效直属成员的账号生效。
-- 工作记录的数据范围不因菜单可见而扩大：团队成员只看自己的原始记录，超级管理员可看
-  全部；团队负责人和系统管理员在工作记录与作战台中同样不能读取其他人的原始记录。
-- 个人周报始终只对作者本人可见，可按周目查看、编辑、保存草稿和提交。拥有“生成团队
-  周报”权限的账号会在周报功能中看到独立的团队周报页签，以及自己生成的历史团队周报。
+首次安装：
 
-## 数据库迁移
-
-```powershell
-uv run alembic upgrade head
-uv run alembic current
+```bash
+git clone --branch mvp --single-branch https://github.com/OOOliver0428/lx_workbench.git
+cd lx_workbench
+sudo bash deploy/ubuntu/install.sh --public-host 服务器IP或内网域名
+sudo solution-workspace create-admin admin "系统管理员"
+sudo solution-workspace health
+sudo solution-workspace backup
 ```
 
-应用启动不会隐式创建表或修改业务数据；部署前必须显式执行迁移。
+浏览器访问 `http://服务器IP:5174/`。部署脚本会安装锁定依赖、构建前端、迁移数据库、安装
+systemd 服务，并启用每日备份 timer。
 
-## 在线备份
+日常运维：
 
-备份命令使用 SQLite Online Backup API，并在完成后执行 `PRAGMA integrity_check`：
-
-```powershell
-uv run python -m app.backup --output-dir "E:\approved-mvp-backups"
+```bash
+sudo solution-workspace status
+sudo solution-workspace health
+sudo solution-workspace logs backend 200
+sudo solution-workspace logs frontend 200
+sudo solution-workspace backup
+sudo solution-workspace db-info
 ```
 
-每次备份生成：
+从 GitHub 正常更新：
 
-- 一致的 `.db` 快照；
-- 包含 SHA-256、文件大小、表数量和 schema revision 的校验清单。
+```bash
+sudo solution-workspace update origin mvp
+sudo solution-workspace health
+sudo systemctl is-enabled solution-workspace-backup.timer
+sudo systemctl is-active solution-workspace-backup.timer
+```
 
-试运行环境应由操作系统计划任务每天调用一次，并把输出目录设置为异机或公司批准的备份位置。
+服务器无法稳定连接 GitHub 时，可以在可信电脑制作增量 Git bundle，再通过 SCP、堡垒机或批准介质
+传入服务器。bundle 只携带代码，不等于完全离线依赖包。完整的首次部署、bundle 更新、版本感知
+回滚、备份恢复、试用库切正式库和故障排查步骤见
+[Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。
+
+## 数据库与试用期切换
+
+首次 Ubuntu 部署默认使用：
+
+```dotenv
+MVP_DATABASE_URL=sqlite:////var/lib/solution-workspace/trial.db
+```
+
+试用期结束有三种受控方案：
+
+- 新建空正式库，不保留试用数据；
+- 冻结并克隆试用库，完整提升为正式库；
+- 校验外部 SQLite 文件后切换。
+
+不要在应用运行时手工覆盖 `.db`、`.db-wal` 或 `.db-shm`。应使用
+`solution-workspace switch-db` 或 `promote-db`，并在维护窗口完成备份、健康检查和业务对账。
+具体步骤见[试用库与正式库切换](docs/UBUNTU_DEPLOYMENT.md#5-试用库与正式库切换)。
+
+`MVP_LLM_CONFIG_SECRET` 不随数据库切换而改变；它与数据库备份必须一起保管，否则数据库中已经保存的
+大模型 API Key 将无法解密。
+
+## AI 配置与网络说明
+
+拥有“大模型配置”权限的管理员可在“系统设置 → 大模型接入”中完成连接测试和保存。浏览器不会保存
+或回显 API Key，后端使用 `MVP_LLM_CONFIG_SECRET` 加密后写入数据库。
+
+- HTTP 内网试运行设置 `MVP_COOKIE_SECURE=false`；0.1.0 已兼容非安全上下文下的 AI 消息 ID 生成。
+- 上线 HTTPS 后设置 `MVP_COOKIE_SECURE=true`，并重新验证登录、Session、CSRF 和同源 `/api`。
+- AI 配置测试成功只证明最小请求可用；单次聊天失败时还需检查 `/api/v1/ai/chat` 响应中的
+  `details.provider_status`，不要仅凭页面通用提示判断是额度问题。
+
+AI 网络和厂商错误的安全排查方法见
+[AI 功能故障排查](docs/UBUNTU_DEPLOYMENT.md#ai-功能异常)。
+
+## 权限基线
+
+- 新账号默认拥有项目只读、任务只读、工作记录全部功能、个人周报全部功能、AI 助手和个人设置。
+- 商机权限按“查看 → 录入进展 → 新建商机”递增。
+- 项目、任务权限按“查看 → 编辑 → 创建”递增，高级权限自动包含低级权限。
+- 工作管理按“查看 → 生成团队周报”递增，仅对至少为团队负责人且有有效直属成员的账号生效。
+- 超级管理员拥有全部权限但不进入业务用户候选目录；个人周报始终只对作者本人可见。
+
+详细接口和权限边界以 [API 契约](docs/API_CONTRACT.md) 为准。
 
 ## 测试
 
 ```powershell
+uv run ruff check app tests
 uv run pytest
-uv run pytest --cov=app --cov-report=term-missing
+
+Set-Location frontend
+npm run lint
+npm test
 ```
 
-测试覆盖账号鉴权、权限、标签与层级、查重、别名、循环检测、项目合并、任务状态、工作记录关联和审计。
+CI 同时执行后端测试、前端构建/渲染测试，以及 Ubuntu 部署脚本和 systemd 模板校验。
 
-## 重要试运行限制
+## 工程结构
 
-- IP＋端口 HTTP 只用于受控 MVP 试运行。
-- 使用专门测试密码，不复用公司账号密码。
-- 防火墙只允许试点网段或明确设备访问。
-- 单应用实例运行，不要启动多个 worker 共享同一个 SQLite。
-- 数据库必须放在服务器本机磁盘，不放在 SMB、NAS 或同步盘。
-- 正式推广前必须切换 HTTPS，并把 `MVP_COOKIE_SECURE` 设置为 `true`。
+```text
+app/                 FastAPI 应用、领域服务和 CLI
+alembic/             数据库迁移
+deploy/              Ubuntu 安装、运维脚本和 systemd 模板
+docs/                产品、接口、部署和版本文档
+frontend/            React 19 + Vinext 前端
+scripts/             本地联调脚本
+tests/               后端及部署资产自动化测试
+.github/workflows/    GitHub Actions CI
+```
+
+运行数据库、备份、日志、模型密钥、缓存、旧原型和离线 bundle 均不进入 Git。
+
+## 文档导航
+
+| 文档 | 用途 |
+|---|---|
+| [CHANGELOG.md](CHANGELOG.md) | 当前版本、未发布变更和历次更新日志 |
+| [docs/RELEASING.md](docs/RELEASING.md) | 版本号、更新日志、标签和发布步骤 |
+| [docs/UBUNTU_DEPLOYMENT.md](docs/UBUNTU_DEPLOYMENT.md) | 部署、升级、回滚、备份、切库和故障排查 |
+| [docs/MVP_RELEASE.md](docs/MVP_RELEASE.md) | 0.1.0 MVP 范围和交付边界 |
+| [docs/API_CONTRACT.md](docs/API_CONTRACT.md) | API、权限和安全契约 |
+| [docs/DEMO_DATA.md](docs/DEMO_DATA.md) | 演示账号和功能覆盖数据 |
+| [docs/PRODUCT_REQUIREMENTS_V2.md](docs/PRODUCT_REQUIREMENTS_V2.md) | 当前产品需求基线 |
+
+## 版本与更新日志
+
+当前发布基线为 **0.1.0**。从下一次迭代开始，每个影响用户、部署、配置、数据库、安全或兼容性的
+变更，都必须先写入 [CHANGELOG.md](CHANGELOG.md) 的 `Unreleased`；发布时再归档到对应版本，并同步
+后端、前端和锁文件中的版本号。项目采用语义化版本，完整规则见
+[版本发布规范](docs/RELEASING.md)。
+
+## 试运行限制
+
+- IP＋端口 HTTP 只用于受控内网或 VPN 试运行，不直接暴露公网。
+- 防火墙和云安全组只允许批准网段访问前端 `5174`，后端 `8787` 不对终端开放。
+- 使用独立测试密码，不复用公司统一身份密码。
+- 只运行一个应用实例，不启动多个 worker 共享 SQLite。
+- 数据库放在服务器本机固定磁盘，不放在 NAS、SMB、NFS 或同步盘。
+- 本机 `/var/backups` 不是完整灾备，必须配置异机复制和恢复演练。
+- 正式推广前必须启用 HTTPS，并重新进行容量、备份恢复和安全评审。

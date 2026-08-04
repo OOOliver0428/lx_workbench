@@ -1,5 +1,7 @@
 # Ubuntu 部署与运维手册
 
+> 适用版本：**0.1.0** · 最后复核：2026-08-04 · 发布分支：`mvp`
+
 本文适用于 `mvp` 分支当前架构：Ubuntu 单节点、单应用实例、本机 SQLite、前端同源代理后端。
 试运行期间可使用独立试用库；业务确认后可切换到新的正式库，或者把试用数据完整提升为正式库。
 
@@ -111,9 +113,14 @@ sudo solution-workspace status
 sudo solution-workspace health
 sudo solution-workspace backup
 sudo solution-workspace logs backend 100
+sudo systemctl is-enabled solution-workspace-backup.timer
+sudo systemctl is-active solution-workspace-backup.timer
+sudo systemctl list-timers solution-workspace-backup.timer
 ```
 
-浏览器访问 `http://服务器IP:5174/`。确认登录、创建一条测试记录、刷新后仍存在，再检查审计日志。
+`health` 必须同时通过后端 `127.0.0.1:8787` 和前端 `127.0.0.1:5174`；只看到某个 systemd
+进程为 `running` 不算完整验收。浏览器访问 `http://服务器IP:5174/`，确认登录、创建一条测试记录、
+刷新后仍存在，再检查审计日志和自动备份计划。
 
 ## 4. 运行配置
 
@@ -243,9 +250,17 @@ sudo solution-workspace promote-db /var/lib/solution-workspace/production.db
 
 # 手工备份
 sudo solution-workspace backup
+
+# 自动备份计划
+sudo systemctl is-enabled solution-workspace-backup.timer
+sudo systemctl is-active solution-workspace-backup.timer
+sudo systemctl list-timers solution-workspace-backup.timer
 ```
 
 服务异常退出会由 systemd 自动重启。`status` 同时显示前端、后端、备份定时器和实时健康检查。
+前后端单元由 `solution-workspace.target` 统一管理，`systemctl status` 显示单个前后端单元为
+`disabled` 并不等于故障；`Active`、监听端口和健康检查才是运行依据。备份 timer 则必须为
+`enabled` 且 `active`。
 
 ## 7. 备份、异机副本与恢复
 
@@ -301,7 +316,15 @@ sudo solution-workspace switch-db \
 
 ```bash
 sudo solution-workspace update origin mvp
+sudo solution-workspace health
+sudo solution-workspace db-info
+sudo systemctl is-enabled solution-workspace-backup.timer
+sudo systemctl is-active solution-workspace-backup.timer
+sudo systemctl list-timers solution-workspace-backup.timer
 ```
+
+更新命令输出旧提交、新提交和离线回滚快照。把三者连同上述检查结果写入运维记录。只有前后端健康、
+数据库 revision 正确且备份 timer 恢复后，更新才算完成；不要以“页面偶尔能打开”代替验收。
 
 更新前确认：
 
@@ -310,6 +333,24 @@ sudo solution-workspace update origin mvp
 - 当前备份成功且异机副本可用；
 - Alembic 迁移和旧版本兼容性已评审；
 - 已安排维护窗口。
+
+更新后如果健康检查失败，不要连续重复执行 `update`、`npm install` 或手工删除运行目录。先保留更新器
+输出，并一次性收集：
+
+```bash
+sudo git -C /opt/solution-workspace rev-parse HEAD
+sudo git -C /opt/solution-workspace status --short
+sudo systemctl status solution-workspace-backend.service \
+  solution-workspace-frontend.service --no-pager --full
+sudo journalctl -u solution-workspace-backend.service \
+  -u solution-workspace-frontend.service --since "30 minutes ago" \
+  --no-pager --full
+sudo ss -lntp | grep -E ':(5174|8787)\b' || true
+sudo systemctl is-enabled solution-workspace-backup.timer
+sudo systemctl is-active solution-workspace-backup.timer
+```
+
+先按第 10 节区分 8787 后端故障和 5174 前端故障，再决定修复或执行版本感知回滚。
 
 ### 8.1 GitHub 不可达时使用增量 bundle
 
@@ -446,6 +487,10 @@ sudo ufw deny 8787/tcp
 3. 设置 `MVP_COOKIE_SECURE=true`；
 4. 重启并重新验证登录、Session、CSRF 和同源 `/api`。
 
+应用入口使用 HTTP 不会迫使大模型请求也降级为 HTTP。浏览器只把消息发到工作台同源 `/api`，由
+Ubuntu 后端再通过 HTTPS 访问大模型厂商。配置域名和 HTTPS 的主要作用是保护用户到工作台这一段，
+并启用安全 Cookie；它不会修复厂商余额、限流、请求参数或上游 5xx。
+
 ## 10. 故障排查
 
 ### `runuser: command not found`
@@ -458,6 +503,61 @@ sudo sed -i 's#/usr/local/bin:/usr/bin:/bin#/usr/local/sbin:/usr/local/bin:/usr/
 sudo apt-get install -y util-linux
 sudo solution-workspace update
 ```
+
+`runuser` 通常位于 `/usr/sbin/runuser`。如果使用了 `--skip-system-packages`，执行安装前也必须自行确认：
+
+```bash
+command -v runuser
+dpkg -S "$(command -v runuser)"
+```
+
+### 健康检查显示后端 8787 不可达
+
+先只检查后端，不要先改防火墙；8787 按设计只监听回环地址：
+
+```bash
+sudo systemctl status solution-workspace-backend.service --no-pager --full
+sudo solution-workspace logs backend 200
+sudo ss -lntp | grep -E ':8787\b' || true
+curl -fsS http://127.0.0.1:8787/api/v1/health/ready
+sudo systemctl cat solution-workspace-backend.service
+```
+
+- `active (running)` 且 `curl` 返回成功：后端正常，继续排查 5174 前端。
+- `ExecStartPre` 失败：通常是 Alembic、数据库路径/权限或磁盘问题；先保存完整日志和升级前快照，
+  不要反复迁移。
+- `Start request repeated too quickly`：先修复日志中的根因，再执行
+  `sudo systemctl reset-failed solution-workspace-backend.service` 和
+  `sudo systemctl start solution-workspace.target`。单纯 reset 不会修复根因。
+
+### 健康检查显示前端 5174 不可达
+
+后端已经健康时，再检查前端服务、监听和两项生产运行文件：
+
+```bash
+sudo systemctl status solution-workspace-frontend.service --no-pager --full
+sudo solution-workspace logs frontend 200
+sudo ss -lntp | grep -E ':5174\b' || true
+sudo systemctl cat solution-workspace-frontend.service
+sudo test -r /opt/solution-workspace/frontend/node_modules/vinext/dist/cli.js
+sudo test -r /opt/solution-workspace/frontend/dist/server/index.js
+```
+
+如果日志包含 `Cannot find module .../node_modules/vinext/dist/cli.js`，说明前端生产运行时不完整或升级交换
+被中断，不是 5174 防火墙问题。不要在发布目录中以 root 执行 `npm install`，也不要删除现有
+`node_modules`/`dist`；保留 `/var/backups/solution-workspace/updates/.../update.env` 和更新器输出，按
+第 8.2 节恢复匹配旧提交的前端运行时，或使用已审核的新版本运维脚本重新执行完整更新。
+
+修复运行时后，如果 systemd 因连续失败停止重试：
+
+```bash
+sudo systemctl reset-failed solution-workspace-frontend.service
+sudo systemctl start solution-workspace.target
+sudo solution-workspace health
+```
+
+前端单元显示 `Loaded: ... disabled` 在 target 管理模式下可以是正常的；判断依据是 `Active`、5174
+监听和 `solution-workspace health`。不要为了消除 `disabled` 字样绕过 target 单独修改部署结构。
 
 ### 页面打不开
 
@@ -477,6 +577,64 @@ curl -fsS http://127.0.0.1:8787/api/v1/health/ready
 ```
 
 检查后端服务、数据库权限、磁盘空间和 Alembic revision。不要把 `8787` 开放给终端绕过前端代理。
+
+### AI 功能异常
+
+先区分三层问题：浏览器是否发出请求、工作台后端是否可用、厂商是否接受请求。
+
+1. 浏览器按 F12 打开 Network/网络，筛选 `Fetch/XHR`，重现问题并找到
+   `POST /api/v1/ai/chat`。
+2. 如果完全没有该请求且页面通过 IP＋HTTP 访问，先确认服务器版本不早于包含 HTTP 消息 ID
+   兼容修复的 `0.1.0`（提交 `4fe59b1`）。旧版依赖安全上下文中的 `crypto.randomUUID()`，可能表现为
+   点击发送无反应。
+3. 如果请求返回工作台 `502`，查看 Response/响应中的 `code`、`request_id` 和
+   `details.provider_status`。不要复制 Cookie、Authorization 请求头或 API Key。
+4. 同时查看后端日志：
+
+   ```bash
+   sudo solution-workspace logs backend 200
+   ```
+
+对于 DeepSeek，页面显示“服务拒绝”是通用提示，不等于确定余额不足。常见的上游状态为：
+
+| `provider_status` | 含义 | 处理 |
+|---|---|---|
+| `400` / `422` | 请求格式或参数不被接受 | 保留 request ID；检查模型参数和脱敏后的厂商错误 |
+| `402` | 余额不足 | 检查账户余额；此后通常会持续失败 |
+| `429` | 频率或并发限制 | 降低频率并稍后重试 |
+| `500` / `503` | 厂商故障或过载 | 短暂等待后重试，持续发生则联系厂商 |
+
+同一句内容每次失败而其他内容稳定成功，更像请求/内容校验；相同内容有时成功有时 `500/503`，更像
+上游瞬时故障。配置页连接测试成功只验证最小请求，不代表后续每次厂商调用都成功。
+
+仅验证服务器到 DeepSeek 的 DNS、TCP 和 TLS，可执行：
+
+```bash
+sudo -u solution-workspace getent ahosts api.deepseek.com
+sudo -u solution-workspace curl -4 -sS -o /dev/null \
+  --connect-timeout 10 --max-time 20 \
+  -w 'HTTP=%{http_code} DNS=%{time_namelookup}s CONNECT=%{time_connect}s TLS=%{time_appconnect}s TOTAL=%{time_total}s\n' \
+  https://api.deepseek.com/
+```
+
+根路径返回快速 `HTTP=401` 表示 DNS、出网 443 和 TLS 已打通，不表示 Key 错误，因为该命令没有携带
+Key。不要把真实 Key 直接写进 Shell 命令、日志或工单。
+
+### 备份 timer 被停用或更新后未恢复
+
+更新、迁移、切库和回滚期间会暂停备份 timer；失败流程可能有意保持停服，避免在未知状态下继续写入。
+先确认应用健康和数据库选择正确，再恢复定时器：
+
+```bash
+sudo solution-workspace health
+sudo solution-workspace db-info
+sudo systemctl enable --now solution-workspace-backup.timer
+sudo systemctl is-enabled solution-workspace-backup.timer
+sudo systemctl is-active solution-workspace-backup.timer
+sudo systemctl list-timers solution-workspace-backup.timer
+```
+
+如果应用或回滚状态尚未确认，不要只为消除 timer 告警而提前恢复。
 
 ### 数据库只读、锁定或磁盘不足
 
@@ -501,7 +659,8 @@ sudo solution-workspace logs backup 200
 
 ## 11. 上线/切库检查清单
 
-- [ ] 目标提交号已记录，CI 和目标 Ubuntu 验证均通过。
+- [ ] 发布版本号、`CHANGELOG.md`、Git 标签和目标提交号一致，CI 已通过。
+- [ ] 目标提交号已记录，目标 Ubuntu 验证已通过。
 - [ ] 服务器仅对批准网段开放前端入口，后端未对外开放。
 - [ ] `app.env` 权限为 `0640 root:solution-workspace`，前端账号不可读，且未进入 Git/Web 根目录。
 - [ ] `/opt/solution-workspace` 为 root 持有并去除 group/other 写权限，运行账号只有读取权。
@@ -513,3 +672,4 @@ sudo solution-workspace logs backup 200
 - [ ] 试用转正式的“丢弃数据”或“保留数据”方案已由业务负责人确认。
 - [ ] 切库前后记录数、关键样本、周报和审计事件完成对账。
 - [ ] 回滚窗口、责任人、RPO/RTO 和备份保留期已确认。
+- [ ] 更新后前端 5174、后端 8787 健康检查均通过，备份 timer 为 `enabled`/`active`。
