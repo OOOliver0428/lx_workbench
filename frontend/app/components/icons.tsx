@@ -201,15 +201,6 @@ export function Shield(props: IconProps) {
   );
 }
 
-export function LogoMark(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <rect x="6.76" y="6.76" width="10.49" height="10.49" rx="2.4" transform="rotate(45 12 12)" />
-      <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
-    </Svg>
-  );
-}
-
 export function Expand(props: IconProps) {
   return (
     <Svg {...props}>

@@ -4220,18 +4220,6 @@ a {
   gap: 12px;
 }
 
-.war-room-logo {
-  align-items: center;
-  background: linear-gradient(145deg, #1677ff, #16a5d9);
-  border-radius: 12px;
-  color: #fff;
-  display: inline-flex;
-  font-size: 24px;
-  height: 40px;
-  justify-content: center;
-  width: 40px;
-}
-
 .war-room-tabs,
 .war-segmented {
   background: #f1f7fc;

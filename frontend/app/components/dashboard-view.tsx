@@ -36,7 +36,6 @@ import {
   Close,
   Expand,
   Layers,
-  LogoMark,
   Minus,
   Package,
   Plus,
@@ -207,9 +206,6 @@ export function DashboardView({
     <main className="war-room">
       <header className="war-room-topbar">
         <div className="war-room-title-lockup">
-          <span className="war-room-logo">
-            <LogoMark size={21} />
-          </span>
           <strong>解决方案部门作战台</strong>
         </div>
         <nav className="war-room-tabs" aria-label="作战台视图">
@@ -231,6 +227,11 @@ export function DashboardView({
             onChange={(event) => void changeWeek(event.target.value)}
             aria-label="选择周次"
           >
+            {dashboard.weeks.some(
+              (week) => week.week_start === selectedWeek,
+            ) ? null : (
+              <option value={selectedWeek}>{selectedWeek}</option>
+            )}
             {dashboard.weeks.map((week) => (
               <option key={week.week_start} value={week.week_start}>
                 {week.label}
@@ -1077,9 +1078,6 @@ function GraphFullscreen({
     >
       <header className="war-graph-fullscreen-head">
         <div className="war-room-title-lockup">
-          <span className="war-room-logo">
-            <LogoMark size={21} />
-          </span>
           <strong>商机关系图谱</strong>
         </div>
         <p className="war-graph-fullscreen-sub">

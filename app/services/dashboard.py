@@ -912,7 +912,9 @@ def build_dashboard(
     can_view_overview = "overview" in pages
     current_week = normalize_week_start()
     selected_week = normalize_week_start(selected_week_start)
-    weeks = [selected_week - timedelta(weeks=index) for index in range(4, -1, -1)]
+    # 周列表始终锚定当前周：否则选中历史周后，下拉选项会随选中周漂移，
+    # 导致用户无法直接切回当前周。
+    weeks = [current_week - timedelta(weeks=index) for index in range(4, -1, -1)]
     scope_users = _scope_users(db, actor)
     member_ids = {user.id for user in scope_users}
     work_author_ids = (
