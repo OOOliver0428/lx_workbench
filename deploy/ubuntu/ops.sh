@@ -766,7 +766,17 @@ EOF
     swap_frontend_runtime
     set_frontend_runtime_state true
     chown -R root:root "${PROJECT_DIR}"
-    chmod -R go-w "${PROJECT_DIR}"
+    # Git creates replaced files using the updater's restrictive umask. Restore
+    # read/search access for the unprivileged runtime accounts before startup.
+    chmod -R u=rwX,go=rX "${PROJECT_DIR}"
+    unreadable_backend_file="$(
+      "${RUNUSER_BIN}" -u "${APP_USER}" -- \
+        find "${PROJECT_DIR}/app" -type f ! -readable -print -quit
+    )"
+    [[ -z "${unreadable_backend_file}" ]] || {
+      fail "backend service account cannot read ${unreadable_backend_file}"
+    }
+    "${RUNUSER_BIN}" -u "${APP_USER}" -- test -r "${PROJECT_DIR}/server.py"
     "${RUNUSER_BIN}" -u "${FRONTEND_USER}" -- \
       test -r "${PROJECT_DIR}/frontend/node_modules/vinext/dist/cli.js"
     "${RUNUSER_BIN}" -u "${FRONTEND_USER}" -- \

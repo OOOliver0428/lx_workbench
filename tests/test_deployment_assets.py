@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -33,6 +34,9 @@ def test_ubuntu_install_keeps_runtime_state_outside_the_checkout() -> None:
     assert "curl flock openssl runuser systemctl" in installer
     assert "bootstrap_command in realpath git systemctl" in installer
     assert 'chown -R root:root "${PROJECT_DIR}"' in installer
+    assert 'chmod -R u=rwX,go=rX "${PROJECT_DIR}"' in installer
+    assert 'chmod -R go-w "${PROJECT_DIR}"' not in installer
+    assert 'find "${PROJECT_DIR}/app" -type f ! -readable -print -quit' in installer
 
 
 def test_systemd_units_keep_backend_private_and_schedule_verified_backups() -> None:
@@ -110,6 +114,33 @@ def test_update_stages_frontend_before_stopping_the_running_release() -> None:
     assert "trap 'update_failed 143' TERM" in operations
     assert '"${RUNUSER_BIN}" -u "${FRONTEND_USER}"' in operations
     assert 'frontend/dist/server/index.js"' in operations
+    assert 'chmod -R u=rwX,go=rX "${PROJECT_DIR}"' in operations
+    assert 'chmod -R go-w "${PROJECT_DIR}"' not in operations
+    assert 'find "${PROJECT_DIR}/app" -type f ! -readable -print -quit' in operations
+
+
+def test_release_permission_normalization_restores_runtime_read_access(
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt":
+        return
+
+    release_dir = tmp_path / "release"
+    package_dir = release_dir / "app" / "services"
+    package_dir.mkdir(parents=True)
+    source_file = package_dir / "dashboard.py"
+    source_file.write_text("VALUE = 1\n", encoding="utf-8")
+    package_dir.chmod(0o700)
+    source_file.chmod(0o600)
+
+    subprocess.run(
+        ["chmod", "-R", "u=rwX,go=rX", str(release_dir)],
+        check=True,
+    )
+
+    assert package_dir.stat().st_mode & stat.S_IXOTH
+    assert source_file.stat().st_mode & stat.S_IROTH
+    assert not source_file.stat().st_mode & stat.S_IWOTH
 
 
 def test_candidate_build_chain_does_not_continue_after_install_failure(tmp_path: Path) -> None:

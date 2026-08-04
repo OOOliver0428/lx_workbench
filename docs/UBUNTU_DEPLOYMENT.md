@@ -530,6 +530,31 @@ sudo systemctl cat solution-workspace-backend.service
   `sudo systemctl reset-failed solution-workspace-backend.service` 和
   `sudo systemctl start solution-workspace.target`。单纯 reset 不会修复根因。
 
+如果日志在导入 `app/...py` 时出现 `PermissionError: [Errno 13] Permission denied`，并且 Alembic
+已经成功，说明是发布文件不可读，不是数据库迁移或端口管控问题。旧版更新器可能在受限 `umask`
+下把本次替换的文件写成仅 root 可读。先根据日志中的绝对路径做最小修复；例如：
+
+```bash
+sudo chown root:root /opt/solution-workspace/app/services/dashboard.py
+sudo chmod 0644 /opt/solution-workspace/app/services/dashboard.py
+sudo -u solution-workspace test -r \
+  /opt/solution-workspace/app/services/dashboard.py
+sudo systemctl reset-failed solution-workspace-backend.service \
+  solution-workspace-frontend.service
+sudo systemctl start solution-workspace-backend.service
+curl -fsS http://127.0.0.1:8787/api/v1/health/ready
+sudo systemctl start solution-workspace-frontend.service
+curl -fsS http://127.0.0.1:5174/ >/dev/null
+sudo systemctl start solution-workspace.target
+sudo systemctl enable --now solution-workspace-backup.timer
+sudo solution-workspace health
+sudo solution-workspace status
+```
+
+不要因此回滚已经迁移成功的数据库，也不要对 `/opt` 或根目录做递归授权。服务恢复后应尽快升级到
+包含发布树权限归一化的新版本；新版安装器和更新器会在启动前恢复 root 持有、运行账号只读的权限，
+并检查后端源码是否都可读。
+
 ### 健康检查显示前端 5174 不可达
 
 后端已经健康时，再检查前端服务、监听和两项生产运行文件：

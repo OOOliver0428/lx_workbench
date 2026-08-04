@@ -354,7 +354,7 @@ fi
   fail "deployed checkout does not match source commit"
 }
 chown -R root:root "${PROJECT_DIR}"
-chmod -R go-w "${PROJECT_DIR}"
+chmod -R u=rwX,go=rX "${PROJECT_DIR}"
 
 log "Installing the locked Python runtime and dependencies"
 export UV_PYTHON_INSTALL_DIR="${PYTHON_RUNTIME_DIR}"
@@ -422,10 +422,17 @@ mv -- "${frontend_stage_dir}/frontend/node_modules" "${PROJECT_DIR}/frontend/nod
 mv -- "${frontend_stage_dir}/frontend/dist" "${PROJECT_DIR}/frontend/dist"
 rm -rf -- "${frontend_stage_dir}"
 chown -R root:root "${PROJECT_DIR}"
-chmod -R go-w "${PROJECT_DIR}"
+chmod -R u=rwX,go=rX "${PROJECT_DIR}"
 
 runuser -u "${BACKEND_USER}" -- test -r "${PROJECT_DIR}/server.py" || {
   fail "backend service account cannot read the installed release"
+}
+unreadable_backend_file="$(
+  runuser -u "${BACKEND_USER}" -- \
+    find "${PROJECT_DIR}/app" -type f ! -readable -print -quit
+)"
+[[ -z "${unreadable_backend_file}" ]] || {
+  fail "backend service account cannot read ${unreadable_backend_file}"
 }
 runuser -u "${FRONTEND_USER}" -- test -r "${PROJECT_DIR}/frontend/package.json" || {
   fail "frontend service account cannot read the installed release"
