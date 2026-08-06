@@ -1,6 +1,6 @@
 # Ubuntu 部署与运维手册
 
-> 适用版本：**0.1.0** · 最后复核：2026-08-04 · 发布分支：`mvp`
+> 适用版本：**0.1.1** · 最后复核：2026-08-06 · 发布分支：`mvp`
 
 本文适用于 `mvp` 分支当前架构：Ubuntu 单节点、单应用实例、本机 SQLite、前端同源代理后端。
 试运行期间可使用独立试用库；业务确认后可切换到新的正式库，或者把试用数据完整提升为正式库。
@@ -31,7 +31,7 @@
 | `/etc/solution-workspace/deploy.conf` | 运维脚本使用的部署元数据 | `0640 root:solution-workspace` |
 | `/var/lib/solution-workspace/` | SQLite 数据库和服务账号 HOME | 不由 Web 服务暴露 |
 | `/var/lib/solution-workspace/releases/` | 人工转入的 bundle/离线发布文件 | `0700 root:root`，发布后清理 |
-| `/var/backups/solution-workspace/` | 本机一致性备份和校验清单 | 仍需复制到异机 |
+| `/var/backups/solution-workspace/scheduled/` | 本机一致性定时备份和校验清单 | 仍需复制到异机 |
 | `/var/cache/solution-workspace/npm/` | 无特权前端构建账号的 npm 内容缓存 | 不包含 `.npmrc` 或部署凭据 |
 | `/usr/local/sbin/solution-workspace` | 统一运维命令 | root 执行 |
 
@@ -139,13 +139,17 @@ sudo solution-workspace health
 | 配置 | 说明 |
 |---|---|
 | `MVP_ENVIRONMENT` | 服务器固定为 `production` |
-| `MVP_DATABASE_URL` | 当前 SQLite URL，必须是 `/var/lib/solution-workspace/` 下的绝对路径 |
+| `MVP_DATABASE_URL` | 当前 SQLite URL，数据库文件必须是 `/var/lib/solution-workspace/` 的直接子文件 |
 | `MVP_SERVER_HOST` | 固定 `127.0.0.1`，不要对内网直接开放后端 |
 | `MVP_SERVER_PORT` | 应与部署时后端端口一致，默认 `8787` |
 | `MVP_ALLOWED_HOSTS_CSV` | 浏览器实际使用的 IP/域名、`127.0.0.1`、`localhost` |
 | `MVP_COOKIE_SECURE` | HTTP 试运行用 `false`；HTTPS 上线后必须为 `true` |
 | `MVP_SESSION_TTL_HOURS` | 登录会话有效期，默认 12 小时 |
+| `MVP_API_MAX_BODY_BYTES` | 后端请求体硬上限，默认 `262144`；须与前端 systemd 的 `MVP_MAX_REQUEST_BODY_BYTES` 一致 |
+| `MVP_LOGIN_*` | 登录密码校验频率、并发、状态容量及失败审计保留参数；扩容前先做压测和安全评审 |
 | `MVP_LLM_CONFIG_SECRET` | 数据库中 AI Provider 密钥的加密主密钥，必须长期保管且禁止随数据库切换而变化 |
+| `MVP_LLM_MAX_*` / `MVP_LLM_USER_*` / `MVP_LLM_GLOBAL_*` | AI 并发、每小时请求、每日 token 和状态容量预算；按模型成本与可用性调整 |
+| `MVP_LLM_*_COOLDOWN_SECONDS` | 聊天、个人周报和团队周报的生成冷却时间 |
 
 如果切换域名或增加反向代理，要把最终请求的 `Host` 加入 `MVP_ALLOWED_HOSTS_CSV`。前端始终通过
 同源 `/api` 转发，不需要开放后端端口或配置宽泛 CORS。
@@ -202,7 +206,7 @@ sudo solution-workspace promote-db /var/lib/solution-workspace/production.db
 
 ### 5.4 使用外部提供的 SQLite 数据库
 
-先把文件复制到数据目录，收紧权限，再独立校验和切换。目标库不会被原地迁移；脚本迁移候选副本，
+先把文件复制到数据目录根层，收紧权限，再独立校验和切换；不接受数据目录下的嵌套路径。目标库不会被原地迁移；脚本迁移候选副本，
 并把原目标保存为带 `pre-switch` 后缀的文件：
 
 ```bash
@@ -297,9 +301,9 @@ sudo solution-workspace logs backup 100
 
 ```bash
 sudo solution-workspace verify-db \
-  /var/backups/solution-workspace/mvp-YYYYMMDDTHHMMSSZ.db
+  /var/backups/solution-workspace/scheduled/mvp-YYYYMMDDTHHMMSSZ.db
 sudo install -m 0600 -o solution-workspace -g solution-workspace \
-  /var/backups/solution-workspace/mvp-YYYYMMDDTHHMMSSZ.db \
+  /var/backups/solution-workspace/scheduled/mvp-YYYYMMDDTHHMMSSZ.db \
   /var/lib/solution-workspace/recovered-YYYYMMDD.db
 sudo solution-workspace switch-db \
   /var/lib/solution-workspace/recovered-YYYYMMDD.db
@@ -694,6 +698,7 @@ sudo solution-workspace logs backup 200
 - [ ] 自动备份成功，异机复制和告警已配置。
 - [ ] 至少完成一次从备份复制为新库、切换、健康检查和业务对账演练。
 - [ ] 创建了独立管理员账号，默认/试用密码已更换。
+- [ ] 正式生产开放前已单独评审并提高密码长度和强度策略；0.1.1 试运行阶段仍保留现有策略。
 - [ ] 试用转正式的“丢弃数据”或“保留数据”方案已由业务负责人确认。
 - [ ] 切库前后记录数、关键样本、周报和审计事件完成对账。
 - [ ] 回滚窗口、责任人、RPO/RTO 和备份保留期已确认。

@@ -137,7 +137,15 @@ def ai_chat(
     db: Session = Depends(get_db, scope="function"),
 ) -> AIChatOut:
     permission_service.assert_permission(db, actor, PermissionKey.AI_USE)
-    result = ai_service.chat(db, request.app.state.settings, payload, actor)
+    idempotency_key = f"chat:{actor.id}:{payload.client_request_id or request.state.request_id}"
+    with request.app.state.llm_guard.generation(
+        user_id=actor.id,
+        purpose="chat",
+        max_tokens=2048,
+        idempotency_key=idempotency_key,
+    ) as lease:
+        result = ai_service.chat(db, request.app.state.settings, payload, actor)
+        lease.record_usage(result.usage)
     record_audit(
         db,
         actor=actor,

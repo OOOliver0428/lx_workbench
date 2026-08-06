@@ -563,9 +563,19 @@ def test_team_summary_requires_complete_submission_or_explicit_force(
     assert forced.json()["forced"] is True
     assert forced.json()["submitted_count"] == 2
     assert forced.json()["expected_count"] == 3
+    api["app"].state.llm_guard.cooldown_seconds["team_summary"] = 0
+    regenerated = client.post(
+        "/api/v1/dashboard/team-summary",
+        params={"week_start": week_start.isoformat()},
+        headers={"X-CSRF-Token": leader_csrf},
+        json={"force": True},
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    assert regenerated.json()["id"] == forced.json()["id"]
+    assert regenerated.json()["revision"] == forced.json()["revision"] + 1
     team_history = client.get("/api/v1/weekly-reports/team-summaries")
     assert team_history.status_code == 200, team_history.text
-    assert team_history.json()[0]["id"] == forced.json()["id"]
+    assert [item["id"] for item in team_history.json()] == [forced.json()["id"]]
 
     dashboard = client.get(
         "/api/v1/dashboard",

@@ -11,7 +11,7 @@ WorkingDirectory=@@PROJECT_DIR@@
 EnvironmentFile=@@ENV_FILE@@
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/usr/bin/flock --wait 600 @@LOCK_FILE@@ @@PROJECT_DIR@@/.venv/bin/python -m app.backup --output-dir @@BACKUP_DIR@@ --retention-days 30
+ExecStart=/usr/bin/flock --wait 600 @@LOCK_FILE@@ @@PROJECT_DIR@@/.venv/bin/python -m app.backup --output-dir @@BACKUP_DIR@@/scheduled --retention-days 30
 UMask=0077
 
 NoNewPrivileges=true
@@ -24,4 +24,4 @@ ProtectKernelTunables=true
 ProtectSystem=strict
 RestrictAddressFamilies=AF_UNIX
 RestrictSUIDSGID=true
-ReadWritePaths=@@DATA_DIR@@ @@BACKUP_DIR@@ @@LOCK_FILE@@
+ReadWritePaths=@@DATA_DIR@@ @@BACKUP_DIR@@/scheduled @@LOCK_FILE@@

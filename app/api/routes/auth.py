@@ -21,6 +21,7 @@ from app.security import (
     verify_password_for_login,
 )
 from app.services.permissions import effective_permission_keys
+from app.throttle import LoginCapacityExceeded
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -35,38 +36,53 @@ def login(
     throttle = request.app.state.login_throttle
     client_ip = request.client.host if request.client else "unknown"
     login_identifier = normalize_user_identifier(payload.login_name)
-    if throttle.is_login_blocked(client_ip, login_identifier):
-        raise AppError("LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试", status_code=429)
-
-    user = db.scalar(
-        select(User).where(
-            or_(
-                User.login_name == login_identifier,
-                User.display_name_key == login_identifier,
+    try:
+        with throttle.verification_slot(client_ip):
+            user = db.scalar(
+                select(User).where(
+                    or_(
+                        User.login_name == login_identifier,
+                        User.display_name_key == login_identifier,
+                    )
+                )
             )
-        )
-    )
-    can_authenticate = bool(user and user.is_active)
-    password_matches = verify_password_for_login(
-        user.password_hash if can_authenticate and user else None,
-        payload.password,
-    )
+            can_authenticate = bool(user and user.is_active)
+            password_matches = verify_password_for_login(
+                user.password_hash if can_authenticate and user else None,
+                payload.password,
+            )
+    except LoginCapacityExceeded as error:
+        raise AppError(
+            "LOGIN_RATE_LIMITED",
+            "登录请求过于频繁，请稍后再试",
+            status_code=429,
+        ) from error
     if not can_authenticate or not password_matches:
-        throttle.record_login_failure(client_ip, login_identifier)
+        failure = throttle.record_login_failure(client_ip, login_identifier)
         actor_id = user.id if user else None
         entity_id = user.id if user else None
         db.rollback()
-        record_audit_committed(
-            request.app.state.session_factory,
-            actor_id=actor_id,
-            action="auth.login",
-            entity_type="user",
-            entity_id=entity_id,
-            request_id=getattr(request.state, "request_id", None),
-            client_ip=client_ip,
-            result="failure",
-            detail={"loginIdentifier": payload.login_name},
-        )
+        if failure.should_audit:
+            settings = request.app.state.settings
+            record_audit_committed(
+                request.app.state.session_factory,
+                actor_id=actor_id,
+                action="auth.login",
+                entity_type="user",
+                entity_id=entity_id,
+                request_id=getattr(request.state, "request_id", None),
+                client_ip=client_ip,
+                result="failure",
+                detail={
+                    "loginIdentifier": login_identifier,
+                    "failureCount": failure.failure_count,
+                    "suppressedAudits": failure.suppressed_audits,
+                },
+                login_failure_retention_days=(
+                    settings.login_failure_audit_retention_days
+                ),
+                login_failure_max_rows=settings.login_failure_audit_max_rows,
+            )
         raise AppError(
             "INVALID_CREDENTIALS",
             "登录名、显示名称或密码错误",

@@ -10,6 +10,7 @@ from app.audit import record_audit
 from app.config import Settings
 from app.domain import is_super_admin
 from app.errors import AppError, ConflictError, PermissionDeniedError
+from app.llm_guard import LLMGuard
 from app.models import (
     AttentionStatus,
     BusinessStage,
@@ -1245,6 +1246,7 @@ def generate_team_summary(
     actor: User,
     *,
     week_start: date,
+    llm_guard: LLMGuard,
 ) -> TeamWeeklySummary:
     permission_service.assert_permission(
         db,
@@ -1288,43 +1290,71 @@ def generate_team_summary(
         )
     )
     missing_text = "、".join(missing) if missing else "无"
-    result = ai_service.complete(
-        db,
-        settings,
-        messages=[
-            {"role": "system", "content": TEAM_SUMMARY_SYSTEM_PROMPT},
-            {
-                "role": "system",
-                "content": (
-                    f"统计周：{normalized_week.isoformat()} 至 "
-                    f"{(normalized_week + timedelta(days=6)).isoformat()}\n"
-                    f"应提交成员：{len(scope_users)} 位\n"
-                    f"实际提交成员：{len(reports)} 位\n"
-                    f"未提交成员：{missing_text}\n\n"
-                    f"以下为已提交个人周报：\n{report_context}"
-                ),
-            },
-            {"role": "user", "content": TEAM_SUMMARY_USER_PROMPT},
-        ],
+    with llm_guard.generation(
+        user_id=actor.id,
+        purpose="team_summary",
         max_tokens=6144,
+        idempotency_key=f"team-summary:{actor.id}:{normalized_week.isoformat()}",
+    ) as lease:
+        result = ai_service.complete(
+            db,
+            settings,
+            messages=[
+                {"role": "system", "content": TEAM_SUMMARY_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": (
+                        f"统计周：{normalized_week.isoformat()} 至 "
+                        f"{(normalized_week + timedelta(days=6)).isoformat()}\n"
+                        f"应提交成员：{len(scope_users)} 位\n"
+                        f"实际提交成员：{len(reports)} 位\n"
+                        f"未提交成员：{missing_text}\n\n"
+                        f"以下为已提交个人周报：\n{report_context}"
+                    ),
+                },
+                {"role": "user", "content": TEAM_SUMMARY_USER_PROMPT},
+            ],
+            max_tokens=6144,
+        )
+        lease.record_usage(result.usage)
+    summary = db.scalar(
+        select(TeamWeeklySummary).where(
+            TeamWeeklySummary.generated_by == actor.id,
+            TeamWeeklySummary.week_start == normalized_week,
+        )
     )
-    summary = TeamWeeklySummary(
-        week_start=normalized_week,
-        week_end=normalized_week + timedelta(days=6),
-        content=result.answer,
-        generated_by=actor.id,
-        forced=payload.force,
-        submitted_count=len(reports),
-        expected_count=len(scope_users),
-        generation_model=result.model,
-        generation_usage=result.usage,
-    )
-    db.add(summary)
+    is_regeneration = summary is not None
+    if summary is None:
+        summary = TeamWeeklySummary(
+            week_start=normalized_week,
+            week_end=normalized_week + timedelta(days=6),
+            content=result.answer,
+            generated_by=actor.id,
+            forced=payload.force,
+            submitted_count=len(reports),
+            expected_count=len(scope_users),
+            generation_model=result.model,
+            generation_usage=result.usage,
+        )
+        db.add(summary)
+    else:
+        summary.content = result.answer
+        summary.forced = payload.force
+        summary.submitted_count = len(reports)
+        summary.expected_count = len(scope_users)
+        summary.generation_model = result.model
+        summary.generation_usage = result.usage
+        summary.revision += 1
+        summary.updated_at = datetime.now(UTC)
     db.flush()
     record_audit(
         db,
         actor=actor,
-        action="team_weekly_summary.generate",
+        action=(
+            "team_weekly_summary.regenerate"
+            if is_regeneration
+            else "team_weekly_summary.generate"
+        ),
         entity_type="team_weekly_summary",
         entity_id=summary.id,
         detail={

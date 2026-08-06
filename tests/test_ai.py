@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
+from datetime import date
 from typing import Any
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from app.models import AIProviderConfig
+from app.models import AIProviderConfig, PermissionKey, User, UserPermission
 from app.services import ai as ai_service
+from app.services.ai_context import build_chat_context, build_weekly_report_context
 from tests.conftest import login
 
 
@@ -81,6 +84,61 @@ def test_ai_status_and_chat_proxy(api: dict, monkeypatch) -> None:
             "total_tokens": 30,
         },
     }
+
+
+def test_ai_context_omits_project_and_task_data_without_view_permissions(
+    api: dict,
+) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member")
+    project = client.post(
+        "/api/v1/projects",
+        headers={"X-CSRF-Token": csrf},
+        json={"name": "AI context permission sentinel"},
+    )
+    assert project.status_code == 201, project.text
+    record = client.post(
+        "/api/v1/work-records",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "work_date": date.today().isoformat(),
+            "content": "permission-filtered record",
+            "minutes": 30,
+            "project_id": project.json()["id"],
+        },
+    )
+    assert record.status_code == 201, record.text
+
+    project_and_task_permissions = {
+        PermissionKey.PROJECTS_VIEW.value,
+        PermissionKey.PROJECTS_EDIT.value,
+        PermissionKey.PROJECTS_CREATE.value,
+        PermissionKey.TASKS_VIEW.value,
+        PermissionKey.TASKS_EDIT.value,
+        PermissionKey.TASKS_CREATE.value,
+    }
+    with api["app"].state.session_factory.begin() as db:
+        db.execute(
+            delete(UserPermission).where(
+                UserPermission.user_id == api["users"]["member"],
+                UserPermission.permission_key.in_(project_and_task_permissions),
+            )
+        )
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        chat_context = json.loads(build_chat_context(db, actor))
+        weekly_context = json.loads(
+            build_weekly_report_context(db, actor, date.today(), date.today())
+        )
+
+    for context in (chat_context, weekly_context):
+        assert context["projects"] == []
+        assert context["tasks"] == []
+        assert context["work_records"]
+        assert "project_id" not in context["work_records"][0]
+        assert "task_id" not in context["work_records"][0]
 
 
 class ProviderResponse:

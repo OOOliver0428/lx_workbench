@@ -816,6 +816,7 @@ class AIStatusOut(BaseModel):
 
 class AIChatRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=64)
 
 
 class AIChatOut(BaseModel):

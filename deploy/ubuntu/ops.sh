@@ -18,7 +18,7 @@ Commands:
   start | stop | restart         Control the application target
   logs [backend|frontend|backup] [LINES]
                                  Show recent logs (default: both app services, 200)
-  backup [OUTPUT_DIR]            Create and verify an online SQLite backup
+  backup                         Create and verify an online SQLite backup
   verify-db DB_PATH              Verify SQLite integrity and backup manifest
   db-info                        Show active SQLite path and Alembic revision
   switch-db ABSOLUTE_DB_PATH     Switch to an existing or new SQLite database
@@ -71,6 +71,7 @@ readonly APP_GROUP="$(id -gn "${APP_USER}")"
 readonly FRONTEND_GROUP="$(id -gn "${FRONTEND_USER}")"
 readonly FRONTEND_HOME="/var/lib/solution-workspace-web-home"
 readonly NPM_CACHE_DIR="/var/cache/solution-workspace/npm"
+readonly SCHEDULED_BACKUP_DIR="${BACKUP_DIR}/scheduled"
 export PATH="${NODE_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 readonly RUNUSER_BIN="$(command -v runuser || true)"
 [[ -x "${RUNUSER_BIN}" ]] || fail "runuser is required; install the util-linux package"
@@ -135,22 +136,11 @@ health_check() {
   return 1
 }
 
-resolve_backup_dir() {
-  local requested="$1"
-  local backup_root resolved
-  backup_root="$(realpath -- "${BACKUP_DIR}")"
-  resolved="$(realpath --canonicalize-missing -- "${requested}")"
-  [[ "${resolved}" == "${backup_root}" || "${resolved}" == "${backup_root}/"* ]] || {
-    fail "backup output must stay inside ${backup_root}"
-  }
-  [[ ! -L "${requested}" ]] || fail "backup output must not be a symbolic link"
-  printf '%s\n' "${resolved}"
-}
-
 create_backup() {
-  local output_dir
-  output_dir="$(resolve_backup_dir "${1:-${BACKUP_DIR}}")"
-  install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${output_dir}"
+  local output_dir="$1"
+  [[ -d "${output_dir}" && ! -L "${output_dir}" ]] || {
+    fail "backup output is not a trusted directory: ${output_dir}"
+  }
   run_app_env "${PYTHON_BIN}" -m app.backup --output-dir "${output_dir}"
 }
 
@@ -202,6 +192,36 @@ print(
 ' "${database_path}"
 }
 
+secure_database_permissions() {
+  local database_path="$1"
+  "${PYTHON_BIN}" - "${DATA_DIR}" "${database_path}" \
+    "$(id -u "${APP_USER}")" "$(id -g "${APP_USER}")" <<'PY'
+import os
+import stat
+import sys
+
+data_root, database_path, uid_text, gid_text = sys.argv[1:]
+parent, filename = os.path.split(database_path)
+if parent != data_root or not filename or "/" in filename:
+    raise SystemExit("database must be a direct child of the data directory")
+
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+file_flags = os.O_RDONLY | os.O_NOFOLLOW
+directory_fd = os.open(data_root, directory_flags)
+try:
+    database_fd = os.open(filename, file_flags, dir_fd=directory_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(database_fd).st_mode):
+            raise SystemExit("database target is not a regular file")
+        os.fchown(database_fd, int(uid_text), int(gid_text))
+        os.fchmod(database_fd, 0o600)
+    finally:
+        os.close(database_fd)
+finally:
+    os.close(directory_fd)
+PY
+}
+
 rewrite_database_url() {
   local new_url="$1"
   local temporary_env
@@ -237,11 +257,25 @@ active_database_path() {
 
 new_operation_dir() {
   local category="$1"
-  local timestamp output_dir
+  local timestamp category_dir output_dir
+  case "${category}" in
+    switches|migrations|updates) ;;
+    *) fail "invalid operation backup category: ${category}" ;;
+  esac
   timestamp="$(date -u +%Y%m%dT%H%M%S%NZ)"
-  output_dir="${BACKUP_DIR}/${category}/${timestamp}"
-  install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${output_dir}" || return 1
+  category_dir="${BACKUP_DIR}/${category}"
+  output_dir="${category_dir}/${timestamp}"
+  [[ ! -L "${category_dir}" ]] || return 1
+  install -d -m 0750 -o root -g "${APP_GROUP}" "${category_dir}" || return 1
+  [[ ! -L "${category_dir}" ]] || return 1
+  install -d -m 0770 -o root -g "${APP_GROUP}" "${output_dir}" || return 1
   printf '%s\n' "${output_dir}"
+}
+
+restart_unchanged_and_fail() {
+  local message="$1"
+  start_after_maintenance || true
+  fail "${message}; unchanged services were restarted"
 }
 
 backup_file_in() {
@@ -281,8 +315,6 @@ with (
     source.backup(target)
     target.commit()
 ' "${source_path}" "${target_path}"
-  chmod 0600 "${target_path}"
-  chown "${APP_USER}:${APP_GROUP}" "${target_path}"
 }
 
 checkpoint_database() {
@@ -365,24 +397,36 @@ switch_database() {
   [[ "${requested_path}" != *"'"* ]] || fail "database path must not contain a single quote"
   target_path="$(realpath --canonicalize-missing -- "${requested_path}")"
   data_root="$(realpath -- "${DATA_DIR}")"
-  [[ "${target_path}" == "${data_root}/"* ]] || {
-    fail "database must stay inside ${data_root} for the systemd sandbox"
+  [[ "$(dirname -- "${target_path}")" == "${data_root}" ]] || {
+    fail "database must be a direct child of ${data_root}"
   }
   [[ "${target_path}" == *.db ]] || fail "database filename must end in .db"
   acquire_lock
-  install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "$(dirname -- "${target_path}")"
   current_path="$(active_database_path)"
   [[ "${target_path}" != "${current_path}" ]] || fail "target database is already active"
 
+  stop_for_maintenance
+  target_path="$(realpath --canonicalize-missing -- "${requested_path}")"
+  data_root="$(realpath -- "${DATA_DIR}")"
+  [[ "$(dirname -- "${target_path}")" == "${data_root}" \
+    && "${target_path}" == *.db ]] || {
+    restart_unchanged_and_fail "database path changed during maintenance entry"
+  }
+  [[ "${target_path}" != "${current_path}" ]] || {
+    restart_unchanged_and_fail "database target became the active database"
+  }
   if [[ "${mode}" == "switch" && -f "${target_path}" ]]; then
-    chown "${APP_USER}:${APP_GROUP}" "${target_path}"
-    chmod 0600 "${target_path}"
-    verify_database "${target_path}"
+    [[ ! -L "${target_path}" ]] || {
+      restart_unchanged_and_fail "database target is a symbolic link"
+    }
+    if ! secure_database_permissions "${target_path}" \
+      || ! verify_database "${target_path}"; then
+      restart_unchanged_and_fail "database target validation failed"
+    fi
   elif [[ "${mode}" == "promote" && -e "${target_path}" ]]; then
-    fail "promote-db target already exists; choose a new filename"
+    restart_unchanged_and_fail "promote-db target already exists"
   fi
 
-  stop_for_maintenance
   if ! rollback_dir="$(new_operation_dir switches)"; then
     start_after_maintenance || true
     fail "cannot create switch rollback directory; unchanged services were restarted"
@@ -437,8 +481,7 @@ switch_database() {
   fi
   move_database_bundle "${SWITCH_CANDIDATE}" "${target_path}"
   SWITCH_SWAPPED="true"
-  chmod 0600 "${target_path}"
-  chown "${APP_USER}:${APP_GROUP}" "${target_path}"
+  secure_database_permissions "${target_path}"
   rewrite_database_url "sqlite:///${target_path}"
 
   if ! systemctl start solution-workspace.target || ! health_check 12 2; then
@@ -489,8 +532,9 @@ case "${COMMAND}" in
     journalctl --no-pager --full "${units[@]}" -n "${lines}"
     ;;
   backup)
+    [[ "$#" -eq 0 ]] || fail "usage: solution-workspace backup"
     acquire_lock
-    create_backup "${1:-${BACKUP_DIR}}"
+    create_backup "${SCHEDULED_BACKUP_DIR}"
     ;;
   verify-db)
     [[ "$#" -eq 1 ]] || fail "usage: solution-workspace verify-db DB_PATH"

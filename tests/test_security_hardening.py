@@ -10,23 +10,57 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.api.routes import auth as auth_route
 from app.dependencies import get_db
 from app.errors import AppError
-from app.identity import normalize_user_identifier
 from app.models import AuditEvent, User, UserRole
 from app.security import hash_password, verify_password_for_login
-from app.throttle import LoginThrottle
+from app.throttle import LoginCapacityExceeded, LoginThrottle
 from tests.conftest import TEST_PASSWORD, login
 
 
-def test_login_throttle_follows_identifier_across_source_addresses() -> None:
-    throttle = LoginThrottle(max_failures=5, window_seconds=300)
-    identifier = normalize_user_identifier("  MEMBER  ")
+def test_login_throttle_caps_rotating_identifiers_with_a_global_budget() -> None:
+    throttle = LoginThrottle(
+        max_verifications=3,
+        max_source_verifications=3,
+        max_concurrent=1,
+    )
 
-    for index in range(5):
-        source = f"198.51.100.{index + 1}"
-        assert not throttle.is_login_blocked(source, identifier)
-        throttle.record_login_failure(source, identifier)
+    for index in range(3):
+        with throttle.verification_slot(f"198.51.100.{index + 1}"):
+            pass
 
-    assert throttle.is_login_blocked("203.0.113.99", identifier)
+    with (
+        pytest.raises(LoginCapacityExceeded),
+        throttle.verification_slot("203.0.113.99"),
+    ):
+        pass
+
+
+def test_login_failure_state_is_bounded_and_audits_are_sampled() -> None:
+    throttle = LoginThrottle(max_keys=128, audit_limit=2)
+
+    decisions = [
+        throttle.record_login_failure("proxy", f"unknown-{index}")
+        for index in range(256)
+    ]
+
+    assert sum(decision.should_audit for decision in decisions) == 2
+    assert throttle.tracked_key_count <= 128
+
+
+def test_wrong_passwords_do_not_lock_out_the_correct_password(api: dict) -> None:
+    client: TestClient = api["client"]
+
+    for _ in range(5):
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"login_name": "member", "password": "wrong-password"},
+        )
+        assert response.status_code == 401
+
+    recovered = client.post(
+        "/api/v1/auth/login",
+        json={"login_name": "member", "password": TEST_PASSWORD},
+    )
+    assert recovered.status_code == 200, recovered.text
 
 
 def test_unknown_and_inactive_users_use_dummy_password_verification(

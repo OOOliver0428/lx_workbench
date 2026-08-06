@@ -2,7 +2,7 @@
 
 本目录只保留当前 MVP 仍然有效的工程与产品资料：
 
-- [CHANGELOG.md](../CHANGELOG.md)：0.1.0、未发布变更和历次更新日志。
+- [CHANGELOG.md](../CHANGELOG.md)：0.1.1、未发布变更和历次更新日志。
 - [RELEASING.md](RELEASING.md)：版本号、更新日志、标签和发布流程。
 - [MVP_RELEASE.md](MVP_RELEASE.md)：阶段范围、暂缓项和交付检查。
 - [API_CONTRACT.md](API_CONTRACT.md)：前后端接口、权限和安全边界。

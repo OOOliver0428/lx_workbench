@@ -86,3 +86,36 @@ def test_framework_404_and_405_errors_keep_the_uniform_contract(tmp_path) -> Non
         assert response.headers["X-Frame-Options"] == "DENY"
         assert response.headers["Referrer-Policy"] == "no-referrer"
         assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_request_body_limit_rejects_oversized_payloads(tmp_path) -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"sqlite:///{(tmp_path / 'body-limit.db').as_posix()}",
+        allowed_hosts_csv="testserver",
+        cookie_secure=False,
+        api_max_body_bytes=1024,
+        llm_config_secret="test-only-llm-config-secret-at-least-32-characters",
+    )
+    app: FastAPI = create_app(settings)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/login",
+            content=b"x" * 1025,
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-ID": "qa-body-too-large",
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json() == {
+        "code": "REQUEST_BODY_TOO_LARGE",
+        "message": "Request body is too large",
+        "request_id": "qa-body-too-large",
+        "details": {"max_bytes": 1024},
+    }
+    assert response.headers["X-Request-ID"] == "qa-body-too-large"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"

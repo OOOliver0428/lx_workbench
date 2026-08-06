@@ -88,7 +88,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "e5b9c7d1a304"
+    assert revision == "b3f8d2a6c901"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -112,6 +112,108 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     }
     assert foreign_keys == 1
     assert journal_mode == "wal"
+    get_settings.cache_clear()
+
+
+def test_team_summary_migration_keeps_latest_duplicate(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "duplicate-summaries.db"
+    monkeypatch.setenv("MVP_DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
+    get_settings.cache_clear()
+    config = Config("alembic.ini")
+    command.upgrade(config, "e5b9c7d1a304")
+
+    with closing(sqlite3.connect(database_path)) as db:
+        db.execute(
+            """
+            INSERT INTO users(
+                id, login_name, display_name, display_name_key, password_hash, role,
+                is_active, must_change_password, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "11111111-1111-4111-8111-111111111111",
+                "summary-owner",
+                "周报负责人",
+                "周报负责人",
+                "not-a-real-password-hash",
+                "team_leader",
+                1,
+                0,
+                "2026-08-01T00:00:00+00:00",
+                "2026-08-01T00:00:00+00:00",
+                1,
+            ),
+        )
+        db.executemany(
+            """
+            INSERT INTO team_weekly_summaries(
+                id, week_start, week_end, content, generated_by, forced,
+                submitted_count, expected_count, generation_model,
+                generation_usage, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "22222222-2222-4222-8222-222222222222",
+                    "2026-07-27",
+                    "2026-08-02",
+                    "旧版本",
+                    "11111111-1111-4111-8111-111111111111",
+                    0,
+                    1,
+                    1,
+                    "test-model",
+                    None,
+                    "2026-08-01T00:00:00+00:00",
+                    "2026-08-01T00:00:00+00:00",
+                    1,
+                ),
+                (
+                    "33333333-3333-4333-8333-333333333333",
+                    "2026-07-27",
+                    "2026-08-02",
+                    "最新版本",
+                    "11111111-1111-4111-8111-111111111111",
+                    0,
+                    1,
+                    1,
+                    "test-model",
+                    None,
+                    "2026-08-02T00:00:00+00:00",
+                    "2026-08-02T00:00:00+00:00",
+                    1,
+                ),
+            ],
+        )
+        db.commit()
+
+    command.upgrade(config, "head")
+    with closing(sqlite3.connect(database_path)) as db:
+        summaries = db.execute(
+            "SELECT id, content FROM team_weekly_summaries"
+        ).fetchall()
+        unique_indexes = [
+            row[1]
+            for row in db.execute("PRAGMA index_list(team_weekly_summaries)")
+            if row[2]
+        ]
+        unique_column_sets = {
+            tuple(
+                column[2]
+                for column in db.execute(
+                    f'PRAGMA index_info("{index_name}")'
+                )
+            )
+            for index_name in unique_indexes
+        }
+
+    assert summaries == [
+        ("33333333-3333-4333-8333-333333333333", "最新版本")
+    ]
+    assert ("generated_by", "week_start") in unique_column_sets
     get_settings.cache_clear()
 
 
@@ -276,7 +378,7 @@ def test_populated_previous_revision_upgrades_without_data_loss(
             """
         ).fetchall()
 
-    assert revision == "e5b9c7d1a304"
+    assert revision == "b3f8d2a6c901"
     assert user == ("historic-user", "历史升级用户", "历史升级用户")
     assert integrity == "ok"
     assert migrated_opportunity == (
@@ -327,7 +429,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "e5b9c7d1a304"
+    assert manifest["schemaRevision"] == "b3f8d2a6c901"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
 

@@ -464,10 +464,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
-    chat: (prompt: string) =>
+    chat: (prompt: string, clientRequestId?: string) =>
       request<AIChatResult>("/api/v1/ai/chat", {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, client_request_id: clientRequestId }),
       }),
   },
   weeklyReports: {

@@ -21,6 +21,9 @@ def test_ubuntu_install_keeps_runtime_state_outside_the_checkout() -> None:
     assert 'readonly BACKUP_DIR="/var/backups/solution-workspace"' in installer
     assert "MVP_DATABASE_URL=${DATABASE_URL}" in installer
     assert "MVP_LLM_CONFIG_SECRET=${llm_secret}" in installer
+    assert "MVP_API_MAX_BODY_BYTES=262144" in installer
+    assert "MVP_LOGIN_MAX_CONCURRENT_VERIFICATIONS=2" in installer
+    assert "MVP_LLM_GLOBAL_TOKENS_PER_DAY=1000000" in installer
     assert 'if [[ ! -f "${ENV_FILE}" ]]' in installer
     assert 'PROJECT_DIR="/opt/solution-workspace"' in installer
     assert 'readonly BACKEND_USER="solution-workspace"' in installer
@@ -37,6 +40,11 @@ def test_ubuntu_install_keeps_runtime_state_outside_the_checkout() -> None:
     assert 'chmod -R u=rwX,go=rX "${PROJECT_DIR}"' in installer
     assert 'chmod -R go-w "${PROJECT_DIR}"' not in installer
     assert 'find "${PROJECT_DIR}/app" -type f ! -readable -print -quit' in installer
+    assert "aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967" in installer
+    assert "4d4fa08d95b06642e5800df6a22bd71455f23f988269e18da2847971d8c0bf31" in installer
+    assert "sha256sum --check --strict" in installer
+    assert 'sh "${temporary_uv_installer}"' not in installer
+    assert 'install -d -m 0755 -o root -g root "${BACKUP_DIR}"' in installer
 
 
 def test_systemd_units_keep_backend_private_and_schedule_verified_backups() -> None:
@@ -51,10 +59,12 @@ def test_systemd_units_keep_backend_private_and_schedule_verified_backups() -> N
     assert "User=@@BACKEND_USER@@" in backend
     assert "User=@@FRONTEND_USER@@" in frontend
     assert "MVP_INTERNAL_API_BASE_URL=http://127.0.0.1:@@BACKEND_PORT@@" in frontend
+    assert "MVP_MAX_REQUEST_BODY_BYTES=262144" in frontend
     assert "python -m app.backup" in backup
+    assert "@@BACKUP_DIR@@/scheduled" in backup
     assert "flock --wait 600 @@LOCK_FILE@@" in backup
     assert "--retention-days 30" in backup
-    assert "ReadWritePaths=@@DATA_DIR@@ @@BACKUP_DIR@@ @@LOCK_FILE@@" in backup
+    assert "ReadWritePaths=@@DATA_DIR@@ @@BACKUP_DIR@@/scheduled @@LOCK_FILE@@" in backup
     assert "Persistent=true" in timer
     assert "Asia/Shanghai" in timer
 
@@ -65,7 +75,7 @@ def test_ops_database_switch_has_backup_validation_and_rollback_guards() -> None
     assert "verify_database" in operations
     assert "acquire_lock" in operations
     assert 'create_backup "${rollback_dir}"' in operations
-    assert "database must stay inside" in operations
+    assert "database must be a direct child" in operations
     assert 'run_app_env "${ALEMBIC_BIN}" upgrade head' in operations
     assert "clone_sqlite_database" in operations
     assert "move_database_bundle" in operations
@@ -78,6 +88,26 @@ def test_ops_database_switch_has_backup_validation_and_rollback_guards() -> None
     assert "new database failed service startup or health checks" in operations
     assert "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" in operations
     assert '"${RUNUSER_BIN}" -u "${APP_USER}"' in operations
+    assert '[[ "$#" -eq 0 ]] || fail "usage: solution-workspace backup"' in operations
+    assert 'create_backup "${SCHEDULED_BACKUP_DIR}"' in operations
+    assert "secure_database_permissions" in operations
+    assert "os.O_NOFOLLOW" in operations
+    assert "os.fstat(database_fd)" in operations
+    assert "os.fchown(database_fd" in operations
+    assert "os.fchmod(database_fd" in operations
+    switch_start = operations.index("switch_database()")
+    assert operations.index("stop_for_maintenance", switch_start) < operations.index(
+        'secure_database_permissions "${target_path}"', switch_start
+    )
+    post_stop = operations.index(
+        'target_path="$(realpath --canonicalize-missing -- "${requested_path}")"',
+        operations.index("stop_for_maintenance", switch_start),
+    )
+    assert operations.index(
+        '[[ "${target_path}" != "${current_path}" ]]', post_stop
+    ) < operations.index(
+        'secure_database_permissions "${target_path}"', post_stop
+    )
 
 
 def test_update_stages_frontend_before_stopping_the_running_release() -> None:

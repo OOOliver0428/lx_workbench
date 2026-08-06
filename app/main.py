@@ -13,9 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
+from app.body_limit import RequestBodyLimitMiddleware
 from app.config import Settings, get_settings
 from app.database import create_database_engine, create_session_factory
 from app.errors import AppError
+from app.llm_guard import LLMGuard
 from app.schemas import ErrorResponse
 from app.throttle import LoginThrottle
 
@@ -33,15 +35,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="团队项目管理 MVP API",
-        version="0.1.0",
+        version="0.1.1",
         lifespan=lifespan,
         responses={
             status_code: {"model": ErrorResponse}
-            for status_code in (400, 401, 403, 404, 409, 422, 429, 500, 502, 503)
+            for status_code in (400, 401, 403, 404, 409, 413, 422, 429, 500, 502, 503)
         },
     )
     app.state.settings = settings
-    app.state.login_throttle = LoginThrottle()
+    app.state.login_throttle = LoginThrottle(
+        max_verifications=settings.login_verification_limit_per_minute,
+        max_source_verifications=settings.login_source_limit_per_minute,
+        max_concurrent=settings.login_max_concurrent_verifications,
+        max_keys=settings.login_throttle_max_keys,
+        audit_limit=settings.login_failure_audit_limit_per_minute,
+    )
+    app.state.llm_guard = LLMGuard(
+        max_concurrent=settings.llm_max_concurrent_generations,
+        max_user_concurrent=settings.llm_max_user_concurrent_generations,
+        user_requests_per_hour=settings.llm_user_requests_per_hour,
+        user_tokens_per_day=settings.llm_user_tokens_per_day,
+        global_tokens_per_day=settings.llm_global_tokens_per_day,
+        max_tracked_users=settings.llm_max_tracked_users,
+        cooldown_seconds={
+            "chat": settings.llm_chat_cooldown_seconds,
+            "weekly_report": settings.llm_weekly_cooldown_seconds,
+            "team_summary": settings.llm_team_summary_cooldown_seconds,
+        },
+    )
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=settings.api_max_body_bytes,
+    )
 
     if settings.allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)

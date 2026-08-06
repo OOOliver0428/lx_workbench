@@ -42,5 +42,6 @@ def generate_team_summary(
         payload,
         actor,
         week_start=week_start,
+        llm_guard=request.app.state.llm_guard,
     )
     return TeamWeeklySummaryOut.model_validate(summary)

@@ -11,6 +11,7 @@ const REQUEST_HEADERS = [
 
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
 const LLM_UPSTREAM_TIMEOUT_MS = 195_000;
+const DEFAULT_MAX_REQUEST_BODY_BYTES = 256 * 1024;
 const NO_STORE = "private, no-store, max-age=0, must-revalidate";
 
 type RouteContext = {
@@ -30,6 +31,51 @@ function upstreamTimeout(path: string[]) {
     resource === "v1/weekly-reports/current/generate" ||
     resource === "v1/dashboard/team-summary";
   return invokesLlm ? LLM_UPSTREAM_TIMEOUT_MS : DEFAULT_UPSTREAM_TIMEOUT_MS;
+}
+
+function maxRequestBodyBytes() {
+  const configured = Number(process.env.MVP_MAX_REQUEST_BODY_BYTES);
+  return Number.isSafeInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_REQUEST_BODY_BYTES;
+}
+
+async function readBodyWithLimit(request: Request): Promise<ArrayBuffer | null> {
+  if (request.method === "GET" || request.method === "HEAD" || !request.body) {
+    return null;
+  }
+
+  const limit = maxRequestBodyBytes();
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength && Number(declaredLength) > limit) {
+    throw new RangeError("request body exceeds configured limit");
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        throw new RangeError("request body exceeds configured limit");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged.buffer;
 }
 
 function secureResponseHeaders(headers = new Headers()) {
@@ -61,8 +107,21 @@ async function proxy(request: Request, context: RouteContext) {
   headers.set("x-forwarded-host", requestUrl.host);
   headers.set("x-forwarded-proto", requestUrl.protocol.slice(0, -1));
 
-  const hasBody = request.method !== "GET" && request.method !== "HEAD";
-  const body = hasBody ? await request.arrayBuffer() : null;
+  let body: ArrayBuffer | null;
+  try {
+    body = await readBodyWithLimit(request);
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    return Response.json(
+      {
+        code: "REQUEST_BODY_TOO_LARGE",
+        message: "请求内容过大",
+        request_id: request.headers.get("x-request-id"),
+        details: { max_bytes: maxRequestBodyBytes() },
+      },
+      { status: 413, headers: secureResponseHeaders() },
+    );
+  }
 
   try {
     const upstreamResponse = await fetch(targetUrl, {

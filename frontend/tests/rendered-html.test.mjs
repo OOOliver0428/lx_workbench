@@ -139,7 +139,7 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(appShell, /messages\.map\(\(message\)/);
   assert.match(
     appShell,
-    /setPrompt\(""\)[\s\S]*?api\.ai\.chat\(question\)/,
+    /setPrompt\(""\)[\s\S]*?api\.ai\.chat\(question, questionId\)/,
   );
   assert.match(appShell, /关闭窗口后清空本次对话/);
   assert.doesNotMatch(appShell, /setAnswer|localStorage|sessionStorage/);
@@ -260,7 +260,9 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(apiProxy, /MVP_INTERNAL_API_BASE_URL/);
   assert.match(apiProxy, /"cookie"/);
   assert.match(apiProxy, /"x-csrf-token"/);
-  assert.match(apiProxy, /request\.arrayBuffer\(\)/);
+  assert.match(apiProxy, /readBodyWithLimit\(request\)/);
+  assert.match(apiProxy, /REQUEST_BODY_TOO_LARGE/);
+  assert.doesNotMatch(apiProxy, /request\.arrayBuffer\(\)/);
   assert.match(apiProxy, /new Headers\(upstreamResponse\.headers\)/);
   assert.match(apiProxy, /export const POST = proxy/);
   assert.doesNotMatch(apiProxy, /"x-forwarded-for"/);
@@ -315,14 +317,49 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(app, /window\.setTimeout/);
   assert.match(
     app,
-    /async function logout\(\)[\s\S]*?catch\s*\{[\s\S]*?finally\s*\{[\s\S]*?setAuth\(null\)/,
+    /logoutConfirmed = caught instanceof ApiClientError && caught\.status === 401/,
   );
+  assert.match(app, /if \(!logoutConfirmed\) return;[\s\S]*?setAuth\(null\)/);
+  assert.match(appShell, /logoutError[\s\S]*?InlineNotice tone="error"/);
   assert.match(layout, /title:\s*"协作工作台"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(
     api + aiConfig + envExample,
     /sk-(?:cp-)?[A-Za-z0-9_-]{20,}/,
   );
+});
+
+test("rejects oversized proxy bodies before contacting the backend", async () => {
+  const previousLimit = process.env.MVP_MAX_REQUEST_BODY_BYTES;
+  process.env.MVP_MAX_REQUEST_BODY_BYTES = "16";
+  try {
+    const routeUrl = new URL(
+      "../app/api/[...path]/route.ts",
+      import.meta.url,
+    );
+    routeUrl.searchParams.set("body-limit-test", `${process.pid}-${Date.now()}`);
+    const { POST } = await import(routeUrl.href);
+    const response = await POST(
+      new Request("http://localhost/api/v1/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "proxy-body-limit-test",
+        },
+        body: "0123456789abcdefg",
+      }),
+      { params: Promise.resolve({ path: ["v1", "auth", "login"] }) },
+    );
+
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).code, "REQUEST_BODY_TOO_LARGE");
+  } finally {
+    if (previousLimit === undefined) {
+      delete process.env.MVP_MAX_REQUEST_BODY_BYTES;
+    } else {
+      process.env.MVP_MAX_REQUEST_BODY_BYTES = previousLimit;
+    }
+  }
 });
 
 test("matches backend object-level project and task management rules", async () => {

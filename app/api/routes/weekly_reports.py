@@ -71,11 +71,19 @@ def generate_current_weekly_report(
         actor,
         PermissionKey.WEEKLY_REPORTS_MANAGE,
     )
-    report = report_service.generate_current_report(
-        db,
-        request.app.state.settings,
-        actor,
-    )
+    week_start, _week_end = report_service.current_week_bounds()
+    with request.app.state.llm_guard.generation(
+        user_id=actor.id,
+        purpose="weekly_report",
+        max_tokens=4096,
+        idempotency_key=f"weekly-report:{actor.id}:{week_start.isoformat()}",
+    ) as lease:
+        report = report_service.generate_current_report(
+            db,
+            request.app.state.settings,
+            actor,
+        )
+        lease.record_usage(report.generation_usage)
     return report_service.report_out(report)
 
 

@@ -792,6 +792,11 @@ class TeamWeeklySummary(Base, TimestampMixin, RevisionMixin):
     generation_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     __table_args__ = (
+        UniqueConstraint(
+            "generated_by",
+            "week_start",
+            name="uq_team_weekly_summaries_generator_week",
+        ),
         CheckConstraint(
             "week_end >= week_start",
             name="ck_team_weekly_summaries_valid_week",

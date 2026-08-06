@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    PermissionKey,
     Project,
     ProjectMember,
     ProjectTag,
@@ -17,6 +18,12 @@ from app.models import (
     User,
     WorkRecord,
 )
+from app.services.permissions import has_permission
+
+CONTEXT_PROJECT_LIMIT = 100
+CONTEXT_TASK_LIMIT = 200
+CONTEXT_RECORD_LIMIT = 200
+CONTEXT_TAG_LIMIT_PER_PROJECT = 20
 
 
 def _json_text(payload: dict[str, Any]) -> str:
@@ -30,16 +37,23 @@ def _project_rows(db: Session, project_ids: set[str]) -> list[dict[str, Any]]:
         select(Project)
         .where(Project.id.in_(project_ids), Project.deleted_at.is_(None))
         .order_by(Project.code)
+        .limit(CONTEXT_PROJECT_LIMIT)
     ).all()
+    loaded_project_ids = {project.id for project in projects}
+    if not loaded_project_ids:
+        return []
     tag_rows = db.execute(
         select(ProjectTagAssignment.project_id, ProjectTag.name)
         .join(ProjectTag, ProjectTag.id == ProjectTagAssignment.tag_id)
-        .where(ProjectTagAssignment.project_id.in_(project_ids))
+        .where(ProjectTagAssignment.project_id.in_(loaded_project_ids))
         .order_by(ProjectTag.sort_order, ProjectTag.name)
+        .limit(CONTEXT_PROJECT_LIMIT * CONTEXT_TAG_LIMIT_PER_PROJECT)
     ).all()
     tags_by_project: dict[str, list[str]] = {}
     for project_id, tag_name in tag_rows:
-        tags_by_project.setdefault(project_id, []).append(tag_name)
+        tags = tags_by_project.setdefault(project_id, [])
+        if len(tags) < CONTEXT_TAG_LIMIT_PER_PROJECT:
+            tags.append(tag_name)
     return [
         {
             "id": project.id,
@@ -71,17 +85,25 @@ def _task_row(task: Task) -> dict[str, Any]:
     }
 
 
-def _work_record_row(record: WorkRecord) -> dict[str, Any]:
-    return {
+def _work_record_row(
+    record: WorkRecord,
+    *,
+    include_project_id: bool,
+    include_task_id: bool,
+) -> dict[str, Any]:
+    row = {
         "id": record.id,
         "work_date": record.work_date,
         "content": record.content,
         "hours": record.minutes / 60,
-        "project_id": record.project_id,
-        "task_id": record.task_id,
         "risk": record.risk,
         "next_action": record.next_action,
     }
+    if include_project_id:
+        row["project_id"] = record.project_id
+    if include_task_id:
+        row["task_id"] = record.task_id
+    return row
 
 
 def build_chat_context(db: Session, actor: User) -> str:
@@ -92,6 +114,9 @@ def build_chat_context(db: Session, actor: User) -> str:
     broaden this scope.
     """
 
+    can_view_projects = has_permission(db, actor, PermissionKey.PROJECTS_VIEW)
+    can_view_tasks = has_permission(db, actor, PermissionKey.TASKS_VIEW)
+    can_view_records = has_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
     project_ids = set(
         db.scalars(
             select(Project.id).where(
@@ -136,6 +161,7 @@ def build_chat_context(db: Session, actor: User) -> str:
         ).all()
     )
     project_ids.discard(None)
+    project_ids = set(sorted(project_ids)[:CONTEXT_PROJECT_LIMIT])
 
     tasks = (
         db.scalars(
@@ -145,23 +171,27 @@ def build_chat_context(db: Session, actor: User) -> str:
                 Task.deleted_at.is_(None),
             )
             .order_by(Task.updated_at.desc())
-            .limit(200)
+            .limit(CONTEXT_TASK_LIMIT)
         ).all()
-        if project_ids
+        if project_ids and can_view_tasks
         else []
     )
     local_today = datetime.now(timezone(timedelta(hours=8))).date()
     recent_since = local_today - timedelta(days=90)
-    records = db.scalars(
-        select(WorkRecord)
-        .where(
-            WorkRecord.author_id == actor.id,
-            WorkRecord.work_date >= recent_since,
-            WorkRecord.deleted_at.is_(None),
-        )
-        .order_by(WorkRecord.work_date.desc(), WorkRecord.created_at.desc())
-        .limit(200)
-    ).all()
+    records = (
+        db.scalars(
+            select(WorkRecord)
+            .where(
+                WorkRecord.author_id == actor.id,
+                WorkRecord.work_date >= recent_since,
+                WorkRecord.deleted_at.is_(None),
+            )
+            .order_by(WorkRecord.work_date.desc(), WorkRecord.created_at.desc())
+            .limit(CONTEXT_RECORD_LIMIT)
+        ).all()
+        if can_view_records
+        else []
+    )
     return _json_text(
         {
             "scope": "仅限当前用户有关的项目、任务及其最近90天工作记录",
@@ -169,9 +199,16 @@ def build_chat_context(db: Session, actor: User) -> str:
                 "id": actor.id,
                 "display_name": actor.display_name,
             },
-            "projects": _project_rows(db, project_ids),
+            "projects": _project_rows(db, project_ids) if can_view_projects else [],
             "tasks": [_task_row(task) for task in tasks],
-            "work_records": [_work_record_row(record) for record in records],
+            "work_records": [
+                _work_record_row(
+                    record,
+                    include_project_id=can_view_projects,
+                    include_task_id=can_view_tasks,
+                )
+                for record in records
+            ],
         }
     )
 
@@ -182,6 +219,8 @@ def build_weekly_report_context(
     week_start: date,
     week_end: date,
 ) -> str:
+    can_view_projects = has_permission(db, actor, PermissionKey.PROJECTS_VIEW)
+    can_view_tasks = has_permission(db, actor, PermissionKey.TASKS_VIEW)
     records = db.scalars(
         select(WorkRecord)
         .where(
@@ -191,6 +230,7 @@ def build_weekly_report_context(
             WorkRecord.deleted_at.is_(None),
         )
         .order_by(WorkRecord.work_date, WorkRecord.created_at)
+        .limit(CONTEXT_RECORD_LIMIT)
     ).all()
     project_ids = {record.project_id for record in records if record.project_id}
     task_ids = {record.task_id for record in records if record.task_id}
@@ -200,7 +240,7 @@ def build_weekly_report_context(
             .where(Task.id.in_(task_ids), Task.deleted_at.is_(None))
             .order_by(Task.created_at)
         ).all()
-        if task_ids
+        if task_ids and can_view_tasks
         else []
     )
     return _json_text(
@@ -212,8 +252,15 @@ def build_weekly_report_context(
             },
             "week_start": week_start,
             "week_end": week_end,
-            "projects": _project_rows(db, project_ids),
+            "projects": _project_rows(db, project_ids) if can_view_projects else [],
             "tasks": [_task_row(task) for task in tasks],
-            "work_records": [_work_record_row(record) for record in records],
+            "work_records": [
+                _work_record_row(
+                    record,
+                    include_project_id=can_view_projects,
+                    include_task_id=can_view_tasks,
+                )
+                for record in records
+            ],
         }
     )

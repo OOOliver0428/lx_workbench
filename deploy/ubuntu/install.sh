@@ -9,6 +9,7 @@ readonly CONFIG_DIR="/etc/solution-workspace"
 readonly ENV_FILE="${CONFIG_DIR}/app.env"
 readonly DATA_DIR="/var/lib/solution-workspace"
 readonly BACKUP_DIR="/var/backups/solution-workspace"
+readonly SCHEDULED_BACKUP_DIR="${BACKUP_DIR}/scheduled"
 readonly PYTHON_RUNTIME_DIR="/opt/solution-workspace-runtime/python"
 readonly UV_CACHE_DIR="/var/cache/solution-workspace/uv"
 readonly NPM_CACHE_DIR="/var/cache/solution-workspace/npm"
@@ -240,7 +241,7 @@ if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
     esac
     node_archive="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"
     temporary_node_dir="$(mktemp -d)"
-    trap 'rm -rf -- "${temporary_node_dir:-}"; rm -f -- "${temporary_uv_installer:-}"' EXIT
+    trap 'rm -rf -- "${temporary_node_dir:-}" "${temporary_uv_dir:-}"' EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
       "https://nodejs.org/dist/v${NODE_VERSION}/${node_archive}" \
       --output "${temporary_node_dir}/${node_archive}"
@@ -263,13 +264,32 @@ if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
     uv_version="$(uv --version | awk '{print $2}')"
   fi
   if [[ -z "${uv_version}" ]] || ! version_at_least "${uv_version}" "0.11.0"; then
-    log "Installing pinned uv ${UV_VERSION}"
-    temporary_uv_installer="$(mktemp)"
-    trap 'rm -rf -- "${temporary_node_dir:-}"; rm -f -- "${temporary_uv_installer:-}"' EXIT
+    log "Installing verified uv ${UV_VERSION} binaries"
+    machine_arch="$(uname -m)"
+    case "${machine_arch}" in
+      x86_64)
+        uv_target="x86_64-unknown-linux-gnu"
+        uv_sha256="aab924fd522efd06f1c5f3b93a243864fc453132c94b2dc49f1371b528a4b967"
+        ;;
+      aarch64|arm64)
+        uv_target="aarch64-unknown-linux-gnu"
+        uv_sha256="4d4fa08d95b06642e5800df6a22bd71455f23f988269e18da2847971d8c0bf31"
+        ;;
+      *) fail "unsupported CPU architecture for uv: ${machine_arch}" ;;
+    esac
+    uv_archive="uv-${uv_target}.tar.gz"
+    temporary_uv_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${temporary_node_dir:-}" "${temporary_uv_dir:-}"' EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-      "https://astral.sh/uv/${UV_VERSION}/install.sh" \
-      --output "${temporary_uv_installer}"
-    env UV_UNMANAGED_INSTALL=/usr/local/bin sh "${temporary_uv_installer}"
+      "https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}/${uv_archive}" \
+      --output "${temporary_uv_dir}/${uv_archive}"
+    printf '%s  %s\n' "${uv_sha256}" "${temporary_uv_dir}/${uv_archive}" \
+      | sha256sum --check --strict -
+    tar -xzf "${temporary_uv_dir}/${uv_archive}" -C "${temporary_uv_dir}"
+    install -m 0755 -o root -g root \
+      "${temporary_uv_dir}/uv-${uv_target}/uv" /usr/local/bin/uv
+    install -m 0755 -o root -g root \
+      "${temporary_uv_dir}/uv-${uv_target}/uvx" /usr/local/bin/uvx
   fi
 fi
 
@@ -290,8 +310,10 @@ BACKEND_GROUP="$(id -gn "${BACKEND_USER}")"
 FRONTEND_GROUP="$(id -gn "${FRONTEND_USER}")"
 
 log "Preparing configuration and runtime directories"
+install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" "${DATA_DIR}"
+install -d -m 0755 -o root -g root "${BACKUP_DIR}"
 install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" \
-  "${DATA_DIR}" "${BACKUP_DIR}"
+  "${SCHEDULED_BACKUP_DIR}"
 install -d -m 0755 -o root -g root \
   "${PYTHON_RUNTIME_DIR}" "${UV_CACHE_DIR}" "$(dirname -- "${PROJECT_DIR}")"
 install -d -m 0750 -o "${FRONTEND_USER}" -g "${FRONTEND_GROUP}" \
@@ -316,6 +338,23 @@ MVP_COOKIE_SECURE=false
 MVP_ALLOWED_HOSTS_CSV=${PUBLIC_HOST},127.0.0.1,localhost
 MVP_CORS_ORIGINS_CSV=
 MVP_LOG_LEVEL=INFO
+MVP_API_MAX_BODY_BYTES=262144
+MVP_LOGIN_VERIFICATION_LIMIT_PER_MINUTE=120
+MVP_LOGIN_SOURCE_LIMIT_PER_MINUTE=60
+MVP_LOGIN_MAX_CONCURRENT_VERIFICATIONS=2
+MVP_LOGIN_THROTTLE_MAX_KEYS=2048
+MVP_LOGIN_FAILURE_AUDIT_LIMIT_PER_MINUTE=20
+MVP_LOGIN_FAILURE_AUDIT_RETENTION_DAYS=90
+MVP_LOGIN_FAILURE_AUDIT_MAX_ROWS=10000
+MVP_LLM_MAX_CONCURRENT_GENERATIONS=2
+MVP_LLM_MAX_USER_CONCURRENT_GENERATIONS=1
+MVP_LLM_USER_REQUESTS_PER_HOUR=20
+MVP_LLM_USER_TOKENS_PER_DAY=100000
+MVP_LLM_GLOBAL_TOKENS_PER_DAY=1000000
+MVP_LLM_MAX_TRACKED_USERS=10000
+MVP_LLM_CHAT_COOLDOWN_SECONDS=2
+MVP_LLM_WEEKLY_COOLDOWN_SECONDS=60
+MVP_LLM_TEAM_SUMMARY_COOLDOWN_SECONDS=60
 MVP_LLM_CONFIG_SECRET=${llm_secret}
 MVP_LLM_TIMEOUT_SECONDS=60
 MVP_LLM_TEST_TOKEN_TTL_SECONDS=600

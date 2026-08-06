@@ -99,12 +99,16 @@ export function AppShell({
   activeView,
   onViewChange,
   onLogout,
+  logoutError,
+  logoutPending,
   children,
 }: {
   context: AuthContext;
   activeView: WorkspaceView;
   onViewChange: (view: WorkspaceView) => void;
   onLogout: () => void;
+  logoutError: string;
+  logoutPending: boolean;
   children: ReactNode;
 }) {
   const [aiOpen, setAiOpen] = useState(false);
@@ -218,6 +222,8 @@ export function AppShell({
             <button
               className="account-logout-button"
               onClick={confirmLogout}
+              disabled={logoutPending}
+              aria-busy={logoutPending}
               aria-label="退出登录"
               title="退出登录"
             >
@@ -226,7 +232,14 @@ export function AppShell({
           </div>
         </div>
       </aside>
-      <div className="workspace-main">{children}</div>
+      <div className="workspace-main">
+        {logoutError ? (
+          <div className="workspace-alert">
+            <InlineNotice tone="error">{logoutError}</InlineNotice>
+          </div>
+        ) : null}
+        {children}
+      </div>
       {aiOpen ? (
         <AIDrawer
           canUseAi={canUseAi}
@@ -322,7 +335,7 @@ function AIDrawer({
     setSubmitting(true);
     setError("");
     try {
-      const result: AIChatResult = await api.ai.chat(question);
+      const result: AIChatResult = await api.ai.chat(question, questionId);
       setMessages((current) => [
         ...current,
         {

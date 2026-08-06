@@ -1,6 +1,6 @@
 [project]
 name = "team-project-mvp"
-version = "0.1.0"
+version = "0.1.1"
 description = "团队项目管理与工作记录 MVP 后端"
 readme = "README.md"
 requires-python = ">=3.12"

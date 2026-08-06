@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
+  ApiClientError,
+  apiErrorMessage,
   setCsrfToken,
   setSessionInvalidatedHandler,
 } from "./api";
@@ -26,6 +28,8 @@ export function WorkspaceApp() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
   const [loginNotice, setLoginNotice] = useState("");
+  const [logoutError, setLogoutError] = useState("");
+  const [logoutPending, setLogoutPending] = useState(false);
   const [projectCreationDraft, setProjectCreationDraft] =
     useState<ProjectCreationDraft | null>(null);
 
@@ -67,17 +71,27 @@ export function WorkspaceApp() {
   }, [auth, invalidateSession]);
 
   async function logout() {
+    setLogoutError("");
+    setLogoutPending(true);
+    let logoutConfirmed = false;
     try {
       await api.auth.logout();
-    } catch {
-      // Logout is best effort: a network failure must not trap the user in an
-      // expired local session or surface an unhandled promise rejection.
+      logoutConfirmed = true;
+    } catch (caught) {
+      logoutConfirmed = caught instanceof ApiClientError && caught.status === 401;
+      if (!logoutConfirmed) {
+        setLogoutError(
+          apiErrorMessage(caught, "退出失败，会话仍可能有效，请重试。"),
+        );
+      }
     } finally {
-      setCsrfToken("");
-      setAuth(null);
-      setActiveView("dashboard");
-      setLoginNotice("");
+      setLogoutPending(false);
     }
+    if (!logoutConfirmed) return;
+    setCsrfToken("");
+    setAuth(null);
+    setActiveView("dashboard");
+    setLoginNotice("");
   }
 
   if (checkingSession) {
@@ -124,6 +138,8 @@ export function WorkspaceApp() {
       activeView={activeView}
       onViewChange={setActiveView}
       onLogout={logout}
+      logoutError={logoutError}
+      logoutPending={logoutPending}
     >
       {activeView === "dashboard" ? (
         <DashboardView

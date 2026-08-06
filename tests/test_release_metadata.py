@@ -21,6 +21,12 @@ def test_release_versions_are_synchronized() -> None:
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## [{version}] - " in changelog
+    assert (ROOT / "app" / "__init__.py").read_text(encoding="utf-8").find(
+        f'__version__ = "{version}"'
+    ) >= 0
+    assert f'version="{version}"' in (ROOT / "app" / "main.py").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_changelog_keeps_an_unreleased_section() -> None:

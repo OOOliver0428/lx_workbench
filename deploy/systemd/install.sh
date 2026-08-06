@@ -78,7 +78,10 @@ valid_port "${BACKEND_PORT}" || fail "invalid backend port"
 [[ "${FRONTEND_PORT}" != "${BACKEND_PORT}" ]] || fail "frontend and backend ports must differ"
 
 NODE_BIN_DIR="$(dirname -- "${NODE_BIN}")"
-install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" "${DATA_DIR}" "${BACKUP_DIR}"
+install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" "${DATA_DIR}"
+install -d -m 0755 -o root -g root "${BACKUP_DIR}"
+install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" \
+  "${BACKUP_DIR}/scheduled"
 chown root:"${BACKEND_GROUP}" "${ENV_FILE}"
 chmod 0640 "${ENV_FILE}"
 
