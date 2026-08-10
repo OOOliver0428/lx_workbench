@@ -106,6 +106,9 @@ export function DashboardView({
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [selectedWeek, setSelectedWeek] = useState("");
   const [activePage, setActivePage] = useState<DashboardPage>("opp");
+  const [slideDirection, setSlideDirection] = useState<"left" | "right">(
+    "right",
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedProject, setSelectedProject] =
@@ -214,7 +217,15 @@ export function DashboardView({
               type="button"
               key={pageId}
               className={activePage === pageId ? "active" : ""}
-              onClick={() => setActivePage(pageId)}
+              onClick={() => {
+                const order = dashboard.accessible_pages;
+                setSlideDirection(
+                  order.indexOf(pageId) < order.indexOf(activePage)
+                    ? "left"
+                    : "right",
+                );
+                setActivePage(pageId);
+              }}
             >
               {PAGE_COPY[pageId].label}
             </button>
@@ -304,29 +315,34 @@ export function DashboardView({
         ) : null}
       </section>
 
-      {activePage === "opp" ? (
-        <OpportunityPage
-          dashboard={dashboard}
-          onSelectOpportunity={setSelectedOpportunity}
-          onSelectProject={setSelectedProject}
-          onRecordProgress={setProgressOpportunity}
-          onCreateProject={onCreateProjectFromOpportunity}
-          onCreateRelation={() => setRelationOpen(true)}
-          canManageRelations={canEditTasks}
-        />
-      ) : null}
-      {activePage === "work" ? (
-        <WorkPage
-          dashboard={dashboard}
-          canGenerateSummary={canGenerateTeamSummary}
-          onSummary={setSummary}
-          onError={setError}
-          onReload={() => load(selectedWeek)}
-        />
-      ) : null}
-      {activePage === "overview" ? (
-        <OverviewPage dashboard={dashboard} />
-      ) : null}
+      <div
+        key={activePage}
+        className={`war-page-slider slide-${slideDirection}`}
+      >
+        {activePage === "opp" ? (
+          <OpportunityPage
+            dashboard={dashboard}
+            onSelectOpportunity={setSelectedOpportunity}
+            onSelectProject={setSelectedProject}
+            onRecordProgress={setProgressOpportunity}
+            onCreateProject={onCreateProjectFromOpportunity}
+            onCreateRelation={() => setRelationOpen(true)}
+            canManageRelations={canEditTasks}
+          />
+        ) : null}
+        {activePage === "work" ? (
+          <WorkPage
+            dashboard={dashboard}
+            canGenerateSummary={canGenerateTeamSummary}
+            onSummary={setSummary}
+            onError={setError}
+            onReload={() => load(selectedWeek)}
+          />
+        ) : null}
+        {activePage === "overview" ? (
+          <OverviewPage dashboard={dashboard} />
+        ) : null}
+      </div>
       <span className="war-page-number">
         {page.index} · {page.label}
       </span>

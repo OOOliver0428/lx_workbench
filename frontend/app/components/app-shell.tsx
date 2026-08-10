@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { api, ApiClientError } from "../api";
 import type {
@@ -113,6 +113,11 @@ export function AppShell({
 }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const navRef = useRef<HTMLElement | null>(null);
+  const [navGlider, setNavGlider] = useState<{
+    top: number;
+    height: number;
+  } | null>(null);
   const permissions = context.permissions ?? [];
   const canUseAi = permissions.includes("ai.use");
   const canManageWeeklyReports = permissions.includes(
@@ -121,6 +126,26 @@ export function AppShell({
   const visibleNavigation = navigation.filter((item) =>
     canAccessWorkspaceView(context, item.id),
   );
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const measure = () => {
+      const activeButton = nav.querySelector<HTMLElement>("button.active");
+      if (!activeButton) {
+        setNavGlider(null);
+        return;
+      }
+      setNavGlider({
+        top: activeButton.offsetTop,
+        height: activeButton.offsetHeight,
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [activeView, sidebarCollapsed, visibleNavigation.length]);
 
   function confirmLogout() {
     if (window.confirm("确认退出当前账号吗？")) {
@@ -160,8 +185,18 @@ export function AppShell({
             </span>
           </button>
         </div>
-        <nav className="primary-nav" aria-label="主导航">
+        <nav className="primary-nav" aria-label="主导航" ref={navRef}>
           <p className="nav-caption">工作空间</p>
+          {navGlider ? (
+            <span
+              className="nav-glider"
+              aria-hidden="true"
+              style={{
+                height: navGlider.height,
+                transform: `translateY(${navGlider.top}px)`,
+              }}
+            />
+          ) : null}
           {visibleNavigation.map((item) => (
             <button
               type="button"
