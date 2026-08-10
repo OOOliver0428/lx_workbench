@@ -15,6 +15,7 @@ import type {
   ReactNode,
 } from "react";
 import { api, ApiClientError } from "../api";
+import { pinyinMatchAny } from "../pinyin";
 import type {
   AttentionStatus,
   BusinessStage,
@@ -403,6 +404,7 @@ export function DashboardView({
       {summary ? (
         <SummaryModal
           summary={summary}
+          members={dashboard.members}
           onClose={() => setSummary(null)}
         />
       ) : null}
@@ -456,14 +458,14 @@ function OpportunityPage({
         }
         if (
           search &&
-          ![
-            project.name,
-            project.type_label,
-            ...project.people.map((person) => person.display_name),
-          ]
-            .join(" ")
-            .toLocaleLowerCase()
-            .includes(search.toLocaleLowerCase())
+          !pinyinMatchAny(
+            [
+              project.name,
+              project.type_label,
+              ...project.people.map((person) => person.display_name),
+            ],
+            search,
+          )
         ) {
           return false;
         }
@@ -491,16 +493,16 @@ function OpportunityPage({
         }
         if (
           search &&
-          ![
-            opportunity.name,
-            opportunity.code,
-            opportunity.customer_name ?? "",
-            opportunity.owner_display_name,
-            ...opportunity.people.map((person) => person.display_name),
-          ]
-            .join(" ")
-            .toLocaleLowerCase()
-            .includes(search.toLocaleLowerCase())
+          !pinyinMatchAny(
+            [
+              opportunity.name,
+              opportunity.code,
+              opportunity.customer_name ?? "",
+              opportunity.owner_display_name,
+              ...opportunity.people.map((person) => person.display_name),
+            ],
+            search,
+          )
         ) {
           return false;
         }
@@ -2569,11 +2571,16 @@ function RelationModal({
 
 function SummaryModal({
   summary,
+  members,
   onClose,
 }: {
   summary: TeamWeeklySummary;
+  members: Dashboard["members"];
   onClose: () => void;
 }) {
+  const memberNames = new Map(
+    members.map((member) => [member.id, member.display_name]),
+  );
   return (
     <Modal
       title="团队周报 · AI 汇总"
@@ -2585,7 +2592,21 @@ function SummaryModal({
         <div>
           <span>{summary.generation_model}</span>
           {summary.forced ? <b>按已提交内容直接生成</b> : <b>全员汇总</b>}
+          {summary.included_leader_count > 0 ? (
+            <b>覆盖 {summary.included_leader_count} 位团队负责人</b>
+          ) : null}
         </div>
+        {summary.source_reports?.length ? (
+          <p className="war-summary-sources">
+            汇总来源：
+            {summary.source_reports
+              .map(
+                (report) =>
+                  `${memberNames.get(report.author_id) ?? "团队成员"} · V${report.submission_version}`,
+              )
+              .join("、")}
+          </p>
+        ) : null}
         <pre>{summary.content}</pre>
         <footer>
           <button className="secondary-button" onClick={onClose}>

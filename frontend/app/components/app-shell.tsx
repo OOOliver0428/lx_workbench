@@ -24,6 +24,7 @@ import {
 export type WorkspaceView =
   | "dashboard"
   | "projects"
+  | "department-works"
   | "tasks"
   | "records"
   | "reports"
@@ -38,19 +39,25 @@ const navigation: Array<{
 }> = [
   { id: "dashboard", label: "作战台", index: "01", description: "进展、产出与节奏" },
   { id: "projects", label: "项目", index: "02", description: "主数据与协作" },
-  { id: "tasks", label: "任务", index: "03", description: "推进与交付" },
-  { id: "records", label: "工作记录", index: "04", description: "个人工作沉淀" },
-  { id: "reports", label: "周报", index: "05", description: "生成、提交与审阅" },
+  {
+    id: "department-works",
+    label: "部门工作",
+    index: "03",
+    description: "部门事项与协作",
+  },
+  { id: "tasks", label: "任务", index: "04", description: "推进与交付" },
+  { id: "records", label: "工作记录", index: "05", description: "个人工作沉淀" },
+  { id: "reports", label: "周报", index: "06", description: "生成、提交与审阅" },
   {
     id: "profile",
     label: "个人设置",
-    index: "06",
+    index: "07",
     description: "头像与密码",
   },
   {
     id: "admin",
     label: "系统设置",
-    index: "07",
+    index: "08",
     description: "用户、标签与模型",
   },
 ];
@@ -78,6 +85,7 @@ export function canAccessWorkspaceView(
   if (view === "profile") return true;
   if (view === "dashboard") return dashboardPermissions.some(has);
   if (view === "projects") return has("projects.view");
+  if (view === "department-works") return has("department_works.view");
   if (view === "tasks") return has("tasks.view");
   if (view === "records") return has("work_records.view");
   if (view === "reports") return has("weekly_reports.view");

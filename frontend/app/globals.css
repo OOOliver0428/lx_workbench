@@ -471,8 +471,10 @@ a {
 
 .field-hint {
   color: var(--muted);
+  display: block;
   font-size: 9px;
   line-height: 1.5;
+  margin-top: 6px;
 }
 
 .login-submit {
@@ -5966,6 +5968,13 @@ a {
   white-space: pre-wrap;
 }
 
+.war-summary-sources {
+  color: #71869a;
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+
 @media (max-width: 1280px) {
   .war-room-topbar {
     grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
@@ -6110,4 +6119,300 @@ a {
   .boot-mark i {
     animation: none;
   }
+}
+
+/* Department works view */
+.department-work-table {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns:
+    minmax(240px, 1.6fr) minmax(110px, 0.7fr) minmax(100px, 0.6fr)
+    105px 90px minmax(180px, 0.9fr);
+}
+
+.department-work-row {
+  background: transparent;
+  border-bottom: 1px solid #e6eff6;
+  min-height: 72px;
+  padding: 14px 20px;
+  transition: background 0.16s ease;
+  width: 100%;
+}
+
+.department-work-row:last-child {
+  border-bottom: 0;
+}
+
+.department-work-row:hover {
+  background: #f9fcff;
+}
+
+.department-work-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.department-work-identity small {
+  color: #647c93;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.department-work-identity strong {
+  font-size: 13px;
+}
+
+.department-work-identity em {
+  color: #8ba3ba;
+  font-size: 11px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.department-work-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.department-work-actions .text-button.danger {
+  color: #c04545;
+}
+
+.department-work-actions .text-button.danger:hover {
+  color: #a83232;
+}
+
+.visibility-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.visibility-options > span {
+  display: block;
+}
+
+.visibility-options .segmented-filter {
+  align-self: start;
+  margin-top: 6px;
+}
+
+@media (max-width: 1180px) {
+  .department-work-table {
+    grid-template-columns:
+      minmax(210px, 1.5fr) minmax(100px, 0.7fr) 100px 90px
+      minmax(160px, 0.8fr);
+  }
+
+  .department-work-table > :nth-child(3) {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .department-work-table {
+    grid-template-columns: minmax(180px, 1fr) 100px 90px;
+  }
+
+  .department-work-table > :nth-child(2),
+  .department-work-table > :nth-child(5),
+  .department-work-table > :nth-child(6) {
+    display: none;
+  }
+}
+
+/* Tasks workflow V3 */
+.task-card-badges {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.task-level-tag {
+  background: var(--accent-soft);
+  border: 1px solid #c9d8ec;
+  border-radius: 6px;
+  color: var(--accent-strong);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+}
+
+.source-tag {
+  border-radius: 6px;
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-right: 6px;
+  padding: 1px 6px;
+}
+
+.source-tag.source-project {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.source-tag.source-work {
+  background: var(--amber-pale);
+  color: var(--amber);
+}
+
+.task-progress {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.task-progress-track {
+  background: var(--blue-pale);
+  border-radius: 6px;
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+}
+
+.task-progress-fill {
+  background: linear-gradient(90deg, #3b93ff, var(--accent));
+  border-radius: 6px;
+  height: 100%;
+  transition: width 0.25s ease;
+}
+
+.task-progress-value {
+  color: var(--accent-strong);
+  font-size: 9px;
+  font-weight: 800;
+  min-width: 30px;
+  text-align: right;
+}
+
+.progress-range {
+  accent-color: var(--accent);
+  width: 100%;
+}
+
+.progress-history {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.progress-history li {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.progress-history .history-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.progress-history .history-head strong {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.progress-history .history-head span {
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.progress-history .history-line {
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.6;
+  margin-top: 6px;
+}
+
+/* Records quick-create */
+.view-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.record-source-tag {
+  background: var(--blue-pale);
+  border: 1px solid #d0dfeb;
+  border-radius: 999px;
+  color: #3e6688;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.4;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.source-options {
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 17px;
+  padding: 0;
+}
+
+.source-options legend {
+  color: var(--ink-soft);
+  float: left;
+  font-size: 11px;
+  font-weight: 750;
+  margin-bottom: 9px;
+  padding: 0;
+  width: 100%;
+}
+
+.source-options label {
+  align-items: center;
+  background: #f8fbfe;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  padding: 7px 12px;
+  transition:
+    background 0.18s ease,
+    border 0.18s ease;
+}
+
+.source-options label:has(input:checked) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.source-options input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.source-options label span {
+  font-size: 10px;
+  font-weight: 750;
+}
+
+/* Admin departments tab */
+.tag-admin-list.department-admin-list article {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
 }

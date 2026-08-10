@@ -3,22 +3,25 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
+import { pinyinMatchAny } from "../pinyin";
 import type {
   AuditEvent,
   AuthContext,
+  Department,
   PermissionDefinition,
   PermissionKey,
   ProjectTag,
   User,
+  UserCandidate,
   UserPermissions,
   UserRole,
 } from "../types";
 import { AIConfigPanel } from "./ai-config-panel";
 import { AvatarImage } from "./avatar";
-import { Dice, Plus } from "./icons";
+import { Dice, Plus, Search } from "./icons";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
-type AdminTab = "users" | "tags" | "ai" | "audit";
+type AdminTab = "users" | "departments" | "tags" | "ai" | "audit";
 
 export function AdminView({ context }: { context: AuthContext }) {
   const permissions = context.permissions ?? [];
@@ -29,23 +32,38 @@ export function AdminView({ context }: { context: AuthContext }) {
   const canManageTags = permissions.includes("settings.tags.manage");
   const canManageAi = permissions.includes("settings.ai.manage");
   const canViewAudit = permissions.includes("settings.audit.view");
+  const canViewDepartments = permissions.includes("departments.view");
+  const canManageDepartments = permissions.includes("departments.manage");
   const showUsers = canManagePermissions || canManageUsers;
   const [users, setUsers] = useState<User[]>([]);
   const [tags, setTags] = useState<ProjectTag[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentCandidates, setDepartmentCandidates] = useState<
+    UserCandidate[]
+  >([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departmentSearch, setDepartmentSearch] = useState("");
+  const [showInactiveDepartments, setShowInactiveDepartments] = useState(false);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [tab, setTab] = useState<AdminTab>(
     showUsers
       ? "users"
-      : canManageTags
-        ? "tags"
-        : canManageAi
-          ? "ai"
-          : "audit",
+      : canViewDepartments
+        ? "departments"
+        : canManageTags
+          ? "tags"
+          : canManageAi
+            ? "ai"
+            : "audit",
   );
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [createTagOpen, setCreateTagOpen] = useState(false);
+  const [createDepartmentOpen, setCreateDepartmentOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingTag, setEditingTag] = useState<ProjectTag | null>(null);
+  const [editingDepartment, setEditingDepartment] = useState<Department | null>(
+    null,
+  );
   const [permissionUser, setPermissionUser] = useState<User | null>(null);
   const [error, setError] = useState("");
 
@@ -66,10 +84,70 @@ export function AdminView({ context }: { context: AuthContext }) {
     }
   }, [canManageTags, canViewAudit, showUsers]);
 
+  const loadDepartments = useCallback(async () => {
+    if (!canViewDepartments) return;
+    setDepartmentsLoading(true);
+    try {
+      const [departmentRows, candidateRows] = await Promise.all([
+        api.departments.list(showInactiveDepartments),
+        api.users.candidates(),
+      ]);
+      setDepartments(departmentRows);
+      setDepartmentCandidates(candidateRows);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "部门数据加载失败",
+      );
+    } finally {
+      setDepartmentsLoading(false);
+    }
+  }, [canViewDepartments, showInactiveDepartments]);
+
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
     return () => window.clearTimeout(timeout);
   }, [load]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(loadDepartments, 0);
+    return () => window.clearTimeout(timeout);
+  }, [loadDepartments]);
+
+  const userNameById = new Map<string, string>();
+  for (const candidate of departmentCandidates) {
+    userNameById.set(candidate.id, candidate.display_name);
+  }
+  for (const user of users) {
+    userNameById.set(user.id, user.display_name);
+  }
+  const visibleDepartments = departments.filter((department) =>
+    pinyinMatchAny([department.name], departmentSearch),
+  );
+
+  async function removeDepartment(department: Department) {
+    if (
+      !window.confirm(
+        `确认删除部门“${department.name}”？删除为软删除，可在审计记录中追溯。`,
+      )
+    ) {
+      return;
+    }
+    const reason = window.prompt("请输入删除原因（可选）：");
+    if (reason === null) return;
+    setError("");
+    try {
+      await api.departments.remove(
+        department.id,
+        department.revision,
+        reason.trim() || null,
+      );
+      await loadDepartments();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "部门删除失败",
+      );
+    }
+  }
 
   return (
     <div className="view-shell">
@@ -80,14 +158,24 @@ export function AdminView({ context }: { context: AuthContext }) {
           <p>维护本地用户、权限、项目标签、大模型接入与审计记录。</p>
         </div>
         {(tab === "users" && canManageUsers) ||
+        (tab === "departments" && canManageDepartments) ||
         (tab === "tags" && canManageTags) ? (
           <button
             className="primary-button"
             onClick={() =>
-              tab === "users" ? setCreateUserOpen(true) : setCreateTagOpen(true)
+              tab === "users"
+                ? setCreateUserOpen(true)
+                : tab === "departments"
+                  ? setCreateDepartmentOpen(true)
+                  : setCreateTagOpen(true)
             }
           >
-            <Plus size={14} /> {tab === "users" ? "创建用户" : "创建标签"}
+            <Plus size={14} />{" "}
+            {tab === "users"
+              ? "创建用户"
+              : tab === "departments"
+                ? "创建部门"
+                : "创建标签"}
           </button>
         ) : null}
       </header>
@@ -99,6 +187,14 @@ export function AdminView({ context }: { context: AuthContext }) {
             onClick={() => setTab("users")}
           >
             用户与权限 <span>{users.length}</span>
+          </button>
+        ) : null}
+        {canViewDepartments ? (
+          <button
+            className={tab === "departments" ? "active" : ""}
+            onClick={() => setTab("departments")}
+          >
+            部门 <span>{departments.length}</span>
           </button>
         ) : null}
         {canManageTags ? (
@@ -155,6 +251,22 @@ export function AdminView({ context }: { context: AuthContext }) {
                         ?.display_name ?? "未指定"}
                     </strong>
                   </span>
+                  {user.primary_department_id &&
+                  departments.some(
+                    (department) => department.id === user.primary_department_id,
+                  ) ? (
+                    <span>
+                      主部门
+                      <strong>
+                        {
+                          departments.find(
+                            (department) =>
+                              department.id === user.primary_department_id,
+                          )?.name
+                        }
+                      </strong>
+                    </span>
+                  ) : null}
                   <div className="user-card-actions">
                     {canManagePermissions &&
                     (context.user.role === "super_admin" ||
@@ -186,6 +298,93 @@ export function AdminView({ context }: { context: AuthContext }) {
             <EmptyState title="暂无用户" description="创建团队的第一个业务账号。" />
           )}
         </section>
+      ) : tab === "departments" ? (
+        <>
+          <section className="toolbar">
+            <label className="search-box">
+              <span aria-hidden="true">
+                <Search size={16} />
+              </span>
+              <input
+                value={departmentSearch}
+                onChange={(event) => setDepartmentSearch(event.target.value)}
+                placeholder="搜索部门名称"
+              />
+            </label>
+            <label className="toggle-filter">
+              <input
+                type="checkbox"
+                checked={showInactiveDepartments}
+                onChange={(event) =>
+                  setShowInactiveDepartments(event.target.checked)
+                }
+              />
+              <span />
+              显示已停用
+            </label>
+            <div className="toolbar-meta">
+              <strong>{visibleDepartments.length}</strong>
+              <span>个部门</span>
+            </div>
+          </section>
+          {departmentsLoading ? (
+            <div className="list-loading">
+              <i />
+              <span>正在载入部门…</span>
+            </div>
+          ) : visibleDepartments.length ? (
+            <section className="tag-admin-list department-admin-list">
+              {visibleDepartments.map((department, index) => (
+                <article key={department.id}>
+                  <span className={`tag-number tag-number-${index % 4}`}>
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div>
+                    <h3>{department.name}</h3>
+                    <p>
+                      负责人：
+                      {(department.leader_id &&
+                        userNameById.get(department.leader_id)) ||
+                        "未指定"}
+                    </p>
+                  </div>
+                  <span className="tag">
+                    {department.is_active ? "启用" : "已停用"}
+                  </span>
+                  <div className="user-card-actions">
+                    {canManageDepartments ? (
+                      <>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setEditingDepartment(department)}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => removeDepartment(department)}
+                        >
+                          删除
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </section>
+          ) : (
+            <EmptyState
+              title="暂无部门"
+              description={
+                departmentSearch
+                  ? "没有匹配搜索条件的部门。"
+                  : "创建团队的第一个部门。"
+              }
+            />
+          )}
+        </>
       ) : tab === "tags" ? (
         <section className="tag-admin-list">
           {tags.map((tag, index) => (
@@ -248,9 +447,20 @@ export function AdminView({ context }: { context: AuthContext }) {
       {createUserOpen && canManageUsers ? (
         <UserCreateModal
           canCreateSystemAdmin={context.user.role === "super_admin"}
+          departments={canViewDepartments ? departments : null}
           onClose={() => setCreateUserOpen(false)}
           onCreated={async () => {
             await load();
+          }}
+        />
+      ) : null}
+      {createDepartmentOpen && canManageDepartments ? (
+        <DepartmentCreateModal
+          candidates={departmentCandidates}
+          onClose={() => setCreateDepartmentOpen(false)}
+          onCreated={async () => {
+            setCreateDepartmentOpen(false);
+            await loadDepartments();
           }}
         />
       ) : null}
@@ -273,10 +483,22 @@ export function AdminView({ context }: { context: AuthContext }) {
           }}
         />
       ) : null}
+      {editingDepartment && canManageDepartments ? (
+        <DepartmentEditModal
+          department={editingDepartment}
+          candidates={departmentCandidates}
+          onClose={() => setEditingDepartment(null)}
+          onUpdated={async () => {
+            setEditingDepartment(null);
+            await loadDepartments();
+          }}
+        />
+      ) : null}
       {editingUser && canManageUsers ? (
         <UserEditModal
           user={editingUser}
           users={users}
+          departments={canViewDepartments ? departments : null}
           canManageSystemAdmins={context.user.role === "super_admin"}
           onClose={() => setEditingUser(null)}
           onUpdated={async () => {
@@ -306,10 +528,12 @@ export function AdminView({ context }: { context: AuthContext }) {
 
 function UserCreateModal({
   canCreateSystemAdmin,
+  departments,
   onClose,
   onCreated,
 }: {
   canCreateSystemAdmin: boolean;
+  departments: Department[] | null;
   onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
@@ -330,6 +554,12 @@ function UserCreateModal({
         display_name: String(form.get("display_name")),
         password: String(form.get("password")),
         role: String(form.get("role")),
+        ...(departments
+          ? {
+              primary_department_id:
+                String(form.get("primary_department_id") || "") || null,
+            }
+          : {}),
       });
       setCreatedUser(created);
       await onCreated();
@@ -445,6 +675,24 @@ function UserCreateModal({
             ) : null}
           </select>
         </label>
+        {departments ? (
+          <label className="field">
+            <span>主部门</span>
+            <select name="primary_department_id" defaultValue="">
+              <option value="">未分配</option>
+              {departments
+                .filter((department) => department.is_active)
+                .map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+            </select>
+            <small className="field-hint">
+              主部门决定用户在部门工作和作战台中的归属，可稍后再分配。
+            </small>
+          </label>
+        ) : null}
         <InlineNotice>
           登录名由系统自动生成。直属 Leader 可在账号创建后通过“编辑资料”配置；超级管理员账号仍只能通过服务器命令创建。
         </InlineNotice>
@@ -465,12 +713,14 @@ function UserCreateModal({
 function UserEditModal({
   user,
   users,
+  departments,
   canManageSystemAdmins,
   onClose,
   onUpdated,
 }: {
   user: User;
   users: User[];
+  departments: Department[] | null;
   canManageSystemAdmins: boolean;
   onClose: () => void;
   onUpdated: () => void;
@@ -483,6 +733,15 @@ function UserEditModal({
       ["team_leader", "system_admin"].includes(candidate.role) &&
       candidate.is_active,
   );
+  const activeDepartments = (departments ?? []).filter(
+    (department) => department.is_active,
+  );
+  const currentDepartmentMissing =
+    departments !== null &&
+    user.primary_department_id !== null &&
+    !activeDepartments.some(
+      (department) => department.id === user.primary_department_id,
+    );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -495,6 +754,12 @@ function UserEditModal({
         display_name: String(form.get("display_name")),
         role: String(form.get("role")),
         leader_id: String(form.get("leader_id") || "") || null,
+        ...(departments
+          ? {
+              primary_department_id:
+                String(form.get("primary_department_id") || "") || null,
+            }
+          : {}),
       });
       onUpdated();
     } catch (caught) {
@@ -555,6 +820,34 @@ function UserEditModal({
               : "当前没有可用负责人，请先把一个已有用户的角色改为“团队负责人”或“系统管理员”并保存。"}
           </small>
         </label>
+        {departments ? (
+          <label className="field">
+            <span>主部门</span>
+            <select
+              name="primary_department_id"
+              defaultValue={user.primary_department_id ?? ""}
+            >
+              <option value="">未分配</option>
+              {activeDepartments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
+                </option>
+              ))}
+              {currentDepartmentMissing && user.primary_department_id ? (
+                <option value={user.primary_department_id}>
+                  {departments.find(
+                    (department) =>
+                      department.id === user.primary_department_id,
+                  )?.name ?? "原部门"}
+                  （已停用）
+                </option>
+              ) : null}
+            </select>
+            <small className="field-hint">
+              主部门决定用户在部门工作和作战台中的归属；变更主部门有安全校验，失败时会提示原因。
+            </small>
+          </label>
+        ) : null}
         <InlineNotice>
           修改角色和直属 Leader 会进入审计日志。已有直属成员的团队负责人不能直接降级。
         </InlineNotice>
@@ -583,9 +876,19 @@ const PERMISSION_DEPENDENCIES: Partial<
   ],
   "projects.edit": ["projects.view"],
   "projects.create": ["projects.edit"],
+  "departments.manage": ["departments.view"],
+  "department_works.edit": [
+    "department_works.view",
+    "departments.view",
+  ],
+  "department_works.create": ["department_works.edit"],
   "tasks.edit": ["tasks.view"],
   "tasks.create": ["tasks.edit"],
-  "tasks.view": ["projects.view"],
+  "tasks.view": [
+    "projects.view",
+    "department_works.view",
+    "departments.view",
+  ],
   "work_records.manage": ["work_records.view"],
   "weekly_reports.manage": ["weekly_reports.view"],
 };
@@ -952,6 +1255,181 @@ function TagEditModal({
         </label>
         <InlineNotice>
           停用后不会出现在新项目的标签选择中，已有项目关联仍会保留。
+        </InlineNotice>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在保存…" : "保存修改"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function DepartmentCreateModal({
+  candidates,
+  onClose,
+  onCreated,
+}: {
+  candidates: UserCandidate[];
+  onClose: () => void;
+  onCreated: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const leaderCandidates = candidates.filter(
+    (candidate) => !candidate.primary_department_id,
+  );
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.departments.create({
+        name: String(form.get("name")).trim(),
+        leader_id: String(form.get("leader_id") || "") || null,
+      });
+      await onCreated();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "部门创建失败",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title="创建部门" eyebrow="NEW DEPARTMENT" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <label className="field">
+          <span>部门名称 *</span>
+          <input name="name" required autoFocus placeholder="例如 交付一部" />
+          <small className="field-hint">部门名称全系统唯一。</small>
+        </label>
+        <label className="field">
+          <span>负责人</span>
+          <select name="leader_id" defaultValue="">
+            <option value="">暂不指定</option>
+            {leaderCandidates.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.display_name}
+              </option>
+            ))}
+          </select>
+          <small className="field-hint">
+            {leaderCandidates.length
+              ? "负责人必须是尚未归属任何部门的用户。"
+              : "当前没有可指定的用户，可先创建部门再在编辑中指定负责人。"}
+          </small>
+        </label>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在创建…" : "创建部门"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function DepartmentEditModal({
+  department,
+  candidates,
+  onClose,
+  onUpdated,
+}: {
+  department: Department;
+  candidates: UserCandidate[];
+  onClose: () => void;
+  onUpdated: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const leaderCandidates = candidates.filter(
+    (candidate) =>
+      candidate.primary_department_id === department.id ||
+      candidate.id === department.leader_id,
+  );
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const isActive = form.get("is_active") === "on";
+    if (
+      department.is_active &&
+      !isActive &&
+      !window.confirm(
+        `确认停用部门“${department.name}”？停用前需确保部门内没有成员和未归档的部门工作。`,
+      )
+    ) {
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.departments.update(department.id, {
+        revision: department.revision,
+        name: String(form.get("name")).trim(),
+        leader_id: String(form.get("leader_id") || "") || null,
+        is_active: isActive,
+      });
+      await onUpdated();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "部门保存失败",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`编辑部门 · ${department.name}`}
+      eyebrow="EDIT DEPARTMENT"
+      onClose={onClose}
+    >
+      <form className="modal-form" onSubmit={submit}>
+        <label className="field">
+          <span>部门名称 *</span>
+          <input name="name" defaultValue={department.name} required autoFocus />
+        </label>
+        <label className="field">
+          <span>负责人</span>
+          <select name="leader_id" defaultValue={department.leader_id ?? ""}>
+            <option value="">暂不指定</option>
+            {leaderCandidates.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.display_name}
+              </option>
+            ))}
+          </select>
+          <small className="field-hint">
+            负责人必须是主部门为本部门的用户。
+          </small>
+        </label>
+        <label className="toggle-filter">
+          <input
+            name="is_active"
+            type="checkbox"
+            defaultChecked={department.is_active}
+          />
+          <span />
+          启用此部门
+        </label>
+        <InlineNotice>
+          停用后不会出现在新的部门工作选择中；有成员或未归档部门工作时无法停用。
         </InlineNotice>
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
         <footer className="modal-actions">

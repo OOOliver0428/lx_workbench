@@ -14,6 +14,11 @@ export type PermissionKey =
   | "projects.view"
   | "projects.edit"
   | "projects.create"
+  | "departments.view"
+  | "departments.manage"
+  | "department_works.view"
+  | "department_works.edit"
+  | "department_works.create"
   | "tasks.view"
   | "tasks.edit"
   | "tasks.create"
@@ -33,15 +38,48 @@ export interface User {
   display_name: string;
   role: UserRole;
   leader_id: string | null;
+  primary_department_id: string | null;
   avatar_key: string | null;
   is_active: boolean;
   must_change_password: boolean;
   revision: number;
 }
 
+export interface Department {
+  id: string;
+  name: string;
+  leader_id: string | null;
+  is_active: boolean;
+  created_by: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DepartmentWorkStatus = "in_progress" | "completed" | "archived";
+
+export type DepartmentWorkVisibility = "department_only" | "public";
+
+export interface DepartmentWork {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  department_id: string;
+  department_name: string;
+  owner_id: string;
+  owner_display_name: string;
+  status: DepartmentWorkStatus;
+  visibility: DepartmentWorkVisibility;
+  created_by: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export type UserCandidate = Pick<
   User,
-  "id" | "display_name" | "avatar_key"
+  "id" | "display_name" | "avatar_key" | "primary_department_id"
 >;
 
 export interface AuthContext {
@@ -204,7 +242,10 @@ export type TaskStatus =
 
 export interface Task {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  department_work_id: string | null;
+  parent_id: string | null;
+  level: number;
   title: string;
   description: string | null;
   owner_id: string;
@@ -217,15 +258,52 @@ export interface Task {
   cancel_reason: string | null;
   started_at: string | null;
   completed_at: string | null;
+  progress_enabled: boolean;
+  progress_percent: number | null;
   revision: number;
   created_at: string;
   updated_at: string;
   collaborator_ids: string[];
 }
 
+export interface TaskProgressHistory {
+  id: string;
+  task_id: string;
+  from_enabled: boolean;
+  to_enabled: boolean;
+  from_percent: number | null;
+  to_percent: number | null;
+  from_status: string;
+  to_status: string;
+  reason: string | null;
+  changed_by: string;
+  changed_at: string;
+}
+
+export type TaskTimeScope = "today" | "week" | "all";
+
+export interface QuickTaskCreate {
+  title: string;
+  description?: string | null;
+  owner_id?: string | null;
+  collaborator_ids?: string[];
+  priority?: "p0" | "p1" | "p2";
+  due_date?: string | null;
+  parent_id?: string | null;
+}
+
+export interface WorkRecordQuickCreateResult {
+  work_record: WorkRecord;
+  created_project_id: string | null;
+  created_department_work_id: string | null;
+  created_task_id: string | null;
+  replayed: boolean;
+}
+
 export interface Deliverable {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  department_work_id: string | null;
   task_id: string | null;
   work_record_id: string | null;
   name: string;
@@ -244,6 +322,11 @@ export interface WorkRecord {
   minutes: number;
   project_id: string | null;
   project_name: string | null;
+  department_work_id: string | null;
+  department_work_name: string | null;
+  source_type: "project" | "department_work" | null;
+  source_id: string | null;
+  source_name: string | null;
   task_id: string | null;
   task_title: string | null;
   risk: string | null;
@@ -544,6 +627,14 @@ export interface TeamWeeklySummary {
   forced: boolean;
   submitted_count: number;
   expected_count: number;
+  included_leader_count: number;
+  source_reports: Array<{
+    report_id: string;
+    author_id: string;
+    submission_version: number;
+    order: number;
+    depth: number;
+  }> | null;
   generation_model: string;
   generation_usage: AIChatResult["usage"] | null;
   created_at: string;

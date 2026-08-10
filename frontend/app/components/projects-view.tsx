@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { api, apiErrorMessage, ApiClientError } from "../api";
 import type {
@@ -16,6 +16,7 @@ import type {
   UserCandidate,
 } from "../types";
 import { canManageProjectObject } from "../object-permissions";
+import { pinyinMatchAny } from "../pinyin";
 import { AvatarImage } from "./avatar";
 import { ChevronRight, Close, Plus, Search } from "./icons";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
@@ -45,6 +46,7 @@ export function ProjectsView({
 }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
+  const [serverMatches, setServerMatches] = useState<ProjectSummary[]>([]);
   const [tags, setTags] = useState<ProjectTag[]>([]);
   const [users, setUsers] = useState<UserCandidate[]>([]);
   const [search, setSearch] = useState("");
@@ -58,22 +60,37 @@ export function ProjectsView({
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    const keyword = search.trim();
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("q", search.trim());
       if (status) params.set("status", status);
-      const projectRowsRequest = api.projects.list(params);
+      const projectRowsRequest = api.projects.list(
+        params.size ? params : undefined,
+      );
       const allProjectRowsRequest = params.size
         ? api.projects.list()
         : projectRowsRequest;
-      const [projectRows, allProjectRows, tagRows, userRows] = await Promise.all([
-        projectRowsRequest,
-        allProjectRowsRequest,
-        api.tags.list(),
-        api.users.candidates(),
-      ]);
+      // 服务端 q 搜索覆盖别名匹配，与客户端拼音过滤取并集
+      const serverSearchRequest = keyword
+        ? api.projects.list(
+            (() => {
+              const searchParams = new URLSearchParams(params);
+              searchParams.set("q", keyword);
+              return searchParams;
+            })(),
+          )
+        : Promise.resolve([]);
+      const [projectRows, allProjectRows, serverMatchRows, tagRows, userRows] =
+        await Promise.all([
+          projectRowsRequest,
+          allProjectRowsRequest,
+          serverSearchRequest,
+          api.tags.list(),
+          api.users.candidates(),
+        ]);
       setProjects(projectRows);
       setAllProjects(allProjectRows);
+      setServerMatches(serverMatchRows);
       setTags(tagRows);
       setUsers(userRows);
     } catch (caught) {
@@ -84,6 +101,24 @@ export function ProjectsView({
       setLoading(false);
     }
   }, [search, status]);
+
+  const visibleProjects = useMemo(() => {
+    const keyword = search.trim();
+    if (!keyword) return projects;
+    const merged = new Map<string, ProjectSummary>();
+    for (const project of serverMatches) merged.set(project.id, project);
+    for (const project of projects) {
+      if (
+        pinyinMatchAny(
+          [project.name, project.code, project.owner_display_name],
+          keyword,
+        )
+      ) {
+        merged.set(project.id, project);
+      }
+    }
+    return [...merged.values()];
+  }, [projects, search, serverMatches]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 180);
@@ -143,7 +178,7 @@ export function ProjectsView({
             </select>
           </label>
           <div className="toolbar-meta">
-            <strong>{projects.length}</strong>
+            <strong>{visibleProjects.length}</strong>
             <span>个项目</span>
           </div>
         </section>
@@ -164,9 +199,9 @@ export function ProjectsView({
               <i />
               <span>正在载入项目…</span>
             </div>
-          ) : projects.length ? (
+          ) : visibleProjects.length ? (
             <div className="table-body">
-              {projects.map((project) => (
+              {visibleProjects.map((project) => (
                 <button
                   className="project-table project-row"
                   key={project.id}

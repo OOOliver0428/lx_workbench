@@ -18,6 +18,11 @@ export function canManageProjectObject(
   );
 }
 
+/**
+ * 任务对象级管理权限：具备 manage 权限，且为特权角色、任务负责人或来源负责人。
+ * 第 4 参 projectOwnerId 语义已泛化为「来源负责人」：项目来源传项目 owner_id，
+ * 部门工作来源传部门工作的 owner_id。
+ */
 export function canManageTaskObject(
   hasManagePermission: boolean,
   currentUser: User,

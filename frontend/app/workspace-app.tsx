@@ -16,6 +16,7 @@ import {
 } from "./components/app-shell";
 import { LoginView, PasswordChangeGate } from "./components/auth-view";
 import { DashboardView } from "./components/dashboard-view";
+import { DepartmentWorksView } from "./components/department-works-view";
 import { ProjectsView } from "./components/projects-view";
 import { ProfileSettingsView } from "./components/profile-settings-view";
 import { RecordsView } from "./components/records-view";
@@ -159,6 +160,9 @@ export function WorkspaceApp() {
           creationDraft={projectCreationDraft}
           onCreationDraftHandled={() => setProjectCreationDraft(null)}
         />
+      ) : null}
+      {activeView === "department-works" ? (
+        <DepartmentWorksView permissions={permissions} context={auth} />
       ) : null}
       {activeView === "tasks" ? (
         <TasksView

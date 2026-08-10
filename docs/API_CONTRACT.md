@@ -118,6 +118,47 @@ API 地址或直接读取 CSRF。
   多人记录时，前端必须显示记录人与其头像；发生代编辑时还必须显示最后代编辑人。
 - `GET /api/v1/work-records?current_week_only=true` 只返回当前上海自然周（周一至周日）的记录，
   可与项目和待归集筛选组合使用。
+- 工作记录来源为项目或部门工作二者其一（响应含 `source_type`/`source_id`/`source_name`）；
+  部门工作来源的记录在归档后不可变更，且不能跨部门改派（`public` 仅扩大读取范围）。
+- `POST /api/v1/work-records/quick-create` 一站式创建工作记录：可同时选择或新建项目/部门工作/
+  任务并在同一事务中落库。请求必须携带 `idempotency_key`：同键同负载返回首次结果（HTTP 200
+  且 `replayed=true`），同键不同负载返回 409 `IDEMPOTENCY_KEY_REUSED`。新建项目、部门工作、
+  任务分别要求 `projects.create`、`department_works.create`、`tasks.create`；交付物必须挂在
+  项目或部门工作来源上。
+
+## 部门与部门工作
+
+- `GET /api/v1/departments` 需要 `departments.view`，支持 `include_inactive` 与 `q` 名称模糊搜索。
+- 部门创建、修改、停用和删除需要 `departments.manage`，且仅系统管理员及以上可管理。部门名
+  规范化后全局唯一；创建或更换负责人时，负责人必须尚未归属任何部门或已是该部门成员；仍有
+  成员或未归档部门工作的部门不能停用或删除（409 并附带占用数量）。
+- `users.primary_department_id` 标记用户主部门。变更主部门前必须先把其负责的部门、未归档
+  部门工作和未完成任务改派完毕，否则返回对应的 409 冲突错误。
+- `GET /api/v1/department-works` 需要 `department_works.view`：全员可见 `public` 事项及本人
+  主部门事项，管理员可见全部；支持 `department_id`/`owner_id`/`status`/`visibility`/`q`/
+  `include_archived` 过滤。
+- 创建部门工作需要 `department_works.create`；编辑、流转和删除需要 `department_works.edit`
+  且仅本人主部门成员或超级管理员可执行。状态机为 `in_progress ↔ completed → archived`；
+  仍有未完成任务时归档返回 `DEPARTMENT_WORK_ACTIVE_TASKS`；归档后为只读。
+
+## 任务工作流
+
+- 任务来源为项目或部门工作二者其一（`project_id` 与 `department_work_id` 恰有一个）；
+  `POST /api/v1/tasks` 需要 `tasks.create`。子任务通过 `parent_id` 继承父任务来源，最多三级
+  （level 0–2），终态父任务不能再添加子任务。
+- 状态机：`todo → {in_progress, blocked, cancelled}`，`in_progress → {blocked, done, cancelled}`，
+  `blocked → {in_progress, cancelled}`，`done`/`cancelled` 为终态。阻塞必须填写阻塞原因、完成
+  必须填写完成结果、取消必须填写取消原因；完成父任务时可携带 `complete_descendants=true`
+  级联完成全部子孙任务。
+- `PATCH /api/v1/tasks/{id}/progress` 管理进度跟踪：开启时必须提供 0–100 且为 5 的倍数的
+  `percent`；100 自动置为完成（需完成结果）；已完成任务进度必须保持 100；已取消任务禁止
+  变更进度。每次变更写入进度历史，可通过 `GET /api/v1/tasks/{id}/progress-history` 读取。
+- `DELETE /api/v1/tasks/{id}` 软删除整棵子树，请求体携带 `revision` 与可选 `reason`。
+- `GET /api/v1/tasks` 的 `time_scope`：`today`（今天到期及逾期未完成任务）、`week`（默认，
+  本周到期、无截止日期及逾期未完成任务）、`all`（全部；默认排除终态，除非显式指定 status）。
+- 跨项目任务关联（`POST /api/v1/tasks/relations`）仅限项目来源任务。
+- 所有删除类接口均携带 JSON 请求体（`revision` 乐观锁与可选原因）；所有写接口执行 revision
+  乐观锁，冲突返回 409 `REVISION_CONFLICT`，并写入审计日志。
 
 ## 作战台聚合
 

@@ -3,11 +3,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
+import { createClientMessageId } from "../client-id";
 import { localDateInputValue } from "../date-utils";
-import type { ProjectSummary, Task, WorkRecord } from "../types";
+import type {
+  DepartmentWork,
+  PermissionKey,
+  ProjectSummary,
+  Task,
+  WorkRecord,
+} from "../types";
 import { AvatarImage } from "./avatar";
 import { ArrowUpRight, Plus } from "./icons";
 import { EmptyState, InlineNotice, Modal } from "./ui";
+
+type RecordSourceType = "project" | "department_work" | "none";
+type QuickSourceType = RecordSourceType | "new_project" | "new_department_work";
 
 export function RecordsView({
   canManage,
@@ -20,26 +30,30 @@ export function RecordsView({
 }) {
   const [records, setRecords] = useState<WorkRecord[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [departmentWorks, setDepartmentWorks] = useState<DepartmentWork[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [departmentWorkId, setDepartmentWorkId] = useState("");
   const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [currentWeekOnly, setCurrentWeekOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<WorkRecord | null>(null);
   const [deletingRecordId, setDeletingRecordId] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
+  const [permissions, setPermissions] = useState<PermissionKey[]>([]);
 
   useEffect(() => {
-    if (!canManage) {
-      return;
-    }
     let cancelled = false;
     api.auth
       .me()
       .then((context) => {
-        if (!cancelled) setCurrentUserId(context.user.id);
+        if (cancelled) return;
+        setCurrentUserId(context.user.id);
+        setPermissions(context.permissions);
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -53,7 +67,14 @@ export function RecordsView({
     return () => {
       cancelled = true;
     };
-  }, [canManage]);
+  }, []);
+
+  const canViewDepartmentWorks = permissions.includes("department_works.view");
+  const canCreateProjects = permissions.includes("projects.create");
+  const canCreateDepartmentWorks = permissions.includes(
+    "department_works.create",
+  );
+  const canCreateTasks = permissions.includes("tasks.create");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,15 +82,21 @@ export function RecordsView({
     try {
       const params = new URLSearchParams();
       if (projectId) params.set("project_id", projectId);
+      if (departmentWorkId) params.set("department_work_id", departmentWorkId);
       if (unassignedOnly) params.set("unassigned_only", "true");
       if (currentWeekOnly) params.set("current_week_only", "true");
-      const [recordRows, projectRows, taskRows] = await Promise.all([
-        api.records.list(params),
-        canViewProjects ? api.projects.list() : Promise.resolve([]),
-        canViewTasks ? api.tasks.list() : Promise.resolve([]),
-      ]);
+      const [recordRows, projectRows, departmentWorkRows, taskRows] =
+        await Promise.all([
+          api.records.list(params),
+          canViewProjects ? api.projects.list() : Promise.resolve([]),
+          canViewDepartmentWorks
+            ? api.departmentWorks.list()
+            : Promise.resolve([]),
+          canViewTasks ? api.tasks.list() : Promise.resolve([]),
+        ]);
       setRecords(recordRows);
       setProjects(projectRows);
+      setDepartmentWorks(departmentWorkRows);
       setTasks(taskRows);
     } catch (caught) {
       setError(
@@ -78,7 +105,15 @@ export function RecordsView({
     } finally {
       setLoading(false);
     }
-  }, [canViewProjects, canViewTasks, currentWeekOnly, projectId, unassignedOnly]);
+  }, [
+    canViewDepartmentWorks,
+    canViewProjects,
+    canViewTasks,
+    currentWeekOnly,
+    departmentWorkId,
+    projectId,
+    unassignedOnly,
+  ]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
@@ -88,6 +123,10 @@ export function RecordsView({
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects],
+  );
+  const departmentWorkNames = useMemo(
+    () => new Map(departmentWorks.map((work) => [work.id, work.name])),
+    [departmentWorks],
   );
   const taskNames = useMemo(
     () => new Map(tasks.map((task) => [task.id, task.title])),
@@ -127,12 +166,23 @@ export function RecordsView({
         <div>
           <p className="eyebrow">WORK LOG</p>
           <h1>工作记录</h1>
-          <p>按项目沉淀每天的有效工作，为后续周报归纳提供可追溯依据。</p>
+          <p>按项目或部门工作沉淀每天的有效工作，为后续周报归纳提供可追溯依据。</p>
         </div>
         {canManage ? (
-          <button className="primary-button" onClick={() => setCreateOpen(true)}>
-            <Plus size={14} /> 记录工作
-          </button>
+          <div className="view-header-actions">
+            <button
+              className="secondary-button"
+              onClick={() => setQuickCreateOpen(true)}
+            >
+              快速记录
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus size={14} /> 记录工作
+            </button>
+          </div>
         ) : null}
       </header>
 
@@ -141,7 +191,7 @@ export function RecordsView({
           <span>关联项目</span>
           <select
             value={projectId}
-            disabled={unassignedOnly}
+            disabled={unassignedOnly || Boolean(departmentWorkId)}
             onChange={(event) => setProjectId(event.target.value)}
           >
             <option value="">全部项目</option>
@@ -152,6 +202,23 @@ export function RecordsView({
             ))}
           </select>
         </label>
+        {canViewDepartmentWorks ? (
+          <label className="select-filter select-wide">
+            <span>关联部门工作</span>
+            <select
+              value={departmentWorkId}
+              disabled={unassignedOnly || Boolean(projectId)}
+              onChange={(event) => setDepartmentWorkId(event.target.value)}
+            >
+              <option value="">全部部门工作</option>
+              {departmentWorks.map((work) => (
+                <option key={work.id} value={work.id}>
+                  {work.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="toggle-filter">
           <input
             type="checkbox"
@@ -177,6 +244,7 @@ export function RecordsView({
       </section>
 
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+      {notice ? <InlineNotice tone="success">{notice}</InlineNotice> : null}
       <section className="record-timeline">
         {loading ? (
           <div className="list-loading">
@@ -200,14 +268,22 @@ export function RecordsView({
                     <div className="record-project-line">
                       <div className="record-labels">
                         <span
-                          className={record.project_id ? "linked" : "unassigned"}
+                          className={record.source_id ? "linked" : "unassigned"}
                         >
-                          {record.project_id
-                            ? record.project_name ??
-                              projectNames.get(record.project_id) ??
-                              "未知项目"
+                          {record.source_id
+                            ? record.source_name ??
+                              record.project_name ??
+                              record.department_work_name ??
+                              (record.source_type === "department_work"
+                                ? departmentWorkNames.get(record.source_id)
+                                : projectNames.get(record.source_id)) ??
+                              "未知来源"
                             : "待归集"}
                         </span>
+                        {record.source_type === "department_work" &&
+                        record.source_id ? (
+                          <span className="record-source-tag">部门工作</span>
+                        ) : null}
                         <span className="record-author">
                           <AvatarImage
                             avatarKey={record.author_avatar_key}
@@ -296,7 +372,7 @@ export function RecordsView({
         ) : (
           <EmptyState
             title="还没有工作记录"
-            description="记录今天完成的工作，并尽量关联到正确项目。"
+            description="记录今天完成的工作，并尽量关联到正确的项目或部门工作。"
           />
         )}
       </section>
@@ -304,10 +380,30 @@ export function RecordsView({
       {createOpen && canManage ? (
         <RecordCreateModal
           projects={projects}
+          departmentWorks={departmentWorks}
           tasks={tasks}
+          canViewDepartmentWorks={canViewDepartmentWorks}
           onClose={() => setCreateOpen(false)}
           onCreated={async () => {
             setCreateOpen(false);
+            await load();
+          }}
+        />
+      ) : null}
+      {quickCreateOpen && canManage ? (
+        <QuickCreateModal
+          projects={projects}
+          departmentWorks={departmentWorks}
+          tasks={tasks}
+          canViewProjects={canViewProjects}
+          canViewDepartmentWorks={canViewDepartmentWorks}
+          canCreateProjects={canCreateProjects}
+          canCreateDepartmentWorks={canCreateDepartmentWorks}
+          canCreateTasks={canCreateTasks}
+          onClose={() => setQuickCreateOpen(false)}
+          onCreated={async (message) => {
+            setQuickCreateOpen(false);
+            setNotice(message);
             await load();
           }}
         />
@@ -316,7 +412,9 @@ export function RecordsView({
         <RecordEditModal
           record={editingRecord}
           projects={projects}
+          departmentWorks={departmentWorks}
           tasks={tasks}
+          canViewDepartmentWorks={canViewDepartmentWorks}
           currentUserId={currentUserId}
           onClose={() => setEditingRecord(null)}
           onUpdated={async () => {
@@ -331,22 +429,38 @@ export function RecordsView({
 
 function RecordCreateModal({
   projects,
+  departmentWorks,
   tasks,
+  canViewDepartmentWorks,
   onClose,
   onCreated,
 }: {
   projects: ProjectSummary[];
+  departmentWorks: DepartmentWork[];
   tasks: Task[];
+  canViewDepartmentWorks: boolean;
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const [sourceType, setSourceType] = useState<RecordSourceType>("project");
   const [selectedProject, setSelectedProject] = useState("");
+  const [selectedDepartmentWork, setSelectedDepartmentWork] = useState("");
   const [deliverableEnabled, setDeliverableEnabled] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const visibleTasks = selectedProject
-    ? tasks.filter((task) => task.project_id === selectedProject)
-    : tasks;
+  const visibleTasks = tasks.filter((task) => {
+    if (sourceType === "project") {
+      return selectedProject
+        ? task.project_id === selectedProject
+        : Boolean(task.project_id);
+    }
+    if (sourceType === "department_work") {
+      return selectedDepartmentWork
+        ? task.department_work_id === selectedDepartmentWork
+        : Boolean(task.department_work_id);
+    }
+    return true;
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -355,7 +469,16 @@ function RecordCreateModal({
     const form = new FormData(event.currentTarget);
     const taskId = optional(form.get("task_id"));
     const task = tasks.find((item) => item.id === taskId);
-    const projectId = task?.project_id ?? optional(form.get("project_id"));
+    let projectId: string | null = null;
+    let departmentWorkId: string | null = null;
+    if (task) {
+      projectId = task.project_id;
+      departmentWorkId = task.department_work_id;
+    } else if (sourceType === "project") {
+      projectId = selectedProject || null;
+    } else if (sourceType === "department_work") {
+      departmentWorkId = selectedDepartmentWork || null;
+    }
     const hours = Number(form.get("hours"));
     const deliverableName = optional(form.get("deliverable_name"));
     const deliverableUrl = optional(form.get("deliverable_url"));
@@ -365,6 +488,7 @@ function RecordCreateModal({
         content: String(form.get("content")),
         minutes: hours * 60,
         project_id: projectId,
+        department_work_id: departmentWorkId,
         task_id: taskId,
         risk: optional(form.get("risk")),
         next_action: optional(form.get("next_action")),
@@ -408,21 +532,74 @@ function RecordCreateModal({
               required
             />
           </label>
-          <label className="field">
-            <span>关联项目</span>
-            <select
-              name="project_id"
-              value={selectedProject}
-              onChange={(event) => setSelectedProject(event.target.value)}
-            >
-              <option value="">暂不归集</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <fieldset className="source-options field-span-two">
+            <legend>工作来源</legend>
+            <label>
+              <input
+                type="radio"
+                name="source_type"
+                checked={sourceType === "project"}
+                onChange={() => setSourceType("project")}
+              />
+              <span>项目</span>
+            </label>
+            {canViewDepartmentWorks ? (
+              <label>
+                <input
+                  type="radio"
+                  name="source_type"
+                  checked={sourceType === "department_work"}
+                  onChange={() => setSourceType("department_work")}
+                />
+                <span>部门工作</span>
+              </label>
+            ) : null}
+            <label>
+              <input
+                type="radio"
+                name="source_type"
+                checked={sourceType === "none"}
+                onChange={() => setSourceType("none")}
+              />
+              <span>暂不关联</span>
+            </label>
+          </fieldset>
+          {sourceType === "project" ? (
+            <label className="field">
+              <span>关联项目</span>
+              <select
+                name="project_id"
+                value={selectedProject}
+                onChange={(event) => setSelectedProject(event.target.value)}
+              >
+                <option value="">请选择项目</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {sourceType === "department_work" ? (
+            <label className="field">
+              <span>关联部门工作</span>
+              <select
+                name="department_work_id"
+                value={selectedDepartmentWork}
+                onChange={(event) =>
+                  setSelectedDepartmentWork(event.target.value)
+                }
+              >
+                <option value="">请选择部门工作</option>
+                {departmentWorks.map((work) => (
+                  <option key={work.id} value={work.id}>
+                    {work.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="field">
             <span>关联任务</span>
             <select name="task_id" defaultValue="">
@@ -497,28 +674,60 @@ function RecordCreateModal({
 function RecordEditModal({
   record,
   projects,
+  departmentWorks,
   tasks,
+  canViewDepartmentWorks,
   currentUserId,
   onClose,
   onUpdated,
 }: {
   record: WorkRecord;
   projects: ProjectSummary[];
+  departmentWorks: DepartmentWork[];
   tasks: Task[];
+  canViewDepartmentWorks: boolean;
   currentUserId: string;
   onClose: () => void;
   onUpdated: () => void;
 }) {
+  const [sourceType, setSourceType] = useState<RecordSourceType>(
+    record.source_type ?? "none",
+  );
   const [selectedProject, setSelectedProject] = useState(
     record.project_id ?? "",
+  );
+  const [selectedDepartmentWork, setSelectedDepartmentWork] = useState(
+    record.department_work_id ?? "",
   );
   const [selectedTask, setSelectedTask] = useState(record.task_id ?? "");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const delegated = record.author_id !== currentUserId;
-  const visibleTasks = selectedProject
-    ? tasks.filter((task) => task.project_id === selectedProject)
-    : tasks;
+  const showDepartmentWorkSource =
+    canViewDepartmentWorks || sourceType === "department_work";
+  const visibleTasks = tasks.filter((task) => {
+    if (sourceType === "project") {
+      return selectedProject
+        ? task.project_id === selectedProject
+        : Boolean(task.project_id);
+    }
+    if (sourceType === "department_work") {
+      return selectedDepartmentWork
+        ? task.department_work_id === selectedDepartmentWork
+        : Boolean(task.department_work_id);
+    }
+    return true;
+  });
+
+  function changeSourceType(value: RecordSourceType) {
+    setSourceType(value);
+    const task = tasks.find((item) => item.id === selectedTask);
+    if (!task) return;
+    if (value === "project" && !task.project_id) setSelectedTask("");
+    if (value === "department_work" && !task.department_work_id) {
+      setSelectedTask("");
+    }
+  }
 
   function changeProject(value: string) {
     setSelectedProject(value);
@@ -526,10 +735,23 @@ function RecordEditModal({
     if (task && task.project_id !== value) setSelectedTask("");
   }
 
+  function changeDepartmentWork(value: string) {
+    setSelectedDepartmentWork(value);
+    const task = tasks.find((item) => item.id === selectedTask);
+    if (task && task.department_work_id !== value) setSelectedTask("");
+  }
+
   function changeTask(value: string) {
     setSelectedTask(value);
     const task = tasks.find((item) => item.id === value);
-    if (task) setSelectedProject(task.project_id);
+    if (!task) return;
+    if (task.project_id) {
+      setSourceType("project");
+      setSelectedProject(task.project_id);
+    } else if (task.department_work_id) {
+      setSourceType("department_work");
+      setSelectedDepartmentWork(task.department_work_id);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -538,7 +760,16 @@ function RecordEditModal({
     setError("");
     const form = new FormData(event.currentTarget);
     const task = tasks.find((item) => item.id === selectedTask);
-    const projectId = task?.project_id ?? optional(selectedProject);
+    let projectId: string | null = null;
+    let departmentWorkId: string | null = null;
+    if (task) {
+      projectId = task.project_id;
+      departmentWorkId = task.department_work_id;
+    } else if (sourceType === "project") {
+      projectId = selectedProject || null;
+    } else if (sourceType === "department_work") {
+      departmentWorkId = selectedDepartmentWork || null;
+    }
     try {
       await api.records.update(record.id, {
         revision: record.revision,
@@ -546,6 +777,7 @@ function RecordEditModal({
         content: String(form.get("content")),
         minutes: Math.round(Number(form.get("hours")) * 60),
         project_id: projectId,
+        department_work_id: departmentWorkId,
         task_id: optional(selectedTask),
         risk: optional(form.get("risk")),
         next_action: optional(form.get("next_action")),
@@ -593,21 +825,80 @@ function RecordEditModal({
               required
             />
           </label>
-          <label className="field">
-            <span>关联项目</span>
-            <select
-              name="project_id"
-              value={selectedProject}
-              onChange={(event) => changeProject(event.target.value)}
-            >
-              <option value="">暂不归集</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <fieldset className="source-options field-span-two">
+            <legend>工作来源</legend>
+            <label>
+              <input
+                type="radio"
+                name="source_type"
+                checked={sourceType === "project"}
+                onChange={() => changeSourceType("project")}
+              />
+              <span>项目</span>
+            </label>
+            {showDepartmentWorkSource ? (
+              <label>
+                <input
+                  type="radio"
+                  name="source_type"
+                  checked={sourceType === "department_work"}
+                  onChange={() => changeSourceType("department_work")}
+                />
+                <span>部门工作</span>
+              </label>
+            ) : null}
+            <label>
+              <input
+                type="radio"
+                name="source_type"
+                checked={sourceType === "none"}
+                onChange={() => changeSourceType("none")}
+              />
+              <span>暂不关联</span>
+            </label>
+          </fieldset>
+          {sourceType === "project" ? (
+            <label className="field">
+              <span>关联项目</span>
+              <select
+                name="project_id"
+                value={selectedProject}
+                onChange={(event) => changeProject(event.target.value)}
+              >
+                <option value="">请选择项目</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {sourceType === "department_work" ? (
+            <label className="field">
+              <span>关联部门工作</span>
+              <select
+                name="department_work_id"
+                value={selectedDepartmentWork}
+                onChange={(event) => changeDepartmentWork(event.target.value)}
+              >
+                <option value="">请选择部门工作</option>
+                {selectedDepartmentWork &&
+                !departmentWorks.some(
+                  (work) => work.id === selectedDepartmentWork,
+                ) ? (
+                  <option value={selectedDepartmentWork}>
+                    {record.department_work_name ?? "当前部门工作"}
+                  </option>
+                ) : null}
+                {departmentWorks.map((work) => (
+                  <option key={work.id} value={work.id}>
+                    {work.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="field">
             <span>关联任务</span>
             <select
@@ -659,7 +950,7 @@ function RecordEditModal({
         </div>
         {record.deliverables.length ? (
           <InlineNotice>
-            已关联的 {record.deliverables.length} 个产出物会保留，并随项目归属同步调整。
+            已关联的 {record.deliverables.length} 个产出物会保留，并随来源归属同步调整。
           </InlineNotice>
         ) : null}
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
@@ -669,6 +960,393 @@ function RecordEditModal({
           </button>
           <button className="primary-button" disabled={submitting}>
             {submitting ? "正在保存…" : "保存修改"}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
+function QuickCreateModal({
+  projects,
+  departmentWorks,
+  tasks,
+  canViewProjects,
+  canViewDepartmentWorks,
+  canCreateProjects,
+  canCreateDepartmentWorks,
+  canCreateTasks,
+  onClose,
+  onCreated,
+}: {
+  projects: ProjectSummary[];
+  departmentWorks: DepartmentWork[];
+  tasks: Task[];
+  canViewProjects: boolean;
+  canViewDepartmentWorks: boolean;
+  canCreateProjects: boolean;
+  canCreateDepartmentWorks: boolean;
+  canCreateTasks: boolean;
+  onClose: () => void;
+  onCreated: (message: string) => void;
+}) {
+  const [idempotencyKey] = useState(() => createClientMessageId());
+  const [sourceType, setSourceType] = useState<QuickSourceType>(
+    canViewProjects
+      ? "project"
+      : canViewDepartmentWorks
+        ? "department_work"
+        : "none",
+  );
+  const [selectedProject, setSelectedProject] = useState("");
+  const [selectedDepartmentWork, setSelectedDepartmentWork] = useState("");
+  const [selectedTask, setSelectedTask] = useState("");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [deliverableEnabled, setDeliverableEnabled] = useState(false);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const hasSource = sourceType !== "none";
+  const visibleTasks = tasks.filter((task) => {
+    if (sourceType === "project") {
+      return selectedProject ? task.project_id === selectedProject : false;
+    }
+    if (sourceType === "department_work") {
+      return selectedDepartmentWork
+        ? task.department_work_id === selectedDepartmentWork
+        : false;
+    }
+    return false;
+  });
+
+  function changeSourceType(value: QuickSourceType) {
+    setSourceType(value);
+    setSelectedTask("");
+    if (value === "none") setDeliverableEnabled(false);
+  }
+
+  function changeTask(value: string) {
+    setSelectedTask(value);
+    if (value) setNewTaskTitle("");
+  }
+
+  function changeNewTaskTitle(value: string) {
+    setNewTaskTitle(value);
+    if (value.trim()) setSelectedTask("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting) return;
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const payload: Record<string, unknown> = {
+      idempotency_key: idempotencyKey,
+      work_date: String(form.get("work_date")),
+      content: String(form.get("content")),
+      minutes: Math.round(Number(form.get("hours")) * 60),
+      risk: optional(form.get("risk")),
+      next_action: optional(form.get("next_action")),
+    };
+    if (sourceType === "project") {
+      if (!selectedProject) {
+        setError("请选择要关联的项目。");
+        return;
+      }
+      payload.project_id = selectedProject;
+    } else if (sourceType === "department_work") {
+      if (!selectedDepartmentWork) {
+        setError("请选择要关联的部门工作。");
+        return;
+      }
+      payload.department_work_id = selectedDepartmentWork;
+    } else if (sourceType === "new_project") {
+      payload.new_project = {
+        name: String(form.get("new_project_name") ?? "").trim(),
+      };
+    } else if (sourceType === "new_department_work") {
+      payload.new_department_work = {
+        name: String(form.get("new_department_work_name") ?? "").trim(),
+        visibility: String(
+          form.get("new_department_work_visibility") ?? "department_only",
+        ),
+      };
+    }
+    const taskTitle = newTaskTitle.trim();
+    if (hasSource && taskTitle) {
+      payload.new_task = { title: taskTitle };
+    } else if (selectedTask) {
+      payload.task_id = selectedTask;
+    }
+    const deliverableName = optional(form.get("deliverable_name"));
+    const deliverableUrl = optional(form.get("deliverable_url"));
+    if (hasSource && deliverableEnabled && deliverableName && deliverableUrl) {
+      payload.deliverables = [{ name: deliverableName, url: deliverableUrl }];
+    }
+    setSubmitting(true);
+    try {
+      const result = await api.records.quickCreate(payload);
+      if (result.replayed) {
+        onCreated("该记录此前已提交成功，已为你恢复原单（未重复创建）。");
+        return;
+      }
+      const created: string[] = [];
+      if (result.created_project_id) created.push("项目");
+      if (result.created_department_work_id) created.push("部门工作");
+      if (result.created_task_id) created.push("任务");
+      onCreated(
+        created.length
+          ? `记录创建成功，已同步新建${created.join("、")}。`
+          : "记录创建成功。",
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "快速记录保存失败",
+      );
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="快速记录工作"
+      eyebrow="QUICK WORK LOG"
+      onClose={onClose}
+      wide
+    >
+      <form className="modal-form" onSubmit={submit}>
+        <div className="form-grid">
+          <label className="field">
+            <span>工作日期 *</span>
+            <input
+              name="work_date"
+              type="date"
+              defaultValue={localDateInputValue()}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>投入时长（小时）*</span>
+            <input
+              name="hours"
+              type="number"
+              min="0.5"
+              max="24"
+              step="0.5"
+              defaultValue="1"
+              required
+            />
+          </label>
+          <fieldset className="source-options field-span-two">
+            <legend>工作来源</legend>
+            {canViewProjects ? (
+              <label>
+                <input
+                  type="radio"
+                  name="source_type"
+                  checked={sourceType === "project"}
+                  onChange={() => changeSourceType("project")}
+                />
+                <span>现有项目</span>
+              </label>
+            ) : null}
+            {canViewDepartmentWorks ? (
+              <label>
+                <input
+                  type="radio"
+                  name="source_type"
+                  checked={sourceType === "department_work"}
+                  onChange={() => changeSourceType("department_work")}
+                />
+                <span>现有部门工作</span>
+              </label>
+            ) : null}
+            {canCreateProjects ? (
+              <label>
+                <input
+                  type="radio"
+                  name="source_type"
+                  checked={sourceType === "new_project"}
+                  onChange={() => changeSourceType("new_project")}
+                />
+                <span>新建项目</span>
+              </label>
+            ) : null}
+            {canCreateDepartmentWorks ? (
+              <label>
+                <input
+                  type="radio"
+                  name="source_type"
+                  checked={sourceType === "new_department_work"}
+                  onChange={() => changeSourceType("new_department_work")}
+                />
+                <span>新建部门工作</span>
+              </label>
+            ) : null}
+            <label>
+              <input
+                type="radio"
+                name="source_type"
+                checked={sourceType === "none"}
+                onChange={() => changeSourceType("none")}
+              />
+              <span>无来源</span>
+            </label>
+          </fieldset>
+          {sourceType === "project" ? (
+            <label className="field">
+              <span>关联项目 *</span>
+              <select
+                name="project_id"
+                value={selectedProject}
+                onChange={(event) => setSelectedProject(event.target.value)}
+              >
+                <option value="">请选择项目</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {sourceType === "department_work" ? (
+            <label className="field">
+              <span>关联部门工作 *</span>
+              <select
+                name="department_work_id"
+                value={selectedDepartmentWork}
+                onChange={(event) =>
+                  setSelectedDepartmentWork(event.target.value)
+                }
+              >
+                <option value="">请选择部门工作</option>
+                {departmentWorks.map((work) => (
+                  <option key={work.id} value={work.id}>
+                    {work.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {sourceType === "new_project" ? (
+            <label className="field">
+              <span>新项目名称 *</span>
+              <input
+                name="new_project_name"
+                placeholder="例如 某集团集采平台二期"
+                required
+              />
+            </label>
+          ) : null}
+          {sourceType === "new_department_work" ? (
+            <>
+              <label className="field">
+                <span>部门工作名称 *</span>
+                <input
+                  name="new_department_work_name"
+                  placeholder="例如 季度巡检与资产盘点"
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>可见性</span>
+                <select
+                  name="new_department_work_visibility"
+                  defaultValue="department_only"
+                >
+                  <option value="department_only">仅本部门可见</option>
+                  <option value="public">全员公开</option>
+                </select>
+              </label>
+            </>
+          ) : null}
+          {sourceType === "project" || sourceType === "department_work" ? (
+            <label className="field">
+              <span>关联现有任务</span>
+              <select
+                name="task_id"
+                value={selectedTask}
+                onChange={(event) => changeTask(event.target.value)}
+              >
+                <option value="">不关联任务</option>
+                {visibleTasks.map((task) => (
+                  <option key={task.id} value={task.id}>
+                    {task.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {hasSource && canCreateTasks ? (
+            <label className="field">
+              <span>新建任务标题</span>
+              <input
+                name="new_task_title"
+                value={newTaskTitle}
+                onChange={(event) => changeNewTaskTitle(event.target.value)}
+                placeholder="留空则不新建任务"
+              />
+            </label>
+          ) : null}
+          <label className="field field-span-two">
+            <span>工作内容 *</span>
+            <textarea
+              name="content"
+              rows={5}
+              placeholder="说明完成了什么、产生了什么结果"
+              required
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>风险或阻塞</span>
+            <textarea name="risk" rows={3} placeholder="没有可留空" />
+          </label>
+          <label className="field">
+            <span>下一步行动</span>
+            <textarea name="next_action" rows={3} placeholder="下一步准备做什么" />
+          </label>
+          <div className="field-span-two deliverable-toggle">
+            <label className="toggle-filter">
+              <input
+                type="checkbox"
+                checked={deliverableEnabled}
+                disabled={!hasSource}
+                onChange={(event) => setDeliverableEnabled(event.target.checked)}
+              />
+              <span />
+              添加产出物链接
+            </label>
+            {!hasSource ? (
+              <small className="field-hint">
+                产出物必须挂在项目或部门工作上，请先选择或新建来源。
+              </small>
+            ) : null}
+          </div>
+          {deliverableEnabled && hasSource ? (
+            <>
+              <label className="field">
+                <span>产出物名称</span>
+                <input name="deliverable_name" placeholder="例如 总体方案 V3" />
+              </label>
+              <label className="field">
+                <span>访问地址</span>
+                <input
+                  name="deliverable_url"
+                  type="url"
+                  placeholder="https://intranet.example/..."
+                />
+              </label>
+            </>
+          ) : null}
+        </div>
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+        <footer className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-button" disabled={submitting}>
+            {submitting ? "正在提交…" : "提交记录"}
           </button>
         </footer>
       </form>

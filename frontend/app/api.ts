@@ -8,6 +8,10 @@ import type {
   AuditEvent,
   AuthContext,
   AvatarOption,
+  Department,
+  DepartmentWork,
+  DepartmentWorkStatus,
+  DepartmentWorkVisibility,
   DuplicateCandidate,
   Opportunity,
   Project,
@@ -16,6 +20,7 @@ import type {
   ProjectSummary,
   ProjectTag,
   Task,
+  TaskProgressHistory,
   User,
   UserCandidate,
   CurrentWeeklyReport,
@@ -25,6 +30,7 @@ import type {
   PermissionKey,
   WeeklyReport,
   WorkRecord,
+  WorkRecordQuickCreateResult,
   UserPermissions,
 } from "./types";
 
@@ -178,6 +184,7 @@ export const api = {
       display_name: string;
       password: string;
       role: string;
+      primary_department_id?: string | null;
     }) =>
       request<User>("/api/v1/users", {
         method: "POST",
@@ -195,11 +202,88 @@ export const api = {
         display_name: string;
         role: string;
         leader_id: string | null;
+        primary_department_id?: string | null;
       },
     ) =>
       request<User>(`/api/v1/users/${id}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
+      }),
+  },
+  departments: {
+    list: (includeInactive = false, query?: string) => {
+      const params = new URLSearchParams();
+      if (includeInactive) params.set("include_inactive", "true");
+      if (query?.trim()) params.set("q", query.trim());
+      return request<Department[]>(
+        `/api/v1/departments${params.size ? `?${params}` : ""}`,
+      );
+    },
+    create: (payload: { name: string; leader_id?: string | null }) =>
+      request<Department>("/api/v1/departments", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (
+      id: string,
+      payload: {
+        revision: number;
+        name?: string;
+        leader_id?: string | null;
+        is_active?: boolean;
+      },
+    ) =>
+      request<Department>(`/api/v1/departments/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    remove: (id: string, revision: number, reason?: string | null) =>
+      request<void>(`/api/v1/departments/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ revision, reason: reason || null }),
+      }),
+  },
+  departmentWorks: {
+    list: (params?: URLSearchParams) =>
+      request<DepartmentWork[]>(
+        `/api/v1/department-works${params?.size ? `?${params}` : ""}`,
+      ),
+    get: (id: string) =>
+      request<DepartmentWork>(`/api/v1/department-works/${id}`),
+    create: (payload: {
+      name: string;
+      description?: string | null;
+      department_id?: string | null;
+      owner_id?: string | null;
+      visibility?: DepartmentWorkVisibility;
+    }) =>
+      request<DepartmentWork>("/api/v1/department-works", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (
+      id: string,
+      payload: {
+        revision: number;
+        name?: string;
+        description?: string | null;
+        owner_id?: string | null;
+        visibility?: DepartmentWorkVisibility;
+      },
+    ) =>
+      request<DepartmentWork>(`/api/v1/department-works/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    transition: (id: string, revision: number, status: DepartmentWorkStatus) =>
+      request<DepartmentWork>(`/api/v1/department-works/${id}/transition`, {
+        method: "POST",
+        body: JSON.stringify({ revision, status }),
+      }),
+    remove: (id: string, revision: number, reason?: string | null) =>
+      request<void>(`/api/v1/department-works/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ revision, reason: reason || null }),
       }),
   },
   audit: {
@@ -408,11 +492,33 @@ export const api = {
         blocker_reason?: string;
         result?: string;
         cancel_reason?: string;
+        complete_descendants?: boolean;
       },
     ) =>
       request<Task>(`/api/v1/tasks/${id}/transition`, {
         method: "POST",
         body: JSON.stringify(payload),
+      }),
+    updateProgress: (
+      id: string,
+      payload: {
+        revision: number;
+        enabled: boolean;
+        percent?: number | null;
+        result?: string | null;
+        reason?: string | null;
+      },
+    ) =>
+      request<Task>(`/api/v1/tasks/${id}/progress`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    progressHistory: (id: string) =>
+      request<TaskProgressHistory[]>(`/api/v1/tasks/${id}/progress-history`),
+    remove: (id: string, revision: number, reason?: string | null) =>
+      request<void>(`/api/v1/tasks/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ revision, reason: reason || null }),
       }),
   },
   records: {
@@ -435,6 +541,14 @@ export const api = {
         method: "DELETE",
         body: JSON.stringify({ revision, reason: reason || null }),
       }),
+    quickCreate: (payload: Record<string, unknown>) =>
+      request<WorkRecordQuickCreateResult>(
+        "/api/v1/work-records/quick-create",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
   },
   ai: {
     status: () => request<AIStatus>("/api/v1/ai/status"),
