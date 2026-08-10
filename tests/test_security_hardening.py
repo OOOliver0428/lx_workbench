@@ -184,7 +184,8 @@ def test_user_directory_requires_business_access_and_protects_inactive_users(
         user["display_name"] for user in visible.json()
     }
     assert all(
-        set(user) == {"id", "display_name", "avatar_key"}
+        set(user)
+        == {"id", "display_name", "avatar_key", "primary_department_id"}
         for user in visible.json()
     )
     sensitive_fields = {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import UTC, date, datetime, time, timedelta, timezone
 
 from sqlalchemy import and_, func, or_, select
@@ -64,6 +64,7 @@ from app.services import ai as ai_service
 from app.services import opportunities as opportunity_service
 from app.services import permissions as permission_service
 from app.services import projects as project_service
+from app.services import tasks as task_service
 
 SHANGHAI = timezone(timedelta(hours=8), name="Asia/Shanghai")
 BUSINESS_USER_ROLES = {
@@ -159,20 +160,60 @@ def _business_users(db: Session) -> list[User]:
     )
 
 
-def _scope_users(db: Session, actor: User) -> list[User]:
-    users = _business_users(db)
+def _scope_users_with_depths(
+    db: Session,
+    actor: User,
+) -> list[tuple[User, int]]:
+    """Return the actor's active organization subtree in hierarchy order.
+
+    The ordinary member dashboard historically shows all business users, so
+    that behavior remains unchanged. Team leaders and system administrators,
+    however, are scoped to themselves and every recursive report. Traversing
+    inactive users without including them keeps active descendants reachable
+    when an old organization chain has not yet been reassigned.
+    """
     if actor.role not in {
         UserRole.TEAM_LEADER.value,
         UserRole.SYSTEM_ADMIN.value,
     }:
-        return users
-    direct_reports = [user for user in users if user.leader_id == actor.id]
-    if not direct_reports:
-        return users
-    if actor.role in BUSINESS_USER_ROLES:
-        direct_reports.append(actor)
-    unique_users = {user.id: user for user in direct_reports}.values()
-    return sorted(unique_users, key=lambda item: item.display_name)
+        return [(user, 0) for user in _business_users(db)]
+
+    organization_users = list(
+        db.scalars(
+            select(User).where(User.role != UserRole.SUPER_ADMIN.value)
+        ).all()
+    )
+    reports_by_leader: dict[str, list[User]] = defaultdict(list)
+    for user in organization_users:
+        if user.leader_id:
+            reports_by_leader[user.leader_id].append(user)
+    for reports in reports_by_leader.values():
+        reports.sort(key=lambda user: (user.display_name, user.id))
+
+    scoped: list[tuple[User, int]] = []
+    pending: deque[tuple[User, int]] = deque([(actor, 0)])
+    visited: set[str] = set()
+    while pending:
+        user, depth = pending.popleft()
+        if user.id in visited:
+            continue
+        visited.add(user.id)
+        if user.is_active:
+            scoped.append((user, depth))
+        pending.extend(
+            (report, depth + 1)
+            for report in reports_by_leader.get(user.id, [])
+            if report.id not in visited
+        )
+
+    return sorted(
+        scoped,
+        key=lambda item: (item[1], item[0].display_name, item[0].id),
+    )
+
+
+def _scope_users(db: Session, actor: User) -> list[User]:
+    return [user for user, _depth in _scope_users_with_depths(db, actor)]
 
 
 def _week_datetimes(week_start: date) -> tuple[datetime, datetime]:
@@ -198,19 +239,6 @@ def _reports_for_week(
             )
         ).all()
     )
-
-
-def _reports_visible_to_summary(
-    actor: User,
-    reports: list[WeeklyReport],
-) -> list[WeeklyReport]:
-    if is_super_admin(actor):
-        return reports
-    return [
-        report
-        for report in reports
-        if report.author_id == actor.id or report.submitted_to_id == actor.id
-    ]
 
 
 def _default_attention(tasks: list[Task]) -> str:
@@ -1186,17 +1214,15 @@ def create_task_relation(
     payload: TaskRelationCreate,
     actor: User,
 ) -> TaskRelation:
-    source = db.get(Task, payload.source_task_id)
-    target = db.get(Task, payload.target_task_id)
-    if (
-        not source
-        or source.deleted_at
-        or not target
-        or target.deleted_at
-    ):
-        raise AppError("TASK_NOT_FOUND", "关联任务不存在", status_code=404)
+    source = task_service.get_task(db, payload.source_task_id, actor=actor)
+    target = task_service.get_task(db, payload.target_task_id, actor=actor)
     if source.id == target.id:
         raise AppError("TASK_RELATION_SELF", "不能将任务关联到自身")
+    if not source.project_id or not target.project_id:
+        raise AppError(
+            "TASK_RELATION_PROJECT_REQUIRED",
+            "跨项目任务关联仅支持项目来源的任务",
+        )
     if source.project_id == target.project_id:
         raise AppError("TASK_RELATION_SAME_PROJECT", "跨项目关联必须连接不同项目的任务")
     source_project = project_service.get_project(db, source.project_id)
@@ -1255,12 +1281,13 @@ def generate_team_summary(
         "当前账号没有生成团队周报的权限",
     )
     normalized_week = normalize_week_start(week_start)
-    scope_users = _scope_users(db, actor)
+    scoped_users_with_depths = _scope_users_with_depths(db, actor)
+    scope_users = [user for user, _depth in scoped_users_with_depths]
+    depth_by_user_id = {
+        user.id: depth for user, depth in scoped_users_with_depths
+    }
     member_ids = {user.id for user in scope_users}
-    reports = _reports_visible_to_summary(
-        actor,
-        _reports_for_week(db, normalized_week, member_ids),
-    )
+    reports = _reports_for_week(db, normalized_week, member_ids)
     submitted_ids = {report.author_id for report in reports}
     missing = [
         user.display_name for user in scope_users if user.id not in submitted_ids
@@ -1279,16 +1306,41 @@ def generate_team_summary(
         raise AppError("TEAM_WEEKLY_REPORTS_EMPTY", "本周还没有可汇总的已提交周报")
 
     users = {user.id: user for user in scope_users}
+    ordered_reports = sorted(
+        reports,
+        key=lambda report: (
+            depth_by_user_id[report.author_id],
+            {
+                UserRole.SYSTEM_ADMIN.value: 0,
+                UserRole.TEAM_LEADER.value: 1,
+                UserRole.MEMBER.value: 2,
+            }.get(users[report.author_id].role, 3),
+            users[report.author_id].display_name,
+            report.author_id,
+        ),
+    )
     report_context = "\n\n".join(
         (
             f"## {users[report.author_id].display_name}\n"
             f"{report.submitted_content or ''}"
         )
-        for report in sorted(
-            reports,
-            key=lambda item: users[item.author_id].display_name,
-        )
+        for report in ordered_reports
     )
+    included_leader_count = sum(
+        users[report.author_id].role
+        in {UserRole.TEAM_LEADER.value, UserRole.SYSTEM_ADMIN.value}
+        for report in ordered_reports
+    )
+    source_reports = [
+        {
+            "report_id": report.id,
+            "author_id": report.author_id,
+            "submission_version": report.submission_version,
+            "order": order,
+            "depth": depth_by_user_id[report.author_id],
+        }
+        for order, report in enumerate(ordered_reports, start=1)
+    ]
     missing_text = "、".join(missing) if missing else "无"
     with llm_guard.generation(
         user_id=actor.id,
@@ -1333,6 +1385,8 @@ def generate_team_summary(
             forced=payload.force,
             submitted_count=len(reports),
             expected_count=len(scope_users),
+            included_leader_count=included_leader_count,
+            source_reports=source_reports,
             generation_model=result.model,
             generation_usage=result.usage,
         )
@@ -1342,6 +1396,8 @@ def generate_team_summary(
         summary.forced = payload.force
         summary.submitted_count = len(reports)
         summary.expected_count = len(scope_users)
+        summary.included_leader_count = included_leader_count
+        summary.source_reports = source_reports
         summary.generation_model = result.model
         summary.generation_usage = result.usage
         summary.revision += 1
@@ -1362,6 +1418,7 @@ def generate_team_summary(
             "forced": payload.force,
             "submittedCount": len(reports),
             "expectedCount": len(scope_users),
+            "includedLeaderCount": included_leader_count,
             "model": result.model,
             "usage": result.usage,
         },

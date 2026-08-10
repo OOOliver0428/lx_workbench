@@ -142,6 +142,10 @@ sudo systemctl is-active solution-workspace-backup.timer
 回滚、备份恢复、试用库切正式库和故障排查步骤见
 [Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。
 
+Windows 上可直接双击根目录的 `生成离线升级包.cmd`。工具会自动同步 `origin/mvp`，
+在 `outputs/offline-updates/` 生成从发布基线 `v0.1.0` 开始的小型 bundle、SHA-256 校验文件和逐步升级说明，
+不会切换分支、修改当前工作区或把未提交文件混入升级包。
+
 ## 数据库与试用期切换
 
 首次 Ubuntu 部署默认使用：

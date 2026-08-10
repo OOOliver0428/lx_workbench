@@ -89,6 +89,42 @@ PERMISSION_CATALOG = (
         "创建项目，同时包含项目编辑和查看权限。",
     ),
     PermissionDefinition(
+        PermissionKey.DEPARTMENTS_VIEW,
+        "department_works",
+        "部门工作",
+        "查看部门目录",
+        "读取有效部门目录和本人主部门信息。",
+    ),
+    PermissionDefinition(
+        PermissionKey.DEPARTMENTS_MANAGE,
+        "department_works",
+        "部门工作",
+        "管理部门",
+        "创建、修改和停用部门并指定部门负责人。",
+        system_admin_assignable=False,
+    ),
+    PermissionDefinition(
+        PermissionKey.DEPARTMENT_WORKS_VIEW,
+        "department_works",
+        "部门工作",
+        "查看部门工作",
+        "查看公开事项和本人主部门范围内的部门工作。",
+    ),
+    PermissionDefinition(
+        PermissionKey.DEPARTMENT_WORKS_EDIT,
+        "department_works",
+        "部门工作",
+        "维护部门工作",
+        "在本人主部门范围内维护部门工作；公开范围不扩大编辑权限。",
+    ),
+    PermissionDefinition(
+        PermissionKey.DEPARTMENT_WORKS_CREATE,
+        "department_works",
+        "部门工作",
+        "创建部门工作",
+        "在本人主部门中创建部门工作，同时包含编辑和查看权限。",
+    ),
+    PermissionDefinition(
         PermissionKey.TASKS_VIEW,
         "tasks",
         "任务管理",
@@ -202,6 +238,16 @@ PERMISSION_IMPLICATIONS = {
     PermissionKey.PROJECTS_CREATE.value: {
         PermissionKey.PROJECTS_EDIT.value,
     },
+    PermissionKey.DEPARTMENTS_MANAGE.value: {
+        PermissionKey.DEPARTMENTS_VIEW.value,
+    },
+    PermissionKey.DEPARTMENT_WORKS_EDIT.value: {
+        PermissionKey.DEPARTMENT_WORKS_VIEW.value,
+        PermissionKey.DEPARTMENTS_VIEW.value,
+    },
+    PermissionKey.DEPARTMENT_WORKS_CREATE.value: {
+        PermissionKey.DEPARTMENT_WORKS_EDIT.value,
+    },
     PermissionKey.TASKS_EDIT.value: {
         PermissionKey.TASKS_VIEW.value,
     },
@@ -210,6 +256,8 @@ PERMISSION_IMPLICATIONS = {
     },
     PermissionKey.TASKS_VIEW.value: {
         PermissionKey.PROJECTS_VIEW.value,
+        PermissionKey.DEPARTMENT_WORKS_VIEW.value,
+        PermissionKey.DEPARTMENTS_VIEW.value,
     },
     PermissionKey.WORK_RECORDS_MANAGE.value: {
         PermissionKey.WORK_RECORDS_VIEW.value,
@@ -226,6 +274,8 @@ TEAM_SCOPE_PERMISSION_KEYS = {
 
 DEFAULT_NEW_USER_PERMISSION_KEYS = {
     PermissionKey.PROJECTS_VIEW.value,
+    PermissionKey.DEPARTMENTS_VIEW.value,
+    PermissionKey.DEPARTMENT_WORKS_VIEW.value,
     PermissionKey.TASKS_VIEW.value,
     PermissionKey.WORK_RECORDS_VIEW.value,
     PermissionKey.WORK_RECORDS_MANAGE.value,

@@ -601,3 +601,107 @@ def test_team_summary_requires_complete_submission_or_explicit_force(
     assert other_scope_dashboard.status_code == 200
     assert other_scope_dashboard.json()["latest_team_summary"] is None
     assert client.get("/api/v1/weekly-reports/team-summaries").json() == []
+
+
+def test_team_summary_recurses_reports_and_orders_formal_content_by_hierarchy(
+    api: dict,
+    monkeypatch,
+) -> None:
+    client: TestClient = api["client"]
+    week_start = dashboard_service.normalize_week_start()
+    week_end = week_start + timedelta(days=6)
+    captured: dict = {}
+    report_ids: dict[str, str] = {}
+
+    with api["app"].state.session_factory.begin() as db:
+        admin = db.get(User, api["users"]["admin"])
+        leader = db.get(User, api["users"]["leader"])
+        member = db.get(User, api["users"]["member"])
+        member2 = db.get(User, api["users"]["member2"])
+        assert admin and leader and member and member2
+
+        member.leader_id = admin.id
+        scoped_users = (admin, leader, member, member2)
+        submitted_to = {
+            admin.id: None,
+            leader.id: admin.id,
+            member.id: admin.id,
+            # The recursive report was submitted to its direct leader, not to
+            # the administrator who is generating this organization summary.
+            member2.id: leader.id,
+        }
+        for user in scoped_users:
+            report = WeeklyReport(
+                author_id=user.id,
+                week_start=week_start,
+                week_end=week_end,
+                content=f"DRAFT-CONTENT-{user.id}",
+                submitted_content=f"FORMAL-CONTENT-{user.id}",
+                submitted_to_id=submitted_to[user.id],
+                submitted_at=utc_now(),
+                submission_version=1,
+            )
+            db.add(report)
+            db.flush()
+            report_ids[user.id] = report.id
+
+    def fake_complete(
+        _db,
+        _settings,
+        *,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+    ) -> AIChatOut:
+        captured["messages"] = messages
+        captured["max_tokens"] = max_tokens
+        return AIChatOut(
+            answer="# Recursive organization summary",
+            model="test-model",
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            },
+        )
+
+    monkeypatch.setattr(dashboard_service.ai_service, "complete", fake_complete)
+    admin_csrf = login(client, "admin")
+    response = client.post(
+        "/api/v1/dashboard/team-summary",
+        params={"week_start": week_start.isoformat()},
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"force": False},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["submitted_count"] == 4
+    assert payload["expected_count"] == 4
+    assert payload["included_leader_count"] == 2
+
+    expected_author_order = [
+        api["users"]["admin"],
+        api["users"]["leader"],
+        api["users"]["member"],
+        api["users"]["member2"],
+    ]
+    assert [item["author_id"] for item in payload["source_reports"]] == (
+        expected_author_order
+    )
+    assert [item["report_id"] for item in payload["source_reports"]] == [
+        report_ids[user_id] for user_id in expected_author_order
+    ]
+    assert [item["order"] for item in payload["source_reports"]] == [1, 2, 3, 4]
+    assert [item["depth"] for item in payload["source_reports"]] == [0, 1, 1, 2]
+
+    system_context = next(
+        message["content"]
+        for message in captured["messages"]
+        if "以下为已提交个人周报" in message["content"]
+    )
+    assert "DRAFT-CONTENT-" not in system_context
+    formal_positions = [
+        system_context.index(f"FORMAL-CONTENT-{user_id}")
+        for user_id in expected_author_order
+    ]
+    assert formal_positions == sorted(formal_positions)
+    assert captured["max_tokens"] == 6144

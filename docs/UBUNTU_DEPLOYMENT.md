@@ -375,6 +375,29 @@ git bundle verify solution-workspace-update.bundle
 sha256sum solution-workspace-update.bundle
 ```
 
+如果制作包的电脑是 Windows，可直接双击仓库根目录的
+`生成离线升级包.cmd`。它会自动同步 `origin/mvp`，在 `outputs/offline-updates/` 生成：
+
+- 从已发布基线 `v0.1.0` 开始的小型 `.bundle`，无需事先查询服务器当前提交；
+- 可由 `sha256sum -c` 校验的 `.bundle.sha256`；
+- 写明目标提交和服务器命令的 `-upgrade.txt`。
+
+该工具在临时裸仓库中制作 bundle，不会切换当前分支、改写工作区或把未提交文件
+带入发布包。要在脚本或终端中使用时，执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass \
+  -File scripts/New-OfflineUpdateBundle.ps1
+```
+
+如果异常老的服务器不包含 `v0.1.0`，服务器端 `bundle verify` 会在更新前安全拒绝。此时可一次性
+生成不要求历史基线、但体积更大的完整包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass \
+  -File scripts/New-OfflineUpdateBundle.ps1 -FullHistory
+```
+
 将 bundle 通过 SCP、堡垒机或批准的介质先传到服务器临时目录，通过独立可信通道核对 SHA-256
 和目标提交号，再转存为 root 持有的发布文件并验证 bundle：
 

@@ -8,6 +8,7 @@ import time
 from contextlib import closing
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 
 from alembic import command
@@ -81,6 +82,53 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
             item[3]: (item[2], item[4])
             for item in db.execute("PRAGMA foreign_key_list(task_relations)")
         }
+        workflow_tables = {
+            item[0]
+            for item in db.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN (
+                    'departments',
+                    'department_works',
+                    'task_progress_history',
+                    'work_record_creation_requests'
+                  )
+                """
+            )
+        }
+        task_columns = {
+            item[1]: {"not_null": bool(item[3]), "default": item[4]}
+            for item in db.execute("PRAGMA table_info(tasks)")
+        }
+        task_foreign_keys = {
+            item[3]: (item[2], item[4], item[6])
+            for item in db.execute("PRAGMA foreign_key_list(tasks)")
+        }
+        work_record_columns = {
+            item[1] for item in db.execute("PRAGMA table_info(work_records)")
+        }
+        deliverable_columns = {
+            item[1] for item in db.execute("PRAGMA table_info(deliverables)")
+        }
+        summary_columns = {
+            item[1] for item in db.execute("PRAGMA table_info(team_weekly_summaries)")
+        }
+        task_table_sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+        ).fetchone()[0]
+        work_record_table_sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='work_records'"
+        ).fetchone()[0]
+        deliverable_table_sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='deliverables'"
+        ).fetchone()[0]
+        summary_table_sql = db.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='table' AND name='team_weekly_summaries'"
+        ).fetchone()[0]
+        foreign_key_violations = db.execute("PRAGMA foreign_key_check").fetchall()
     engine = create_database_engine(get_settings())
     with engine.connect() as connection:
         foreign_keys = connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one()
@@ -88,7 +136,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "b3f8d2a6c901"
+    assert revision == "c8a4d7e2f906"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -106,10 +154,41 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     assert task_relation_foreign_keys["deleted_by"] == ("users", "id")
     assert ai_config_table == ("ai_provider_configs",)
     assert "access_mode" in ai_config_columns
+    assert workflow_tables == {
+        "departments",
+        "department_works",
+        "task_progress_history",
+        "work_record_creation_requests",
+    }
+    assert "primary_department_id" in user_columns
+    assert user_indexes["ix_users_primary_department_id"] is False
+    assert task_columns["project_id"]["not_null"] is False
+    assert task_columns["department_work_id"]["not_null"] is False
+    assert task_columns["parent_id"]["not_null"] is False
+    assert task_columns["level"] == {"not_null": True, "default": None}
+    assert task_columns["progress_enabled"]["not_null"] is True
+    assert task_columns["progress_enabled"]["default"] is None
+    assert task_columns["progress_percent"]["not_null"] is False
+    assert task_foreign_keys["department_work_id"] == (
+        "department_works",
+        "id",
+        "RESTRICT",
+    )
+    assert task_foreign_keys["parent_id"] == ("tasks", "id", "RESTRICT")
+    assert "department_work_id" in work_record_columns
+    assert "department_work_id" in deliverable_columns
+    assert {"included_leader_count", "source_reports"} <= summary_columns
+    assert "ck_tasks_exactly_one_source" in task_table_sql
+    assert "ck_tasks_level" in task_table_sql
+    assert "ck_tasks_progress" in task_table_sql
+    assert "ck_work_records_at_most_one_source" in work_record_table_sql
+    assert "ck_deliverables_exactly_one_work_source" in deliverable_table_sql
+    assert "ck_team_weekly_summaries_leader_count" in summary_table_sql
     assert duration_triggers == {
         "ck_work_records_minutes_insert",
         "ck_work_records_minutes_update",
     }
+    assert foreign_key_violations == []
     assert foreign_keys == 1
     assert journal_mode == "wal"
     get_settings.cache_clear()
@@ -214,6 +293,458 @@ def test_team_summary_migration_keeps_latest_duplicate(
         ("33333333-3333-4333-8333-333333333333", "最新版本")
     ]
     assert ("generated_by", "week_start") in unique_column_sets
+    get_settings.cache_clear()
+
+
+def test_workflow_migration_preserves_populated_task_graph(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "workflow-upgrade.db"
+    monkeypatch.setenv("MVP_DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
+    get_settings.cache_clear()
+    config = Config("alembic.ini")
+    command.upgrade(config, "b3f8d2a6c901")
+
+    user_id = "10000000-0000-4000-8000-000000000001"
+    project_id = "20000000-0000-4000-8000-000000000001"
+    task_ids = (
+        "30000000-0000-4000-8000-000000000001",
+        "30000000-0000-4000-8000-000000000002",
+    )
+    record_id = "40000000-0000-4000-8000-000000000001"
+    timestamp = "2026-08-10T00:00:00+00:00"
+    with closing(sqlite3.connect(database_path)) as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute(
+            """
+            INSERT INTO users(
+                id, login_name, display_name, display_name_key, password_hash, role,
+                is_active, must_change_password, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                "workflow-user",
+                "Workflow User",
+                "workflow user",
+                "not-a-real-password-hash",
+                "team_leader",
+                1,
+                0,
+                timestamp,
+                timestamp,
+                1,
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO projects(
+                id, code, name, normalized_name, status, owner_id, proposed_by,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                "WF-001",
+                "Workflow Project",
+                "workflow project",
+                "active",
+                user_id,
+                user_id,
+                timestamp,
+                timestamp,
+                1,
+            ),
+        )
+        db.executemany(
+            """
+            INSERT INTO tasks(
+                id, project_id, title, owner_id, created_by, priority, status,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    task_ids[0],
+                    project_id,
+                    "First historical task",
+                    user_id,
+                    user_id,
+                    "p1",
+                    "in_progress",
+                    timestamp,
+                    timestamp,
+                    2,
+                ),
+                (
+                    task_ids[1],
+                    project_id,
+                    "Second historical task",
+                    user_id,
+                    user_id,
+                    "p2",
+                    "todo",
+                    timestamp,
+                    timestamp,
+                    1,
+                ),
+            ],
+        )
+        db.execute(
+            """
+            INSERT INTO task_collaborators(
+                id, task_id, user_id, added_by, added_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "31000000-0000-4000-8000-000000000001",
+                task_ids[0],
+                user_id,
+                user_id,
+                timestamp,
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO task_assignment_history(
+                id, task_id, new_owner_id, changed_by, changed_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "32000000-0000-4000-8000-000000000001",
+                task_ids[0],
+                user_id,
+                user_id,
+                timestamp,
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO task_relations(
+                id, source_task_id, target_task_id, label, created_by,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "33000000-0000-4000-8000-000000000001",
+                task_ids[0],
+                task_ids[1],
+                "historical dependency",
+                user_id,
+                timestamp,
+                timestamp,
+                1,
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO work_records(
+                id, author_id, work_date, content, minutes, project_id, task_id,
+                last_edited_by, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id,
+                user_id,
+                "2026-08-10",
+                "Historical work record",
+                60,
+                project_id,
+                task_ids[0],
+                user_id,
+                timestamp,
+                timestamp,
+                3,
+            ),
+        )
+        db.executemany(
+            """
+            INSERT INTO deliverables(
+                id, project_id, task_id, work_record_id, name, url, created_by,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "50000000-0000-4000-8000-000000000001",
+                    project_id,
+                    task_ids[0],
+                    None,
+                    "Task deliverable",
+                    "https://example.test/task",
+                    user_id,
+                    timestamp,
+                    timestamp,
+                    1,
+                ),
+                (
+                    "50000000-0000-4000-8000-000000000002",
+                    project_id,
+                    None,
+                    record_id,
+                    "Record deliverable",
+                    "https://example.test/record",
+                    user_id,
+                    timestamp,
+                    timestamp,
+                    1,
+                ),
+            ],
+        )
+        db.execute(
+            """
+            INSERT INTO team_weekly_summaries(
+                id, week_start, week_end, content, generated_by, forced,
+                submitted_count, expected_count, generation_model,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "60000000-0000-4000-8000-000000000001",
+                "2026-08-10",
+                "2026-08-16",
+                "Historical summary",
+                user_id,
+                0,
+                1,
+                1,
+                "test-model",
+                timestamp,
+                timestamp,
+                1,
+            ),
+        )
+        db.commit()
+
+    command.upgrade(config, "head")
+
+    with closing(sqlite3.connect(database_path)) as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        migrated_tasks = db.execute(
+            """
+            SELECT id, project_id, department_work_id, parent_id, level,
+                   progress_enabled, progress_percent, revision
+            FROM tasks ORDER BY id
+            """
+        ).fetchall()
+        migrated_record = db.execute(
+            """
+            SELECT project_id, department_work_id, task_id, minutes, revision
+            FROM work_records WHERE id = ?
+            """,
+            (record_id,),
+        ).fetchone()
+        migrated_deliverables = db.execute(
+            """
+            SELECT project_id, department_work_id, task_id, work_record_id
+            FROM deliverables ORDER BY id
+            """
+        ).fetchall()
+        summary_metadata = db.execute(
+            """
+            SELECT included_leader_count, source_reports
+            FROM team_weekly_summaries
+            """
+        ).fetchone()
+        reference_counts = {
+            "collaborators": db.execute("SELECT COUNT(*) FROM task_collaborators").fetchone()[0],
+            "assignment_history": db.execute(
+                "SELECT COUNT(*) FROM task_assignment_history"
+            ).fetchone()[0],
+            "relations": db.execute("SELECT COUNT(*) FROM task_relations").fetchone()[0],
+        }
+        trigger_names = {
+            item[0]
+            for item in db.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='trigger' AND name LIKE 'ck_work_records_minutes_%'"
+            )
+        }
+        foreign_key_violations = db.execute("PRAGMA foreign_key_check").fetchall()
+
+        with pytest.raises(sqlite3.IntegrityError, match="half-hour"):
+            db.execute(
+                """
+                INSERT INTO work_records(
+                    id, author_id, work_date, content, minutes, project_id,
+                    last_edited_by, created_at, updated_at, revision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "40000000-0000-4000-8000-000000000099",
+                    user_id,
+                    "2026-08-10",
+                    "Invalid duration",
+                    45,
+                    project_id,
+                    user_id,
+                    timestamp,
+                    timestamp,
+                    1,
+                ),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="ck_tasks_exactly_one_source"):
+            db.execute(
+                """
+                INSERT INTO tasks(
+                    id, title, owner_id, created_by, priority, status,
+                    level, progress_enabled, created_at, updated_at, revision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "30000000-0000-4000-8000-000000000099",
+                    "Missing source",
+                    user_id,
+                    user_id,
+                    "p1",
+                    "todo",
+                    0,
+                    0,
+                    timestamp,
+                    timestamp,
+                    1,
+                ),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="ck_tasks_progress"):
+            db.execute(
+                """
+                INSERT INTO tasks(
+                    id, project_id, title, owner_id, created_by, priority, status,
+                    level, progress_enabled, progress_percent,
+                    created_at, updated_at, revision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "30000000-0000-4000-8000-000000000098",
+                    project_id,
+                    "Invalid progress step",
+                    user_id,
+                    user_id,
+                    "p1",
+                    "in_progress",
+                    0,
+                    1,
+                    7,
+                    timestamp,
+                    timestamp,
+                    1,
+                ),
+            )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="ck_task_progress_history_percent",
+        ):
+            db.execute(
+                """
+                INSERT INTO task_progress_history(
+                    id, task_id, from_enabled, to_enabled, from_percent, to_percent,
+                    from_status, to_status, changed_by, changed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "34000000-0000-4000-8000-000000000099",
+                    task_ids[0],
+                    0,
+                    1,
+                    None,
+                    7,
+                    "todo",
+                    "in_progress",
+                    user_id,
+                    timestamp,
+                ),
+            )
+
+    assert migrated_tasks == [
+        (task_ids[0], project_id, None, None, 0, 0, None, 2),
+        (task_ids[1], project_id, None, None, 0, 0, None, 1),
+    ]
+    assert migrated_record == (project_id, None, task_ids[0], 60, 3)
+    assert migrated_deliverables == [
+        (project_id, None, task_ids[0], None),
+        (project_id, None, None, record_id),
+    ]
+    assert summary_metadata == (0, None)
+    assert reference_counts == {
+        "collaborators": 1,
+        "assignment_history": 1,
+        "relations": 1,
+    }
+    assert trigger_names == {
+        "ck_work_records_minutes_insert",
+        "ck_work_records_minutes_update",
+    }
+    assert foreign_key_violations == []
+    get_settings.cache_clear()
+
+
+def test_workflow_migration_rejects_existing_foreign_key_corruption(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "corrupt-workflow.db"
+    monkeypatch.setenv("MVP_DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
+    get_settings.cache_clear()
+    config = Config("alembic.ini")
+    command.upgrade(config, "b3f8d2a6c901")
+
+    timestamp = "2026-08-10T00:00:00+00:00"
+    with closing(sqlite3.connect(database_path)) as db:
+        db.execute(
+            """
+            INSERT INTO users(
+                id, login_name, display_name, display_name_key, password_hash, role,
+                is_active, must_change_password, created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "70000000-0000-4000-8000-000000000001",
+                "corrupt-user",
+                "Corrupt User",
+                "corrupt user",
+                "not-a-real-password-hash",
+                "member",
+                1,
+                0,
+                timestamp,
+                timestamp,
+                1,
+            ),
+        )
+        # sqlite3 connections start with FK checks disabled. This deliberately
+        # simulates a legacy database that was modified outside the application.
+        db.execute(
+            """
+            INSERT INTO tasks(
+                id, project_id, title, owner_id, created_by, priority, status,
+                created_at, updated_at, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "71000000-0000-4000-8000-000000000001",
+                "missing-project",
+                "Corrupt task",
+                "70000000-0000-4000-8000-000000000001",
+                "70000000-0000-4000-8000-000000000001",
+                "p1",
+                "todo",
+                timestamp,
+                timestamp,
+                1,
+            ),
+        )
+        db.commit()
+
+    with pytest.raises(RuntimeError, match="foreign key violations before migration"):
+        command.upgrade(config, "head")
+
+    with closing(sqlite3.connect(database_path)) as db:
+        revision = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+        task = db.execute("SELECT project_id FROM tasks").fetchone()
+
+    assert revision == "b3f8d2a6c901"
+    assert task == ("missing-project",)
     get_settings.cache_clear()
 
 
@@ -378,7 +909,7 @@ def test_populated_previous_revision_upgrades_without_data_loss(
             """
         ).fetchall()
 
-    assert revision == "b3f8d2a6c901"
+    assert revision == "c8a4d7e2f906"
     assert user == ("historic-user", "历史升级用户", "历史升级用户")
     assert integrity == "ok"
     assert migrated_opportunity == (
@@ -429,7 +960,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "b3f8d2a6c901"
+    assert manifest["schemaRevision"] == "c8a4d7e2f906"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
 

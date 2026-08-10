@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Deliverable,
+    DepartmentWork,
     Project,
     ProjectAlias,
     ProjectMember,
@@ -129,6 +130,11 @@ def work_record_out(db: Session, record: WorkRecord) -> WorkRecordOut:
     payload = WorkRecordOut.model_validate(record)
     author = db.get(User, record.author_id)
     project = db.get(Project, record.project_id) if record.project_id else None
+    department_work = (
+        db.get(DepartmentWork, record.department_work_id)
+        if record.department_work_id
+        else None
+    )
     task = db.get(Task, record.task_id) if record.task_id else None
     last_editor = (
         author
@@ -138,6 +144,19 @@ def work_record_out(db: Session, record: WorkRecord) -> WorkRecordOut:
     payload.author_display_name = author.display_name if author else "未知用户"
     payload.author_avatar_key = author.avatar_key if author else None
     payload.project_name = project.name if project else None
+    payload.department_work_name = department_work.name if department_work else None
+    if project:
+        payload.source_type = "project"
+        payload.source_id = project.id
+        payload.source_name = project.name
+    elif department_work:
+        payload.source_type = "department_work"
+        payload.source_id = department_work.id
+        payload.source_name = department_work.name
+    else:
+        payload.source_type = None
+        payload.source_id = None
+        payload.source_name = None
     payload.task_title = task.title if task else None
     payload.last_editor_display_name = (
         last_editor.display_name if last_editor else "未知用户"

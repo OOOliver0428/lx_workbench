@@ -9,7 +9,7 @@ from app.audit import record_audit
 from app.config import Settings
 from app.domain import can_be_direct_leader
 from app.errors import AppError, ConflictError, NotFoundError, PermissionDeniedError
-from app.models import TeamWeeklySummary, User, WeeklyReport, utc_now
+from app.models import TeamWeeklySummary, User, UserRole, WeeklyReport, utc_now
 from app.schemas import (
     WeeklyReportDraftUpdate,
     WeeklyReportOut,
@@ -201,7 +201,12 @@ def submit_report(
             {"submission_version": report.submission_version},
         )
     leader = db.get(User, actor.leader_id) if actor.leader_id else None
-    if not leader or not can_be_direct_leader(leader):
+    can_self_publish = (
+        actor.leader_id is None
+        and actor.role
+        in {UserRole.TEAM_LEADER.value, UserRole.SYSTEM_ADMIN.value}
+    )
+    if (not leader or not can_be_direct_leader(leader)) and not can_self_publish:
         raise AppError(
             "DIRECT_LEADER_REQUIRED",
             "尚未配置有效的直属 Leader，请联系系统管理员后再提交",
@@ -209,7 +214,7 @@ def submit_report(
 
     was_submitted = report.submitted_content is not None
     report.submitted_content = report.content
-    report.submitted_to_id = leader.id
+    report.submitted_to_id = leader.id if leader else None
     report.submitted_at = utc_now()
     report.submission_version += 1
     report.revision += 1
@@ -222,7 +227,8 @@ def submit_report(
         entity_id=report.id,
         detail={
             "weekStart": report.week_start.isoformat(),
-            "submittedToId": leader.id,
+            "submittedToId": leader.id if leader else None,
+            "selfPublished": leader is None,
             "submissionVersion": report.submission_version,
         },
     )

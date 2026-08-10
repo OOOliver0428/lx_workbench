@@ -4,9 +4,48 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.models import User, WeeklyReport
 from app.schemas import AIChatOut
 from app.services import weekly_reports as report_service
 from tests.conftest import login
+
+
+def test_top_level_leaders_can_formally_submit_without_a_direct_leader(
+    api: dict,
+) -> None:
+    client: TestClient = api["client"]
+    week_start, week_end = report_service.current_week_bounds()
+    report_ids: dict[str, str] = {}
+
+    with api["app"].state.session_factory.begin() as db:
+        for login_name in ("leader", "admin"):
+            user = db.get(User, api["users"][login_name])
+            assert user
+            user.leader_id = None
+            report = WeeklyReport(
+                author_id=user.id,
+                week_start=week_start,
+                week_end=week_end,
+                content=f"{login_name} formal weekly report",
+            )
+            db.add(report)
+            db.flush()
+            report_ids[login_name] = report.id
+
+    for login_name in ("leader", "admin"):
+        csrf = login(client, login_name)
+        current = client.get("/api/v1/weekly-reports/current").json()["report"]
+        assert current["id"] == report_ids[login_name]
+        submitted = client.post(
+            f"/api/v1/weekly-reports/{current['id']}/submit",
+            headers={"X-CSRF-Token": csrf},
+            json={"revision": current["revision"], "overwrite_confirmed": False},
+        )
+        assert submitted.status_code == 200, submitted.text
+        payload = submitted.json()
+        assert payload["submitted_content"] == f"{login_name} formal weekly report"
+        assert payload["submitted_at"] is not None
+        assert payload["submitted_to_id"] is None
 
 
 def test_admin_assigns_direct_leader_with_role_and_revision_guards(api: dict) -> None:

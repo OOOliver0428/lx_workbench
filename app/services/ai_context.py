@@ -4,10 +4,11 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    DepartmentWork,
     PermissionKey,
     Project,
     ProjectMember,
@@ -18,9 +19,11 @@ from app.models import (
     User,
     WorkRecord,
 )
+from app.services import department_works as department_work_service
 from app.services.permissions import has_permission
 
 CONTEXT_PROJECT_LIMIT = 100
+CONTEXT_DEPARTMENT_WORK_LIMIT = 100
 CONTEXT_TASK_LIMIT = 200
 CONTEXT_RECORD_LIMIT = 200
 CONTEXT_TAG_LIMIT_PER_PROJECT = 20
@@ -70,10 +73,50 @@ def _project_rows(db: Session, project_ids: set[str]) -> list[dict[str, Any]]:
     ]
 
 
+def _department_work_rows(
+    db: Session,
+    actor: User,
+    department_work_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Return only department work rows the actor may currently see."""
+
+    if not department_work_ids:
+        return []
+    works = db.scalars(
+        select(DepartmentWork)
+        .where(
+            DepartmentWork.id.in_(department_work_ids),
+            DepartmentWork.deleted_at.is_(None),
+        )
+        .order_by(DepartmentWork.code)
+    ).all()
+    visible_works = [
+        work
+        for work in works
+        if department_work_service.can_view_department_work(db, actor, work)
+    ][:CONTEXT_DEPARTMENT_WORK_LIMIT]
+    return [
+        {
+            "id": work.id,
+            "code": work.code,
+            "name": work.name,
+            "description": work.description,
+            "department_id": work.department_id,
+            "owner_id": work.owner_id,
+            "status": work.status,
+            "visibility": work.visibility,
+        }
+        for work in visible_works
+    ]
+
+
 def _task_row(task: Task) -> dict[str, Any]:
     return {
         "id": task.id,
         "project_id": task.project_id,
+        "department_work_id": task.department_work_id,
+        "parent_id": task.parent_id,
+        "level": task.level,
         "title": task.title,
         "description": task.description,
         "owner_id": task.owner_id,
@@ -82,6 +125,8 @@ def _task_row(task: Task) -> dict[str, Any]:
         "due_date": task.due_date,
         "blocker_reason": task.blocker_reason,
         "result": task.result,
+        "progress_enabled": task.progress_enabled,
+        "progress_percent": task.progress_percent,
     }
 
 
@@ -89,6 +134,7 @@ def _work_record_row(
     record: WorkRecord,
     *,
     include_project_id: bool,
+    include_department_work_id: bool,
     include_task_id: bool,
 ) -> dict[str, Any]:
     row = {
@@ -101,6 +147,8 @@ def _work_record_row(
     }
     if include_project_id:
         row["project_id"] = record.project_id
+    if include_department_work_id:
+        row["department_work_id"] = record.department_work_id
     if include_task_id:
         row["task_id"] = record.task_id
     return row
@@ -115,6 +163,9 @@ def build_chat_context(db: Session, actor: User) -> str:
     """
 
     can_view_projects = has_permission(db, actor, PermissionKey.PROJECTS_VIEW)
+    can_view_department_works = has_permission(
+        db, actor, PermissionKey.DEPARTMENT_WORKS_VIEW
+    )
     can_view_tasks = has_permission(db, actor, PermissionKey.TASKS_VIEW)
     can_view_records = has_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
     project_ids = set(
@@ -163,17 +214,82 @@ def build_chat_context(db: Session, actor: User) -> str:
     project_ids.discard(None)
     project_ids = set(sorted(project_ids)[:CONTEXT_PROJECT_LIMIT])
 
+    department_work_ids = set(
+        db.scalars(
+            select(DepartmentWork.id).where(
+                DepartmentWork.owner_id == actor.id,
+                DepartmentWork.deleted_at.is_(None),
+            )
+        ).all()
+    )
+    # Department work is shared by a department, so every visible source in the
+    # actor's primary department is relevant without an explicit assignment.
+    if actor.primary_department_id:
+        department_work_ids.update(
+            db.scalars(
+                select(DepartmentWork.id).where(
+                    DepartmentWork.department_id == actor.primary_department_id,
+                    DepartmentWork.deleted_at.is_(None),
+                )
+            ).all()
+        )
+    department_work_ids.update(
+        db.scalars(
+            select(Task.department_work_id).where(
+                Task.owner_id == actor.id,
+                Task.department_work_id.is_not(None),
+                Task.deleted_at.is_(None),
+            )
+        ).all()
+    )
+    department_work_ids.update(
+        db.scalars(
+            select(Task.department_work_id)
+            .join(TaskCollaborator, TaskCollaborator.task_id == Task.id)
+            .where(
+                TaskCollaborator.user_id == actor.id,
+                Task.department_work_id.is_not(None),
+                Task.deleted_at.is_(None),
+            )
+        ).all()
+    )
+    department_work_ids.update(
+        db.scalars(
+            select(WorkRecord.department_work_id).where(
+                WorkRecord.author_id == actor.id,
+                WorkRecord.department_work_id.is_not(None),
+                WorkRecord.deleted_at.is_(None),
+            )
+        ).all()
+    )
+    department_work_ids.discard(None)
+    department_work_rows = (
+        _department_work_rows(db, actor, department_work_ids)
+        if can_view_department_works
+        else []
+    )
+    visible_department_work_ids = {
+        row["id"] for row in department_work_rows
+    }
+
+    task_source_filters = []
+    if project_ids:
+        task_source_filters.append(Task.project_id.in_(project_ids))
+    if visible_department_work_ids:
+        task_source_filters.append(
+            Task.department_work_id.in_(visible_department_work_ids)
+        )
     tasks = (
         db.scalars(
             select(Task)
             .where(
-                Task.project_id.in_(project_ids),
+                or_(*task_source_filters),
                 Task.deleted_at.is_(None),
             )
             .order_by(Task.updated_at.desc())
             .limit(CONTEXT_TASK_LIMIT)
         ).all()
-        if project_ids and can_view_tasks
+        if task_source_filters and can_view_tasks
         else []
     )
     local_today = datetime.now(timezone(timedelta(hours=8))).date()
@@ -194,17 +310,26 @@ def build_chat_context(db: Session, actor: User) -> str:
     )
     return _json_text(
         {
-            "scope": "仅限当前用户有关的项目、任务及其最近90天工作记录",
+            "scope": "仅限与当前用户有关的项目、部门工作、任务及其最近90天工作记录",
             "current_user": {
                 "id": actor.id,
                 "display_name": actor.display_name,
             },
             "projects": _project_rows(db, project_ids) if can_view_projects else [],
+            "department_works": department_work_rows,
             "tasks": [_task_row(task) for task in tasks],
             "work_records": [
                 _work_record_row(
                     record,
                     include_project_id=can_view_projects,
+                    include_department_work_id=(
+                        can_view_department_works
+                        and (
+                            record.department_work_id is None
+                            or record.department_work_id
+                            in visible_department_work_ids
+                        )
+                    ),
                     include_task_id=can_view_tasks,
                 )
                 for record in records
@@ -220,6 +345,9 @@ def build_weekly_report_context(
     week_end: date,
 ) -> str:
     can_view_projects = has_permission(db, actor, PermissionKey.PROJECTS_VIEW)
+    can_view_department_works = has_permission(
+        db, actor, PermissionKey.DEPARTMENT_WORKS_VIEW
+    )
     can_view_tasks = has_permission(db, actor, PermissionKey.TASKS_VIEW)
     records = db.scalars(
         select(WorkRecord)
@@ -233,6 +361,9 @@ def build_weekly_report_context(
         .limit(CONTEXT_RECORD_LIMIT)
     ).all()
     project_ids = {record.project_id for record in records if record.project_id}
+    department_work_ids = {
+        record.department_work_id for record in records if record.department_work_id
+    }
     task_ids = {record.task_id for record in records if record.task_id}
     tasks = (
         db.scalars(
@@ -243,9 +374,28 @@ def build_weekly_report_context(
         if task_ids and can_view_tasks
         else []
     )
+    # A record linked through a task remains attributable even for legacy rows
+    # whose source column was not backfilled.
+    department_work_ids.update(
+        task.department_work_id for task in tasks if task.department_work_id
+    )
+    department_work_rows = (
+        _department_work_rows(db, actor, department_work_ids)
+        if can_view_department_works
+        else []
+    )
+    visible_department_work_ids = {
+        row["id"] for row in department_work_rows
+    }
+    tasks = [
+        task
+        for task in tasks
+        if task.department_work_id is None
+        or task.department_work_id in visible_department_work_ids
+    ]
     return _json_text(
         {
-            "scope": "仅限当前用户本自然周的工作记录；项目仅在本周存在该用户工作记录时提供",
+            "scope": "仅限当前用户本自然周的工作记录；项目和部门工作仅在本周存在关联记录时提供",
             "current_user": {
                 "id": actor.id,
                 "display_name": actor.display_name,
@@ -253,11 +403,20 @@ def build_weekly_report_context(
             "week_start": week_start,
             "week_end": week_end,
             "projects": _project_rows(db, project_ids) if can_view_projects else [],
+            "department_works": department_work_rows,
             "tasks": [_task_row(task) for task in tasks],
             "work_records": [
                 _work_record_row(
                     record,
                     include_project_id=can_view_projects,
+                    include_department_work_id=(
+                        can_view_department_works
+                        and (
+                            record.department_work_id is None
+                            or record.department_work_id
+                            in visible_department_work_ids
+                        )
+                    ),
                     include_task_id=can_view_tasks,
                 )
                 for record in records

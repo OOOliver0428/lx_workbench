@@ -207,6 +207,8 @@ def test_initial_password_must_be_changed_before_business_access(api: dict) -> N
     assert client.get("/api/v1/tasks").status_code == 200
     assert client.get("/api/v1/auth/me").json()["permissions"] == [
         "projects.view",
+        "departments.view",
+        "department_works.view",
         "tasks.view",
         "work_records.view",
         "work_records.manage",
@@ -278,6 +280,8 @@ def test_user_creation_only_accepts_name_role_and_initial_password(api: dict) ->
     assert permissions.status_code == 200, permissions.text
     assert permissions.json()["assigned_permissions"] == [
         "projects.view",
+        "departments.view",
+        "department_works.view",
         "tasks.view",
         "work_records.view",
         "work_records.manage",
@@ -470,6 +474,8 @@ def test_progressive_permissions_and_team_scope_eligibility(api: dict) -> None:
         "projects.view",
         "projects.edit",
         "projects.create",
+        "departments.view",
+        "department_works.view",
         "tasks.view",
         "tasks.edit",
         "tasks.create",
@@ -498,6 +504,8 @@ def test_progressive_permissions_and_team_scope_eligibility(api: dict) -> None:
     assert edit_only.json()["assigned_permissions"] == [
         "projects.view",
         "projects.edit",
+        "departments.view",
+        "department_works.view",
         "tasks.view",
         "tasks.edit",
     ]

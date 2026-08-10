@@ -10,7 +10,17 @@ from app.dependencies import get_current_user, get_db, require_csrf
 from app.domain import DIRECT_LEADER_ROLES, can_be_direct_leader, is_super_admin
 from app.errors import AppError, ConflictError, NotFoundError
 from app.identity import normalize_user_identifier
-from app.models import PermissionKey, User, UserRole, utc_now
+from app.models import (
+    Department,
+    DepartmentWork,
+    DepartmentWorkStatus,
+    PermissionKey,
+    Task,
+    TaskStatus,
+    User,
+    UserRole,
+    utc_now,
+)
 from app.schemas import (
     PermissionDefinitionOut,
     UserCandidateOut,
@@ -78,6 +88,13 @@ def _get_assignable_leader(db: Session, leader_id: str) -> User:
     return leader
 
 
+def _get_active_department(db: Session, department_id: str) -> Department:
+    department = db.get(Department, department_id)
+    if not department or department.deleted_at or not department.is_active:
+        raise AppError("DEPARTMENT_INVALID", "主部门必须是有效部门")
+    return department
+
+
 def _ensure_no_leader_cycle(db: Session, user: User, leader: User) -> None:
     current: User | None = leader
     visited: set[str] = set()
@@ -86,6 +103,62 @@ def _ensure_no_leader_cycle(db: Session, user: User, leader: User) -> None:
             raise AppError("DIRECT_LEADER_CYCLE", "直属 Leader 关系不能形成管理环")
         visited.add(current.id)
         current = db.get(User, current.leader_id) if current.leader_id else None
+
+
+def _ensure_department_change_safe(
+    db: Session,
+    user: User,
+    target_department_id: str | None,
+) -> None:
+    if target_department_id == user.primary_department_id:
+        return
+    led_department = db.scalar(
+        select(Department).where(
+            Department.leader_id == user.id,
+            Department.deleted_at.is_(None),
+            Department.is_active.is_(True),
+        )
+    )
+    if led_department and led_department.id != target_department_id:
+        raise ConflictError(
+            "DEPARTMENT_LEADER_REASSIGN_REQUIRED",
+            "该用户仍是部门负责人，请先调整部门负责人后再变更主部门",
+            {"department_id": led_department.id},
+        )
+    owned_work = db.scalar(
+        select(DepartmentWork).where(
+            DepartmentWork.owner_id == user.id,
+            DepartmentWork.deleted_at.is_(None),
+            DepartmentWork.status != DepartmentWorkStatus.ARCHIVED.value,
+            DepartmentWork.department_id != target_department_id,
+        )
+    )
+    if owned_work:
+        raise ConflictError(
+            "DEPARTMENT_WORK_OWNER_REASSIGN_REQUIRED",
+            "该用户仍负责未归档的部门工作，请先改派后再变更主部门",
+            {"department_work_id": owned_work.id},
+        )
+    owned_task = db.scalar(
+        select(Task)
+        .join(DepartmentWork, DepartmentWork.id == Task.department_work_id)
+        .where(
+            Task.owner_id == user.id,
+            Task.deleted_at.is_(None),
+            Task.status.not_in(
+                {TaskStatus.DONE.value, TaskStatus.CANCELLED.value}
+            ),
+            DepartmentWork.deleted_at.is_(None),
+            DepartmentWork.status != DepartmentWorkStatus.ARCHIVED.value,
+            DepartmentWork.department_id != target_department_id,
+        )
+    )
+    if owned_task:
+        raise ConflictError(
+            "DEPARTMENT_TASK_OWNER_REASSIGN_REQUIRED",
+            "该用户仍负责原部门的未完成任务，请先改派后再变更主部门",
+            {"task_id": owned_task.id},
+        )
 
 
 @router.get("", response_model=list[UserOut])
@@ -228,6 +301,11 @@ def create_user(
         password_hash=hash_password(payload.password),
         role=payload.role.value,
         leader_id=None,
+        primary_department_id=(
+            _get_active_department(db, payload.primary_department_id).id
+            if payload.primary_department_id
+            else None
+        ),
         must_change_password=True,
     )
     db.add(user)
@@ -254,6 +332,7 @@ def create_user(
             "displayName": user.display_name,
             "role": user.role,
             "leaderId": None,
+            "primaryDepartmentId": user.primary_department_id,
             "permissions": initial_permissions,
         },
     )
@@ -290,6 +369,7 @@ def update_user(
         "displayName": user.display_name,
         "role": user.role,
         "leaderId": user.leader_id,
+        "primaryDepartmentId": user.primary_department_id,
         "revision": user.revision,
     }
     if "role" in fields and payload.role:
@@ -336,6 +416,14 @@ def update_user(
             user.leader_id = leader.id
         else:
             user.leader_id = None
+    if "primary_department_id" in fields:
+        target_department_id = (
+            _get_active_department(db, payload.primary_department_id).id
+            if payload.primary_department_id
+            else None
+        )
+        _ensure_department_change_safe(db, user, target_department_id)
+        user.primary_department_id = target_department_id
 
     user.revision += 1
     user.updated_at = utc_now()
@@ -357,6 +445,7 @@ def update_user(
             "displayName": user.display_name,
             "role": user.role,
             "leaderId": user.leader_id,
+            "primaryDepartmentId": user.primary_department_id,
             "revision": user.revision,
         },
     )

@@ -40,6 +40,11 @@ def new_opportunity_code() -> str:
     return f"OPP-{date_part}-{uuid.uuid4().hex[:8].upper()}"
 
 
+def new_department_work_code() -> str:
+    date_part = datetime.now(UTC).strftime("%Y%m%d")
+    return f"DW-{date_part}-{uuid.uuid4().hex[:8].upper()}"
+
+
 def is_privileged(user: User) -> bool:
     return user.role in PRIVILEGED_ROLES
 

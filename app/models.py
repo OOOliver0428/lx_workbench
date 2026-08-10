@@ -91,6 +91,11 @@ class PermissionKey(StrEnum):
     PROJECTS_VIEW = "projects.view"
     PROJECTS_EDIT = "projects.edit"
     PROJECTS_CREATE = "projects.create"
+    DEPARTMENTS_VIEW = "departments.view"
+    DEPARTMENTS_MANAGE = "departments.manage"
+    DEPARTMENT_WORKS_VIEW = "department_works.view"
+    DEPARTMENT_WORKS_EDIT = "department_works.edit"
+    DEPARTMENT_WORKS_CREATE = "department_works.create"
     TASKS_VIEW = "tasks.view"
     TASKS_EDIT = "tasks.edit"
     TASKS_CREATE = "tasks.create"
@@ -113,6 +118,17 @@ class ProjectStatus(StrEnum):
     ARCHIVED = "archived"
     REJECTED = "rejected"
     MERGED = "merged"
+
+
+class DepartmentWorkStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class DepartmentWorkVisibility(StrEnum):
+    DEPARTMENT_ONLY = "department_only"
+    PUBLIC = "public"
 
 
 class OpportunityStatus(StrEnum):
@@ -203,6 +219,16 @@ class User(Base, TimestampMixin, RevisionMixin):
         ForeignKey("users.id", ondelete="SET NULL"),
         index=True,
     )
+    primary_department_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "departments.id",
+            name="fk_users_primary_department_id_departments",
+            ondelete="SET NULL",
+            use_alter=True,
+        ),
+        index=True,
+    )
     avatar_key: Mapped[str | None] = mapped_column(String(40))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -242,6 +268,77 @@ class UserPermission(Base, TimestampMixin):
             "user_id",
             "permission_key",
             name="uq_user_permissions_user_key",
+        ),
+    )
+
+
+class Department(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
+    __tablename__ = "departments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    leader_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_departments_normalized_name_active",
+            "normalized_name",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index("ix_departments_active_deleted", "is_active", "deleted_at"),
+    )
+
+
+class DepartmentWork(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
+    __tablename__ = "department_works"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    code: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    department_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("departments.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=DepartmentWorkStatus.IN_PROGRESS.value
+    )
+    visibility: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=DepartmentWorkVisibility.DEPARTMENT_ONLY.value
+    )
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_department_works_department_name_active",
+            "department_id",
+            "normalized_name",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL AND status != 'archived'"),
+        ),
+        Index(
+            "ix_department_works_department_status_deleted",
+            "department_id",
+            "status",
+            "deleted_at",
         ),
     )
 
@@ -558,12 +655,22 @@ class Task(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    project_id: Mapped[str] = mapped_column(
+    project_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("projects.id", ondelete="RESTRICT"),
-        nullable=False,
         index=True,
     )
+    department_work_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("department_works.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     owner_id: Mapped[str] = mapped_column(
@@ -578,8 +685,27 @@ class Task(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     cancel_reason: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    progress_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    progress_percent: Mapped[int | None] = mapped_column(Integer)
 
-    __table_args__ = (Index("ix_tasks_project_status", "project_id", "status"),)
+    __table_args__ = (
+        CheckConstraint(
+            "(project_id IS NOT NULL AND department_work_id IS NULL) OR "
+            "(project_id IS NULL AND department_work_id IS NOT NULL)",
+            name="ck_tasks_exactly_one_source",
+        ),
+        CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_tasks_not_self_parent"),
+        CheckConstraint("level >= 0 AND level <= 2", name="ck_tasks_level"),
+        CheckConstraint(
+            "(progress_enabled = 0 AND progress_percent IS NULL) OR "
+            "(progress_enabled = 1 AND progress_percent >= 0 "
+            "AND progress_percent <= 100 AND progress_percent % 5 = 0)",
+            name="ck_tasks_progress",
+        ),
+        Index("ix_tasks_project_status", "project_id", "status"),
+        Index("ix_tasks_department_work_status", "department_work_id", "status"),
+        Index("ix_tasks_due_status", "due_date", "status"),
+    )
 
 
 class TaskCollaborator(Base):
@@ -611,6 +737,41 @@ class TaskAssignmentHistory(Base):
     changed_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class TaskProgressHistory(Base):
+    __tablename__ = "task_progress_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    from_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    to_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    from_percent: Mapped[int | None] = mapped_column(Integer)
+    to_percent: Mapped[int | None] = mapped_column(Integer)
+    from_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    changed_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "((from_enabled = 0 AND from_percent IS NULL) OR "
+            "(from_enabled = 1 AND from_percent >= 0 AND from_percent <= 100 "
+            "AND from_percent % 5 = 0)) AND "
+            "((to_enabled = 0 AND to_percent IS NULL) OR "
+            "(to_enabled = 1 AND to_percent >= 0 AND to_percent <= 100 "
+            "AND to_percent % 5 = 0))",
+            name="ck_task_progress_history_percent",
+        ),
+        Index("ix_task_progress_history_task_time", "task_id", "changed_at"),
     )
 
 
@@ -713,6 +874,11 @@ class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
         ForeignKey("projects.id", ondelete="RESTRICT"),
         index=True,
     )
+    department_work_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("department_works.id", ondelete="RESTRICT"),
+        index=True,
+    )
     task_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("tasks.id", ondelete="RESTRICT"),
@@ -728,7 +894,50 @@ class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
             "minutes >= 30 AND minutes <= 1440 AND minutes % 30 = 0",
             name="ck_work_records_minutes",
         ),
+        CheckConstraint(
+            "project_id IS NULL OR department_work_id IS NULL",
+            name="ck_work_records_at_most_one_source",
+        ),
         Index("ix_work_records_project_date", "project_id", "work_date"),
+        Index(
+            "ix_work_records_department_work_date",
+            "department_work_id",
+            "work_date",
+        ),
+    )
+
+
+class WorkRecordCreationRequest(Base):
+    __tablename__ = "work_record_creation_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    actor_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    work_record_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("work_records.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="RESTRICT")
+    )
+    created_department_work_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("department_works.id", ondelete="RESTRICT")
+    )
+    created_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_id",
+            "idempotency_key",
+            name="uq_work_record_creation_actor_key",
+        ),
     )
 
 
@@ -788,6 +997,8 @@ class TeamWeeklySummary(Base, TimestampMixin, RevisionMixin):
     forced: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     submitted_count: Mapped[int] = mapped_column(Integer, nullable=False)
     expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    included_leader_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_reports: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     generation_model: Mapped[str] = mapped_column(String(120), nullable=False)
     generation_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
@@ -805,6 +1016,10 @@ class TeamWeeklySummary(Base, TimestampMixin, RevisionMixin):
             "submitted_count >= 0 AND expected_count >= submitted_count",
             name="ck_team_weekly_summaries_counts",
         ),
+        CheckConstraint(
+            "included_leader_count >= 0 AND included_leader_count <= submitted_count",
+            name="ck_team_weekly_summaries_leader_count",
+        ),
         Index(
             "ix_team_weekly_summaries_week_created",
             "week_start",
@@ -817,10 +1032,14 @@ class Deliverable(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     __tablename__ = "deliverables"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    project_id: Mapped[str] = mapped_column(
+    project_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("projects.id", ondelete="RESTRICT"),
-        nullable=False,
+        index=True,
+    )
+    department_work_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("department_works.id", ondelete="RESTRICT"),
         index=True,
     )
     task_id: Mapped[str | None] = mapped_column(
@@ -835,6 +1054,11 @@ class Deliverable(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
 
     __table_args__ = (
+        CheckConstraint(
+            "(project_id IS NOT NULL AND department_work_id IS NULL) OR "
+            "(project_id IS NULL AND department_work_id IS NOT NULL)",
+            name="ck_deliverables_exactly_one_work_source",
+        ),
         CheckConstraint(
             "(task_id IS NOT NULL AND work_record_id IS NULL) OR "
             "(task_id IS NULL AND work_record_id IS NOT NULL)",

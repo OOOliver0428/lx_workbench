@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from app.models import (
     AttentionStatus,
     BusinessStage,
+    DepartmentWorkStatus,
+    DepartmentWorkVisibility,
     PermissionKey,
     ProjectStatus,
     TaskPriority,
@@ -47,6 +58,7 @@ class UserOut(ORMModel):
     display_name: str
     role: str
     leader_id: str | None
+    primary_department_id: str | None
     avatar_key: str | None
     is_active: bool
     must_change_password: bool
@@ -59,6 +71,7 @@ class UserCandidateOut(ORMModel):
     id: str
     display_name: str
     avatar_key: str | None
+    primary_department_id: str | None
 
 
 class AuthContextOut(BaseModel):
@@ -105,6 +118,7 @@ class UserCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=10, max_length=256)
     role: UserRole = UserRole.MEMBER
+    primary_department_id: str | None = None
 
     @field_validator("display_name")
     @classmethod
@@ -122,6 +136,7 @@ class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     role: UserRole | None = None
     leader_id: str | None = None
+    primary_department_id: str | None = None
 
     @field_validator("display_name")
     @classmethod
@@ -146,6 +161,97 @@ class AvatarOptionOut(BaseModel):
 class ProfileAvatarUpdate(BaseModel):
     revision: int = Field(ge=1)
     avatar_key: str | None = Field(default=None, max_length=40)
+
+
+class DepartmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    leader_id: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return _strip_required_text(value)
+
+
+class DepartmentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    leader_id: str | None = None
+    is_active: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_optional_name(cls, value: str | None) -> str | None:
+        return _strip_required_text(value) if value is not None else None
+
+
+class DepartmentOut(ORMModel):
+    id: str
+    name: str
+    leader_id: str | None
+    is_active: bool
+    created_by: str
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class DepartmentWorkCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=10000)
+    department_id: str | None = None
+    owner_id: str | None = None
+    visibility: DepartmentWorkVisibility = DepartmentWorkVisibility.DEPARTMENT_ONLY
+
+    @field_validator("name")
+    @classmethod
+    def strip_work_name(cls, value: str) -> str:
+        return _strip_required_text(value)
+
+
+class DepartmentWorkUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=10000)
+    owner_id: str | None = None
+    visibility: DepartmentWorkVisibility | None = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_optional_work_name(cls, value: str | None) -> str | None:
+        return _strip_required_text(value) if value is not None else None
+
+
+class DepartmentWorkTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    status: DepartmentWorkStatus
+
+
+class DepartmentWorkOut(ORMModel):
+    id: str
+    code: str
+    name: str
+    description: str | None
+    department_id: str
+    department_name: str = ""
+    owner_id: str
+    owner_display_name: str = ""
+    status: str
+    visibility: str
+    created_by: str
+    revision: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class ProjectTagCreate(BaseModel):
@@ -401,11 +507,21 @@ class ProjectMergeOut(BaseModel):
     moved_counts: dict[str, int]
 
 
+class TaskTimeScope(StrEnum):
+    TODAY = "today"
+    WEEK = "week"
+    ALL = "all"
+
+
 class TaskCreate(BaseModel):
-    project_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str | None = None
+    department_work_id: str | None = None
+    parent_id: str | None = None
     title: str = Field(min_length=1, max_length=240)
     description: str | None = Field(default=None, max_length=10000)
-    owner_id: str
+    owner_id: str | None = None
     collaborator_ids: list[str] = Field(default_factory=list, max_length=100)
     priority: TaskPriority = TaskPriority.P1
     due_date: date | None = None
@@ -414,6 +530,18 @@ class TaskCreate(BaseModel):
     @classmethod
     def unique_collaborators(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def validate_source(self) -> TaskCreate:
+        source_count = int(self.project_id is not None) + int(
+            self.department_work_id is not None
+        )
+        if self.parent_id:
+            if source_count > 1:
+                raise ValueError("项目和部门工作不能同时作为任务来源")
+        elif source_count != 1:
+            raise ValueError("任务必须且只能选择项目或部门工作之一")
+        return self
 
 
 class TaskUpdate(BaseModel):
@@ -431,6 +559,7 @@ class TaskTransition(BaseModel):
     blocker_reason: str | None = Field(default=None, max_length=4000)
     result: str | None = Field(default=None, max_length=10000)
     cancel_reason: str | None = Field(default=None, max_length=4000)
+    complete_descendants: bool = False
 
 
 class TaskReassign(BaseModel):
@@ -441,7 +570,10 @@ class TaskReassign(BaseModel):
 
 class TaskOut(ORMModel):
     id: str
-    project_id: str
+    project_id: str | None
+    department_work_id: str | None
+    parent_id: str | None
+    level: int
     title: str
     description: str | None
     owner_id: str
@@ -454,10 +586,51 @@ class TaskOut(ORMModel):
     cancel_reason: str | None
     started_at: datetime | None
     completed_at: datetime | None
+    progress_enabled: bool
+    progress_percent: int | None
     revision: int
     created_at: datetime
     updated_at: datetime
     collaborator_ids: list[str] = []
+
+
+class TaskProgressUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    enabled: bool
+    percent: int | None = Field(default=None, ge=0, le=100, multiple_of=5)
+    result: str | None = Field(default=None, max_length=10000)
+    reason: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_enabled_percent(self) -> TaskProgressUpdate:
+        if self.enabled and self.percent is None:
+            raise ValueError("开启进度跟踪时必须提供进度")
+        if not self.enabled and self.percent is not None:
+            raise ValueError("关闭进度跟踪时不能提供进度")
+        return self
+
+
+class TaskProgressHistoryOut(ORMModel):
+    id: str
+    task_id: str
+    from_enabled: bool
+    to_enabled: bool
+    from_percent: int | None
+    to_percent: int | None
+    from_status: str
+    to_status: str
+    reason: str | None
+    changed_by: str
+    changed_at: datetime
+
+
+class TaskTreeDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class ProjectProgressCreate(BaseModel):
@@ -511,7 +684,8 @@ class DeliverableInput(BaseModel):
 
 class DeliverableOut(ORMModel):
     id: str
-    project_id: str
+    project_id: str | None
+    department_work_id: str | None
     task_id: str | None
     work_record_id: str | None
     name: str
@@ -525,10 +699,17 @@ class WorkRecordCreate(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
     minutes: int = Field(ge=30, le=1440, multiple_of=30)
     project_id: str | None = None
+    department_work_id: str | None = None
     task_id: str | None = None
     risk: str | None = Field(default=None, max_length=5000)
     next_action: str | None = Field(default=None, max_length=5000)
     deliverables: list[DeliverableInput] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> WorkRecordCreate:
+        if self.project_id and self.department_work_id:
+            raise ValueError("工作记录不能同时关联项目和部门工作")
+        return self
 
 
 class WorkRecordUpdate(BaseModel):
@@ -537,10 +718,17 @@ class WorkRecordUpdate(BaseModel):
     content: str | None = Field(default=None, min_length=1, max_length=20000)
     minutes: int | None = Field(default=None, ge=30, le=1440, multiple_of=30)
     project_id: str | None = None
+    department_work_id: str | None = None
     task_id: str | None = None
     risk: str | None = Field(default=None, max_length=5000)
     next_action: str | None = Field(default=None, max_length=5000)
     delegated_edit_reason: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_update_source(self) -> WorkRecordUpdate:
+        if self.project_id and self.department_work_id:
+            raise ValueError("工作记录不能同时关联项目和部门工作")
+        return self
 
 
 class WorkRecordOut(ORMModel):
@@ -553,6 +741,11 @@ class WorkRecordOut(ORMModel):
     minutes: int
     project_id: str | None
     project_name: str | None = None
+    department_work_id: str | None
+    department_work_name: str | None = None
+    source_type: str | None = None
+    source_id: str | None = None
+    source_name: str | None = None
     task_id: str | None
     task_title: str | None = None
     risk: str | None
@@ -565,6 +758,68 @@ class WorkRecordOut(ORMModel):
     created_at: datetime
     updated_at: datetime
     deliverables: list[DeliverableOut] = []
+
+
+class QuickTaskCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=10000)
+    owner_id: str | None = None
+    collaborator_ids: list[str] = Field(default_factory=list, max_length=100)
+    priority: TaskPriority = TaskPriority.P1
+    due_date: date | None = None
+    parent_id: str | None = None
+
+    @field_validator("collaborator_ids")
+    @classmethod
+    def unique_quick_collaborators(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
+class WorkRecordQuickCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=8, max_length=80)
+    work_date: date
+    content: str = Field(min_length=1, max_length=20000)
+    minutes: int = Field(ge=30, le=1440, multiple_of=30)
+    risk: str | None = Field(default=None, max_length=5000)
+    next_action: str | None = Field(default=None, max_length=5000)
+    deliverables: list[DeliverableInput] = Field(default_factory=list, max_length=50)
+    project_id: str | None = None
+    department_work_id: str | None = None
+    new_project: ProjectCreate | None = None
+    new_department_work: DepartmentWorkCreate | None = None
+    task_id: str | None = None
+    new_task: QuickTaskCreate | None = None
+
+    @model_validator(mode="after")
+    def validate_composite_choices(self) -> WorkRecordQuickCreate:
+        source_count = sum(
+            int(value is not None)
+            for value in (
+                self.project_id,
+                self.department_work_id,
+                self.new_project,
+                self.new_department_work,
+            )
+        )
+        if source_count > 1:
+            raise ValueError("一次只能选择或新建一个工作来源")
+        if self.task_id and self.new_task:
+            raise ValueError("已有任务和新任务不能同时提交")
+        if self.new_task and source_count != 1 and not self.new_task.parent_id:
+            raise ValueError("新建任务必须选择或新建一个工作来源")
+        return self
+
+
+class WorkRecordQuickCreateOut(BaseModel):
+    work_record: WorkRecordOut
+    created_project_id: str | None = None
+    created_department_work_id: str | None = None
+    created_task_id: str | None = None
+    replayed: bool = False
 
 
 class WeeklyReportOut(ORMModel):
@@ -767,6 +1022,8 @@ class TeamWeeklySummaryOut(ORMModel):
     forced: bool
     submitted_count: int
     expected_count: int
+    included_leader_count: int = 0
+    source_reports: list[dict[str, Any]] | None = None
     generation_model: str
     generation_usage: dict[str, int] | None
     created_at: datetime

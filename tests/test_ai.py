@@ -7,7 +7,20 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
-from app.models import AIProviderConfig, PermissionKey, User, UserPermission
+from app.models import (
+    AIProviderConfig,
+    Department,
+    DepartmentWork,
+    DepartmentWorkStatus,
+    DepartmentWorkVisibility,
+    PermissionKey,
+    Task,
+    TaskPriority,
+    TaskStatus,
+    User,
+    UserPermission,
+    WorkRecord,
+)
 from app.services import ai as ai_service
 from app.services.ai_context import build_chat_context, build_weekly_report_context
 from tests.conftest import login
@@ -113,6 +126,11 @@ def test_ai_context_omits_project_and_task_data_without_view_permissions(
         PermissionKey.PROJECTS_VIEW.value,
         PermissionKey.PROJECTS_EDIT.value,
         PermissionKey.PROJECTS_CREATE.value,
+        PermissionKey.DEPARTMENTS_VIEW.value,
+        PermissionKey.DEPARTMENTS_MANAGE.value,
+        PermissionKey.DEPARTMENT_WORKS_VIEW.value,
+        PermissionKey.DEPARTMENT_WORKS_EDIT.value,
+        PermissionKey.DEPARTMENT_WORKS_CREATE.value,
         PermissionKey.TASKS_VIEW.value,
         PermissionKey.TASKS_EDIT.value,
         PermissionKey.TASKS_CREATE.value,
@@ -135,10 +153,177 @@ def test_ai_context_omits_project_and_task_data_without_view_permissions(
 
     for context in (chat_context, weekly_context):
         assert context["projects"] == []
+        assert context["department_works"] == []
         assert context["tasks"] == []
         assert context["work_records"]
         assert "project_id" not in context["work_records"][0]
+        assert "department_work_id" not in context["work_records"][0]
         assert "task_id" not in context["work_records"][0]
+
+
+def test_ai_context_includes_only_visible_related_department_work(api: dict) -> None:
+    today = date.today()
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        foreign_owner = db.get(User, api["users"]["member2"])
+        creator = db.get(User, api["users"]["super_admin"])
+        assert actor is not None
+        assert foreign_owner is not None
+        assert creator is not None
+
+        local_department = Department(
+            name="AI Context Local Department",
+            normalized_name="ai context local department",
+            leader_id=None,
+            created_by=creator.id,
+        )
+        foreign_department = Department(
+            name="AI Context Foreign Department",
+            normalized_name="ai context foreign department",
+            leader_id=None,
+            created_by=creator.id,
+        )
+        db.add_all([local_department, foreign_department])
+        db.flush()
+        actor.primary_department_id = local_department.id
+        foreign_owner.primary_department_id = foreign_department.id
+
+        local_work = DepartmentWork(
+            code="DWK-AI-LOCAL",
+            name="Local department work",
+            normalized_name="local department work",
+            description="Local trusted context",
+            department_id=local_department.id,
+            owner_id=actor.id,
+            status=DepartmentWorkStatus.IN_PROGRESS.value,
+            visibility=DepartmentWorkVisibility.DEPARTMENT_ONLY.value,
+            created_by=actor.id,
+        )
+        public_work = DepartmentWork(
+            code="DWK-AI-PUBLIC",
+            name="Public related department work",
+            normalized_name="public related department work",
+            description="Public trusted context",
+            department_id=foreign_department.id,
+            owner_id=foreign_owner.id,
+            status=DepartmentWorkStatus.IN_PROGRESS.value,
+            visibility=DepartmentWorkVisibility.PUBLIC.value,
+            created_by=foreign_owner.id,
+        )
+        hidden_work = DepartmentWork(
+            code="DWK-AI-HIDDEN",
+            name="Hidden foreign department work",
+            normalized_name="hidden foreign department work",
+            description="Must not enter AI context",
+            department_id=foreign_department.id,
+            owner_id=foreign_owner.id,
+            status=DepartmentWorkStatus.IN_PROGRESS.value,
+            visibility=DepartmentWorkVisibility.DEPARTMENT_ONLY.value,
+            created_by=foreign_owner.id,
+        )
+        db.add_all([local_work, public_work, hidden_work])
+        db.flush()
+
+        local_task = Task(
+            project_id=None,
+            department_work_id=local_work.id,
+            parent_id=None,
+            level=0,
+            title="Tracked local task",
+            owner_id=actor.id,
+            created_by=actor.id,
+            priority=TaskPriority.P1.value,
+            status=TaskStatus.IN_PROGRESS.value,
+            progress_enabled=True,
+            progress_percent=45,
+        )
+        public_task = Task(
+            project_id=None,
+            department_work_id=public_work.id,
+            parent_id=None,
+            level=0,
+            title="Tracked public task",
+            owner_id=actor.id,
+            created_by=actor.id,
+            priority=TaskPriority.P1.value,
+            status=TaskStatus.TODO.value,
+            progress_enabled=False,
+            progress_percent=None,
+        )
+        hidden_task = Task(
+            project_id=None,
+            department_work_id=hidden_work.id,
+            parent_id=None,
+            level=0,
+            title="Hidden task",
+            owner_id=actor.id,
+            created_by=actor.id,
+            priority=TaskPriority.P1.value,
+            status=TaskStatus.TODO.value,
+            progress_enabled=False,
+            progress_percent=None,
+        )
+        db.add_all([local_task, public_task, hidden_task])
+        db.flush()
+        db.add(
+            WorkRecord(
+                author_id=actor.id,
+                work_date=today,
+                content="Weekly department work result",
+                minutes=60,
+                project_id=None,
+                department_work_id=local_work.id,
+                task_id=local_task.id,
+                last_edited_by=actor.id,
+            )
+        )
+        db.flush()
+        expected = {
+            "local_work": local_work.id,
+            "public_work": public_work.id,
+            "hidden_work": hidden_work.id,
+            "local_task": local_task.id,
+            "public_task": public_task.id,
+            "hidden_task": hidden_task.id,
+        }
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        chat_context = json.loads(build_chat_context(db, actor))
+        weekly_context = json.loads(
+            build_weekly_report_context(db, actor, today, today)
+        )
+
+    assert {row["id"] for row in chat_context["department_works"]} == {
+        expected["local_work"],
+        expected["public_work"],
+    }
+    assert {row["id"] for row in chat_context["tasks"]} == {
+        expected["local_task"],
+        expected["public_task"],
+    }
+    local_task_row = next(
+        row for row in chat_context["tasks"] if row["id"] == expected["local_task"]
+    )
+    assert local_task_row["department_work_id"] == expected["local_work"]
+    assert local_task_row["parent_id"] is None
+    assert local_task_row["level"] == 0
+    assert local_task_row["progress_enabled"] is True
+    assert local_task_row["progress_percent"] == 45
+    assert chat_context["work_records"][0]["department_work_id"] == expected[
+        "local_work"
+    ]
+
+    assert [row["id"] for row in weekly_context["department_works"]] == [
+        expected["local_work"]
+    ]
+    assert [row["id"] for row in weekly_context["tasks"]] == [
+        expected["local_task"]
+    ]
+    assert weekly_context["work_records"][0]["department_work_id"] == expected[
+        "local_work"
+    ]
 
 
 class ProviderResponse:

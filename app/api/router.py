@@ -5,6 +5,8 @@ from app.api.routes import (
     audit,
     auth,
     dashboard,
+    department_works,
+    departments,
     health,
     opportunities,
     profile,
@@ -22,6 +24,8 @@ api_router.include_router(auth.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(profile.router)
 api_router.include_router(users.router)
+api_router.include_router(departments.router)
+api_router.include_router(department_works.router)
 api_router.include_router(project_tags.router)
 api_router.include_router(opportunities.router)
 api_router.include_router(projects.router)

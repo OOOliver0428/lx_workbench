@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -7,11 +10,28 @@ from sqlalchemy.orm import Session
 
 from app.audit import record_audit
 from app.domain import is_super_admin, jsonable_snapshot
-from app.errors import AppError, NotFoundError, PermissionDeniedError
-from app.models import Deliverable, ProjectStatus, User, WorkRecord, utc_now
-from app.schemas import WorkRecordCreate, WorkRecordUpdate
+from app.errors import AppError, ConflictError, NotFoundError, PermissionDeniedError
+from app.models import (
+    Deliverable,
+    DepartmentWorkStatus,
+    PermissionKey,
+    ProjectStatus,
+    User,
+    WorkRecord,
+    WorkRecordCreationRequest,
+    utc_now,
+)
+from app.schemas import (
+    TaskCreate,
+    WorkRecordCreate,
+    WorkRecordQuickCreate,
+    WorkRecordUpdate,
+)
+from app.services import department_works as department_work_service
+from app.services import permissions as permission_service
+from app.services import projects as project_service
+from app.services import tasks as task_service
 from app.services.projects import assert_revision, get_project
-from app.services.tasks import get_task
 
 WORK_RECORD_SNAPSHOT_FIELDS = (
     "id",
@@ -20,6 +40,7 @@ WORK_RECORD_SNAPSHOT_FIELDS = (
     "content",
     "minutes",
     "project_id",
+    "department_work_id",
     "task_id",
     "risk",
     "next_action",
@@ -31,6 +52,15 @@ WORK_RECORD_SNAPSHOT_FIELDS = (
 SHANGHAI = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
+@dataclass(frozen=True)
+class QuickCreateResult:
+    work_record: WorkRecord
+    created_project_id: str | None
+    created_department_work_id: str | None
+    created_task_id: str | None
+    replayed: bool
+
+
 def get_work_record(db: Session, record_id: str) -> WorkRecord:
     record = db.get(WorkRecord, record_id)
     if not record or record.deleted_at:
@@ -38,17 +68,49 @@ def get_work_record(db: Session, record_id: str) -> WorkRecord:
     return record
 
 
+def _require_department_work_record_scope(
+    db: Session,
+    *,
+    actor: User,
+    department_work_id: str,
+) -> None:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.DEPARTMENT_WORKS_VIEW,
+    )
+    work = department_work_service.get_department_work(db, department_work_id)
+    department_work_service.require_view_department_work(db, actor, work)
+    if work.status == DepartmentWorkStatus.ARCHIVED.value:
+        raise ConflictError(
+            "DEPARTMENT_WORK_ARCHIVED",
+            "已归档部门工作不能变更工作记录",
+        )
+    if actor.primary_department_id != work.department_id and not is_super_admin(actor):
+        raise PermissionDeniedError("公开范围仅允许跨部门查看，不能跨部门变更工作记录")
+
+
 def _validate_links(
     db: Session,
     *,
+    actor: User,
     project_id: str | None,
+    department_work_id: str | None,
     task_id: str | None,
-) -> str | None:
+) -> tuple[str | None, str | None]:
+    if project_id and department_work_id:
+        raise AppError(
+            "WORK_RECORD_SOURCE_INVALID",
+            "工作记录不能同时关联项目和部门工作",
+        )
     if task_id:
-        task = get_task(db, task_id)
+        task = task_service.get_task(db, task_id, actor=actor)
         if project_id and project_id != task.project_id:
-            raise AppError("TASK_PROJECT_MISMATCH", "任务与项目不一致")
+            raise AppError("TASK_SOURCE_MISMATCH", "任务与工作来源不一致")
+        if department_work_id and department_work_id != task.department_work_id:
+            raise AppError("TASK_SOURCE_MISMATCH", "任务与工作来源不一致")
         project_id = task.project_id
+        department_work_id = task.department_work_id
     if project_id:
         project = get_project(db, project_id)
         if project.status in {
@@ -57,7 +119,13 @@ def _validate_links(
             ProjectStatus.ARCHIVED.value,
         }:
             raise AppError("PROJECT_NOT_WRITABLE", "当前项目状态不允许新增工作记录")
-    return project_id
+    if department_work_id:
+        _require_department_work_record_scope(
+            db,
+            actor=actor,
+            department_work_id=department_work_id,
+        )
+    return project_id, department_work_id
 
 
 def _add_deliverables(
@@ -66,12 +134,14 @@ def _add_deliverables(
     deliverables: list[object],
     actor: User,
 ) -> None:
-    if deliverables and not record.project_id:
-        raise AppError("DELIVERABLE_PROJECT_REQUIRED", "产出物必须关联项目")
+    if deliverables and not (record.project_id or record.department_work_id):
+        # Keep the historical code so existing API clients do not need a flag day.
+        raise AppError("DELIVERABLE_PROJECT_REQUIRED", "产出物必须关联项目或部门工作")
     for item in deliverables:
         db.add(
             Deliverable(
                 project_id=record.project_id,
+                department_work_id=record.department_work_id,
                 work_record_id=record.id,
                 task_id=None,
                 name=item.name.strip(),
@@ -100,9 +170,11 @@ def create_work_record(
     payload: WorkRecordCreate,
     actor: User,
 ) -> WorkRecord:
-    project_id = _validate_links(
+    project_id, department_work_id = _validate_links(
         db,
+        actor=actor,
         project_id=payload.project_id,
+        department_work_id=payload.department_work_id,
         task_id=payload.task_id,
     )
     record = WorkRecord(
@@ -111,6 +183,7 @@ def create_work_record(
         content=payload.content.strip(),
         minutes=payload.minutes,
         project_id=project_id,
+        department_work_id=department_work_id,
         task_id=payload.task_id,
         risk=payload.risk,
         next_action=payload.next_action,
@@ -137,6 +210,7 @@ def list_work_records(
     *,
     author_id: str | None = None,
     project_id: str | None = None,
+    department_work_id: str | None = None,
     unassigned_only: bool = False,
     current_week_only: bool = False,
 ) -> list[WorkRecord]:
@@ -147,8 +221,13 @@ def list_work_records(
         query = query.where(WorkRecord.author_id == author_id)
     if project_id:
         query = query.where(WorkRecord.project_id == project_id)
+    if department_work_id:
+        query = query.where(WorkRecord.department_work_id == department_work_id)
     if unassigned_only:
-        query = query.where(WorkRecord.project_id.is_(None))
+        query = query.where(
+            WorkRecord.project_id.is_(None),
+            WorkRecord.department_work_id.is_(None),
+        )
     if current_week_only:
         today = datetime.now(SHANGHAI).date()
         week_start = today - timedelta(days=today.weekday())
@@ -178,18 +257,29 @@ def update_work_record(
     fields = payload.model_fields_set - {"revision", "delegated_edit_reason"}
 
     task_id = payload.task_id if "task_id" in fields else record.task_id
-    if "project_id" in fields:
-        project_id = payload.project_id
-    elif "task_id" in fields and task_id:
-        project_id = None
-    else:
-        project_id = record.project_id
-    project_id = _validate_links(db, project_id=project_id, task_id=task_id)
+    project_id = payload.project_id if "project_id" in fields else record.project_id
+    department_work_id = (
+        payload.department_work_id
+        if "department_work_id" in fields
+        else record.department_work_id
+    )
+    if "task_id" in fields and task_id:
+        if "project_id" not in fields:
+            project_id = None
+        if "department_work_id" not in fields:
+            department_work_id = None
+    project_id, department_work_id = _validate_links(
+        db,
+        actor=actor,
+        project_id=project_id,
+        department_work_id=department_work_id,
+        task_id=task_id,
+    )
     linked_deliverables = _active_deliverables_for_record(db, record.id)
-    if linked_deliverables and not project_id:
+    if linked_deliverables and not (project_id or department_work_id):
         raise AppError(
             "DELIVERABLE_PROJECT_REQUIRED",
-            "有交付物的工作记录必须关联项目",
+            "有交付物的工作记录必须关联项目或部门工作",
         )
     for field in ("work_date", "content", "minutes", "risk", "next_action"):
         if field in fields:
@@ -199,13 +289,18 @@ def update_work_record(
             setattr(record, field, value)
     now = utc_now()
     moved_deliverable_count = 0
-    if "project_id" in fields or "task_id" in fields:
+    if {"project_id", "department_work_id", "task_id"} & fields:
         record.project_id = project_id
+        record.department_work_id = department_work_id
         record.task_id = task_id
         for deliverable in linked_deliverables:
-            if deliverable.project_id == project_id:
+            if (
+                deliverable.project_id == project_id
+                and deliverable.department_work_id == department_work_id
+            ):
                 continue
             deliverable.project_id = project_id
+            deliverable.department_work_id = department_work_id
             deliverable.revision += 1
             deliverable.updated_at = now
             moved_deliverable_count += 1
@@ -231,6 +326,146 @@ def update_work_record(
     return record
 
 
+def _quick_payload_hash(payload: WorkRecordQuickCreate) -> str:
+    canonical = payload.model_dump(mode="json", exclude={"idempotency_key"})
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _existing_quick_request(
+    db: Session,
+    *,
+    actor: User,
+    idempotency_key: str,
+    payload_hash: str,
+) -> QuickCreateResult | None:
+    request = db.scalar(
+        select(WorkRecordCreationRequest).where(
+            WorkRecordCreationRequest.actor_id == actor.id,
+            WorkRecordCreationRequest.idempotency_key == idempotency_key,
+        )
+    )
+    if request is None:
+        return None
+    if request.payload_hash != payload_hash:
+        raise ConflictError(
+            "IDEMPOTENCY_KEY_REUSED",
+            "该幂等键已用于另一份请求，请更换后重试",
+        )
+    record = db.get(WorkRecord, request.work_record_id)
+    if record is None or record.deleted_at:
+        raise ConflictError(
+            "IDEMPOTENT_RESULT_UNAVAILABLE",
+            "该请求已处理，但原工作记录当前不可用",
+        )
+    return QuickCreateResult(
+        work_record=record,
+        created_project_id=request.created_project_id,
+        created_department_work_id=request.created_department_work_id,
+        created_task_id=request.created_task_id,
+        replayed=True,
+    )
+
+
+def quick_create_work_record(
+    db: Session,
+    payload: WorkRecordQuickCreate,
+    actor: User,
+) -> QuickCreateResult:
+    """Create optional source/task plus one record in the request transaction."""
+
+    payload_hash = _quick_payload_hash(payload)
+    existing = _existing_quick_request(
+        db,
+        actor=actor,
+        idempotency_key=payload.idempotency_key,
+        payload_hash=payload_hash,
+    )
+    if existing is not None:
+        return existing
+
+    project_id = payload.project_id
+    department_work_id = payload.department_work_id
+    task_id = payload.task_id
+    created_project_id: str | None = None
+    created_department_work_id: str | None = None
+    created_task_id: str | None = None
+
+    if payload.new_project is not None:
+        permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_CREATE)
+        project = project_service.create_project(db, payload.new_project, actor)
+        project_id = project.id
+        created_project_id = project.id
+    elif payload.new_department_work is not None:
+        permission_service.assert_permission(
+            db,
+            actor,
+            PermissionKey.DEPARTMENT_WORKS_CREATE,
+        )
+        department_work = department_work_service.create_department_work(
+            db,
+            payload.new_department_work,
+            actor,
+        )
+        department_work_id = department_work.id
+        created_department_work_id = department_work.id
+
+    if payload.new_task is not None:
+        permission_service.assert_permission(db, actor, PermissionKey.TASKS_CREATE)
+        task_payload = TaskCreate(
+            project_id=project_id,
+            department_work_id=department_work_id,
+            parent_id=payload.new_task.parent_id,
+            title=payload.new_task.title,
+            description=payload.new_task.description,
+            owner_id=payload.new_task.owner_id,
+            collaborator_ids=payload.new_task.collaborator_ids,
+            priority=payload.new_task.priority,
+            due_date=payload.new_task.due_date,
+        )
+        task = task_service.create_task(db, task_payload, actor)
+        task_id = task.id
+        project_id = task.project_id
+        department_work_id = task.department_work_id
+        created_task_id = task.id
+
+    record_payload = WorkRecordCreate(
+        work_date=payload.work_date,
+        content=payload.content,
+        minutes=payload.minutes,
+        project_id=project_id,
+        department_work_id=department_work_id,
+        task_id=task_id,
+        risk=payload.risk,
+        next_action=payload.next_action,
+        deliverables=payload.deliverables,
+    )
+    record = create_work_record(db, record_payload, actor)
+    request = WorkRecordCreationRequest(
+        actor_id=actor.id,
+        idempotency_key=payload.idempotency_key,
+        payload_hash=payload_hash,
+        work_record_id=record.id,
+        created_project_id=created_project_id,
+        created_department_work_id=created_department_work_id,
+        created_task_id=created_task_id,
+    )
+    db.add(request)
+    db.flush()
+    return QuickCreateResult(
+        work_record=record,
+        created_project_id=created_project_id,
+        created_department_work_id=created_department_work_id,
+        created_task_id=created_task_id,
+        replayed=False,
+    )
+
+
 def delete_work_record(
     db: Session,
     record: WorkRecord,
@@ -243,6 +478,12 @@ def delete_work_record(
         raise PermissionDeniedError("只能删除自己的工作记录")
     if record.author_id != actor.id and not reason:
         raise AppError("DELEGATED_DELETE_REASON_REQUIRED", "代删他人记录必须填写原因")
+    if record.department_work_id:
+        _require_department_work_record_scope(
+            db,
+            actor=actor,
+            department_work_id=record.department_work_id,
+        )
     assert_revision(record, revision, entity_name="work_record")
     before = jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS)
     now = utc_now()

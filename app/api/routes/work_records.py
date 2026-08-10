@@ -1,11 +1,18 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
 from app.domain import is_super_admin
 from app.errors import PermissionDeniedError
 from app.models import PermissionKey, User
-from app.schemas import RevisionAction, WorkRecordCreate, WorkRecordOut, WorkRecordUpdate
+from app.schemas import (
+    RevisionAction,
+    WorkRecordCreate,
+    WorkRecordOut,
+    WorkRecordQuickCreate,
+    WorkRecordQuickCreateOut,
+    WorkRecordUpdate,
+)
 from app.serializers import work_record_out
 from app.services import permissions as permission_service
 from app.services import work_records as record_service
@@ -17,6 +24,7 @@ router = APIRouter(prefix="/work-records", tags=["work-records"])
 def list_work_records(
     author_id: str | None = None,
     project_id: str | None = None,
+    department_work_id: str | None = None,
     unassigned_only: bool = False,
     current_week_only: bool = False,
     actor: User = Depends(get_current_user),
@@ -28,6 +36,7 @@ def list_work_records(
         actor,
         author_id=author_id,
         project_id=project_id,
+        department_work_id=department_work_id,
         unassigned_only=unassigned_only,
         current_week_only=current_week_only,
     )
@@ -42,6 +51,30 @@ def create_work_record(
 ) -> WorkRecordOut:
     permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
     return work_record_out(db, record_service.create_work_record(db, payload, actor))
+
+
+@router.post(
+    "/quick-create",
+    response_model=WorkRecordQuickCreateOut,
+    status_code=201,
+)
+def quick_create_work_record(
+    payload: WorkRecordQuickCreate,
+    response: Response,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db, scope="function"),
+) -> WorkRecordQuickCreateOut:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
+    result = record_service.quick_create_work_record(db, payload, actor)
+    if result.replayed:
+        response.status_code = 200
+    return WorkRecordQuickCreateOut(
+        work_record=work_record_out(db, result.work_record),
+        created_project_id=result.created_project_id,
+        created_department_work_id=result.created_department_work_id,
+        created_task_id=result.created_task_id,
+        replayed=result.replayed,
+    )
 
 
 @router.get("/{record_id}", response_model=WorkRecordOut)
