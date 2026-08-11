@@ -30,6 +30,33 @@ const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
   "cancelled",
 ]);
 
+type TimeBucket = "overdue" | "due" | "future" | "none";
+
+/** 当前「今天 / 本周日」日期（Asia/Shanghai，YYYY-MM-DD）。 */
+function shanghaiWeekWindow() {
+  const shanghaiNow = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }),
+  );
+  const format = (value: Date) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  const weekday = shanghaiNow.getDay() || 7;
+  const sunday = new Date(shanghaiNow);
+  sunday.setDate(shanghaiNow.getDate() + (7 - weekday));
+  return { today: format(shanghaiNow), weekEnd: format(sunday) };
+}
+
+function taskTimeBucket(
+  task: Task,
+  scope: "today" | "week",
+  today: string,
+  weekEnd: string,
+): TimeBucket {
+  if (!task.due_date) return "none";
+  if (task.due_date < today) return "overdue";
+  if (scope === "today") return task.due_date === today ? "due" : "future";
+  return task.due_date <= weekEnd ? "due" : "future";
+}
+
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: "待开始",
   in_progress: "处理中",
@@ -48,7 +75,6 @@ export function TasksView({
   currentUser: User;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [matchedIds, setMatchedIds] = useState<Set<string> | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [departmentWorks, setDepartmentWorks] = useState<DepartmentWork[]>([]);
   const [users, setUsers] = useState<UserCandidate[]>([]);
@@ -77,28 +103,16 @@ export function TasksView({
     setLoading(true);
     setError("");
     try {
-      const baseParams = new URLSearchParams();
-      baseParams.set("time_scope", "all");
-      if (status) baseParams.set("status", status);
-      const matchedParams = new URLSearchParams();
-      matchedParams.set("time_scope", timeScope);
-      if (status) matchedParams.set("status", status);
-      const [taskRows, matchedRows, projectRows, workRows, userRows] =
-        await Promise.all([
-          api.tasks.list(baseParams),
-          timeScope === "all"
-            ? Promise.resolve(null)
-            : api.tasks.list(matchedParams),
-          api.projects.list(),
-          api.departmentWorks.list(),
-          api.users.candidates(),
-        ]);
+      const params = new URLSearchParams();
+      params.set("time_scope", "all");
+      if (status) params.set("status", status);
+      const [taskRows, projectRows, workRows, userRows] = await Promise.all([
+        api.tasks.list(params),
+        api.projects.list(),
+        api.departmentWorks.list(),
+        api.users.candidates(),
+      ]);
       setTasks(taskRows);
-      setMatchedIds(
-        matchedRows
-          ? new Set(matchedRows.map((task) => task.id))
-          : null,
-      );
       setProjects(projectRows);
       setDepartmentWorks(
         workRows.filter((work) => work.status !== "archived"),
@@ -111,7 +125,7 @@ export function TasksView({
     } finally {
       setLoading(false);
     }
-  }, [status, timeScope]);
+  }, [status]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
@@ -204,28 +218,68 @@ export function TasksView({
     ? (tasks.find((task) => task.id === detailTaskId) ?? null)
     : null;
 
-  const matchedTaskIds = matchedIds;
-  const matchedGroups = useMemo(
-    () =>
-      matchedTaskIds
-        ? taskGroups.filter((group) =>
-            group.tasks.some((task) => matchedTaskIds.has(task.id)),
-          )
-        : taskGroups,
-    [taskGroups, matchedTaskIds],
-  );
-  const restGroups = useMemo(
-    () =>
-      matchedTaskIds
-        ? taskGroups.filter(
-            (group) =>
-              !group.tasks.some((task) => matchedTaskIds.has(task.id)),
-          )
-        : [],
-    [taskGroups, matchedTaskIds],
-  );
-  const scopeHint =
-    timeScope === "today" ? "无今日截止任务" : "无本周到期任务";
+  // 时间筛选分桶：仅「今天/本周」生效；全部模式为 null
+  const activeScope: "today" | "week" | null =
+    timeScope === "all" ? null : timeScope;
+  const bucketWindow = shanghaiWeekWindow();
+  const timeBuckets = useMemo<Record<TimeBucket, Task[]> | null>(() => {
+    if (!activeScope) return null;
+    const buckets: Record<TimeBucket, Task[]> = {
+      overdue: [],
+      due: [],
+      future: [],
+      none: [],
+    };
+    for (const task of visibleTasks) {
+      buckets[
+        taskTimeBucket(
+          task,
+          activeScope,
+          bucketWindow.today,
+          bucketWindow.weekEnd,
+        )
+      ].push(task);
+    }
+    return buckets;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTasks, activeScope]);
+
+  const groupBuckets = useMemo<Record<TimeBucket, TaskGroup[]> | null>(() => {
+    if (!timeBuckets || !activeScope) return null;
+    const rank: Record<TimeBucket, number> = {
+      overdue: 0,
+      due: 1,
+      future: 2,
+      none: 3,
+    };
+    const buckets: Record<TimeBucket, TaskGroup[]> = {
+      overdue: [],
+      due: [],
+      future: [],
+      none: [],
+    };
+    for (const group of taskGroups) {
+      let bucket: TimeBucket = "none";
+      for (const task of group.tasks) {
+        const own = taskTimeBucket(
+          task,
+          activeScope,
+          bucketWindow.today,
+          bucketWindow.weekEnd,
+        );
+        if (rank[own] < rank[bucket]) bucket = own;
+      }
+      buckets[bucket].push(group);
+    }
+    return buckets;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskGroups, timeBuckets, activeScope]);
+
+  const dueSectionLabel = timeScope === "today" ? "今日待完成" : "本周待完成";
+  const dueEmptyHint =
+    timeScope === "today"
+      ? "今天没有待完成的任务，可以处理逾期或规划后续安排"
+      : "本周没有待完成的任务，可以处理逾期或规划后续安排";
 
   function collectDescendants(taskId: string) {
     const collected: Task[] = [];
@@ -263,6 +317,22 @@ export function TasksView({
         caught instanceof ApiClientError ? caught.message : "状态更新失败",
       );
     }
+  }
+
+  function renderDivider(
+    label: string,
+    options?: { danger?: boolean; hint?: string },
+  ) {
+    return (
+      <div className="task-filter-divider" key={`divider-${label}`}>
+        {options?.hint ? <p>{options.hint}</p> : null}
+        <div
+          className={`task-filter-divider-line${options?.danger ? " danger" : ""}`}
+        >
+          <span>{label}</span>
+        </div>
+      </div>
+    );
   }
 
   function renderTaskCard(task: Task) {
@@ -521,26 +591,52 @@ export function TasksView({
             onOpenTask={(task) => setDetailTaskId(task.id)}
           />
         ) : taskGroups.length ? (
-          <>
-            <TaskGroupOverview
-              groups={matchedGroups}
-              onOpenGroup={(group) => setOpenGroupKey(group.key)}
-            />
-            {restGroups.length ? (
-              <>
-                <div className="task-filter-divider">
-                  {matchedGroups.length === 0 ? <p>{scopeHint}</p> : null}
-                  <div className="task-filter-divider-line">
-                    <span>其他任务</span>
-                  </div>
-                </div>
+          groupBuckets ? (
+            <>
+              {groupBuckets.overdue.length ? (
+                <>
+                  {renderDivider("已逾期", { danger: true })}
+                  <TaskGroupOverview
+                    groups={groupBuckets.overdue}
+                    onOpenGroup={(group) => setOpenGroupKey(group.key)}
+                  />
+                </>
+              ) : null}
+              {renderDivider(dueSectionLabel, {
+                hint:
+                  groupBuckets.due.length === 0 ? dueEmptyHint : undefined,
+              })}
+              {groupBuckets.due.length ? (
                 <TaskGroupOverview
-                  groups={restGroups}
+                  groups={groupBuckets.due}
                   onOpenGroup={(group) => setOpenGroupKey(group.key)}
                 />
-              </>
-            ) : null}
-          </>
+              ) : null}
+              {groupBuckets.future.length ? (
+                <>
+                  {renderDivider("更晚到期")}
+                  <TaskGroupOverview
+                    groups={groupBuckets.future}
+                    onOpenGroup={(group) => setOpenGroupKey(group.key)}
+                  />
+                </>
+              ) : null}
+              {groupBuckets.none.length ? (
+                <>
+                  {renderDivider("未设置截止日期")}
+                  <TaskGroupOverview
+                    groups={groupBuckets.none}
+                    onOpenGroup={(group) => setOpenGroupKey(group.key)}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : (
+            <TaskGroupOverview
+              groups={taskGroups}
+              onOpenGroup={(group) => setOpenGroupKey(group.key)}
+            />
+          )
         ) : (
           <div className="board-empty">
             <EmptyState
@@ -557,28 +653,35 @@ export function TasksView({
             <span>正在载入任务…</span>
           </div>
         ) : visibleTasks.length ? (
-          (() => {
-            const matchedTasks = matchedIds
-              ? visibleTasks.filter((task) => matchedIds.has(task.id))
-              : visibleTasks;
-            const restTasks = matchedIds
-              ? visibleTasks.filter((task) => !matchedIds.has(task.id))
-              : [];
-            return (
-              <>
-                {matchedTasks.map(renderTaskCard)}
-                {matchedIds && restTasks.length ? (
-                  <div className="task-filter-divider">
-                    {matchedTasks.length === 0 ? <p>{scopeHint}</p> : null}
-                    <div className="task-filter-divider-line">
-                      <span>其他任务</span>
-                    </div>
-                  </div>
-                ) : null}
-                {restTasks.map(renderTaskCard)}
-              </>
-            );
-          })()
+          timeBuckets ? (
+            <>
+              {timeBuckets.overdue.length ? (
+                <>
+                  {renderDivider("已逾期", { danger: true })}
+                  {timeBuckets.overdue.map(renderTaskCard)}
+                </>
+              ) : null}
+              {renderDivider(dueSectionLabel, {
+                hint:
+                  timeBuckets.due.length === 0 ? dueEmptyHint : undefined,
+              })}
+              {timeBuckets.due.map(renderTaskCard)}
+              {timeBuckets.future.length ? (
+                <>
+                  {renderDivider("更晚到期")}
+                  {timeBuckets.future.map(renderTaskCard)}
+                </>
+              ) : null}
+              {timeBuckets.none.length ? (
+                <>
+                  {renderDivider("未设置截止日期")}
+                  {timeBuckets.none.map(renderTaskCard)}
+                </>
+              ) : null}
+            </>
+          ) : (
+            visibleTasks.map(renderTaskCard)
+          )
         ) : (
           <div className="board-empty">
             <EmptyState

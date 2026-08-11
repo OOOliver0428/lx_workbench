@@ -7070,3 +7070,12 @@ a {
   content: "";
   flex: 1;
 }
+
+.task-filter-divider-line.danger {
+  color: var(--red);
+}
+
+.task-filter-divider-line.danger::before,
+.task-filter-divider-line.danger::after {
+  border-top-color: #e3b3ad;
+}
