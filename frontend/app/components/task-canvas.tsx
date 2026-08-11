@@ -348,39 +348,57 @@ export function TaskGroupDetail({
 
   const layout = useMemo(() => {
     const ids = new Set(group.tasks.map((task) => task.id));
-    const roots = sortedTasks.filter(
-      (task) => !task.parent_id || !ids.has(task.parent_id),
-    );
-    const positions = new Map<string, { x: number; y: number }>();
-    let x = 0;
-    let hasKids = false;
-    for (const root of roots) {
-      const kids = childrenOf(group.tasks, root.id).filter((task) =>
-        ids.has(task.id),
-      );
-      if (kids.length) hasKids = true;
-      const width = Math.max(1, kids.length) * (CARD_W + GAP_X) - GAP_X;
-      positions.set(root.id, { x: x + (width - CARD_W) / 2, y: 0 });
-      kids.forEach((kid, index) => {
-        positions.set(kid.id, {
-          x: x + index * (CARD_W + GAP_X),
-          y: CARD_H + GAP_Y,
-        });
-      });
-      x += width + GAP_X * 1.2;
-    }
-    const extraY = hasKids ? CARD_H * 2 + GAP_Y : CARD_H + GAP_Y;
-    for (const task of sortedTasks) {
-      if (!positions.has(task.id)) {
-        positions.set(task.id, { x, y: extraY });
-        x += CARD_W + GAP_X;
+    const childrenMap = new Map<string, Task[]>();
+    for (const task of group.tasks) {
+      if (task.parent_id && ids.has(task.parent_id)) {
+        const list = childrenMap.get(task.parent_id) ?? [];
+        list.push(task);
+        childrenMap.set(task.parent_id, list);
       }
-    }    return {
+    }
+    childrenMap.forEach((list) =>
+      list.sort((a, b) => compareTasks(a, b, sortKey)),
+    );
+    const roots = group.tasks
+      .filter((task) => !task.parent_id || !ids.has(task.parent_id))
+      .sort((a, b) => compareTasks(a, b, sortKey));
+    const positions = new Map<string, { x: number; y: number }>();
+    let maxDepth = 0;
+
+    function placeSubtree(task: Task, depth: number, leftX: number): number {
+      maxDepth = Math.max(maxDepth, depth);
+      const kids = childrenMap.get(task.id) ?? [];
+      if (!kids.length) {
+        positions.set(task.id, {
+          x: leftX,
+          y: depth * (CARD_H + GAP_Y),
+        });
+        return CARD_W;
+      }
+      let cursor = leftX;
+      kids.forEach((kid, index) => {
+        cursor += placeSubtree(kid, depth + 1, cursor);
+        if (index < kids.length - 1) cursor += GAP_X;
+      });
+      const span = Math.max(cursor - leftX, CARD_W);
+      positions.set(task.id, {
+        x: leftX + (span - CARD_W) / 2,
+        y: depth * (CARD_H + GAP_Y),
+      });
+      return span;
+    }
+
+    let x = 0;
+    roots.forEach((root, index) => {
+      x += placeSubtree(root, 0, x);
+      if (index < roots.length - 1) x += GAP_X * 1.2;
+    });
+    return {
       positions,
-      width: Math.max(x - GAP_X * 1.2, CARD_W),
-      height: hasKids ? CARD_H * 2 + GAP_Y : CARD_H,
+      width: Math.max(x, CARD_W),
+      height: (maxDepth + 1) * CARD_H + maxDepth * GAP_Y,
     };
-  }, [group.tasks, sortedTasks]);
+  }, [group.tasks, sortKey]);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -578,10 +596,40 @@ function FlatCanvas({
   onOpenTask: (task: Task) => void;
   onBlankDoubleClick?: () => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const update = () => setContainerWidth(element.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  // 屏幕适配：内容不足一屏时按比例拉宽列间距，充分利用可用宽度
+  const available = containerWidth - 36;
+  const stretch =
+    available > layout.width
+      ? Math.min(available / layout.width, 1.8)
+      : 1;
+  const positions = useMemo(() => {
+    if (stretch === 1) return layout.positions;
+    return new Map(
+      [...layout.positions].map(([id, point]) => [
+        id,
+        { x: point.x * stretch, y: point.y },
+      ]),
+    );
+  }, [layout, stretch]);
+  const canvasWidth = layout.width * stretch;
   const ids = new Set(tasks.map((task) => task.id));
   return (
     <div
       className="task-canvas-scroll"
+      ref={scrollRef}
       onDoubleClick={(event) => {
         if (
           onBlankDoubleClick &&
@@ -593,11 +641,11 @@ function FlatCanvas({
     >
       <div
         className="task-canvas"
-        style={{ width: layout.width, height: layout.height }}
+        style={{ width: canvasWidth, height: layout.height }}
       >
         <svg
           className="task-wire"
-          width={layout.width}
+          width={canvasWidth}
           height={layout.height}
           aria-hidden="true"
         >
@@ -606,11 +654,11 @@ function FlatCanvas({
               (task) =>
                 task.parent_id &&
                 ids.has(task.parent_id) &&
-                layout.positions.has(task.parent_id),
+                positions.has(task.parent_id),
             )
             .map((task) => {
-              const from = layout.positions.get(task.parent_id as string);
-              const to = layout.positions.get(task.id);
+              const from = positions.get(task.parent_id as string);
+              const to = positions.get(task.id);
               if (!from || !to) return null;
               const x1 = from.x + CARD_W / 2;
               const y1 = from.y + CARD_H;
@@ -629,7 +677,7 @@ function FlatCanvas({
             })}
         </svg>
         {tasks.map((task, index) => {
-          const position = layout.positions.get(task.id);
+          const position = positions.get(task.id);
           if (!position) return null;
           return (
             <div

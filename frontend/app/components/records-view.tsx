@@ -133,6 +133,12 @@ export function RecordsView({
     [tasks],
   );
   const totalMinutes = records.reduce((sum, record) => sum + record.minutes, 0);
+  const weekMinutes = useMemo(() => {
+    const { start, end } = currentWeekRange();
+    return records
+      .filter((record) => record.work_date >= start && record.work_date <= end)
+      .reduce((sum, record) => sum + record.minutes, 0);
+  }, [records]);
 
   async function deleteRecord(record: WorkRecord) {
     if (!window.confirm(`确认删除 ${record.work_date} 的这条工作记录？`)) {
@@ -240,6 +246,10 @@ export function RecordsView({
         <div className="toolbar-meta">
           <strong>{formatHours(totalMinutes)}</strong>
           <span>累计工时</span>
+        </div>
+        <div className="toolbar-meta">
+          <strong>{formatHours(weekMinutes)}</strong>
+          <span>本周工时</span>
         </div>
       </section>
 
@@ -1377,6 +1387,21 @@ function humanDate(value: string) {
 function formatHours(minutes: number) {
   const hours = minutes / 60;
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
+/** 当前自然周（周一至周日，Asia/Shanghai）的 YYYY-MM-DD 起止。 */
+function currentWeekRange() {
+  const shanghaiNow = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }),
+  );
+  const weekday = shanghaiNow.getDay() || 7;
+  const monday = new Date(shanghaiNow);
+  monday.setDate(shanghaiNow.getDate() - (weekday - 1));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const format = (value: Date) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  return { start: format(monday), end: format(sunday) };
 }
 
 function optional(value: FormDataEntryValue | null) {

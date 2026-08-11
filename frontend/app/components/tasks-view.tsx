@@ -48,6 +48,7 @@ export function TasksView({
   currentUser: User;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [matchedIds, setMatchedIds] = useState<Set<string> | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [departmentWorks, setDepartmentWorks] = useState<DepartmentWork[]>([]);
   const [users, setUsers] = useState<UserCandidate[]>([]);
@@ -76,16 +77,28 @@ export function TasksView({
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams();
-      params.set("time_scope", timeScope);
-      if (status) params.set("status", status);
-      const [taskRows, projectRows, workRows, userRows] = await Promise.all([
-        api.tasks.list(params),
-        api.projects.list(),
-        api.departmentWorks.list(),
-        api.users.candidates(),
-      ]);
+      const baseParams = new URLSearchParams();
+      baseParams.set("time_scope", "all");
+      if (status) baseParams.set("status", status);
+      const matchedParams = new URLSearchParams();
+      matchedParams.set("time_scope", timeScope);
+      if (status) matchedParams.set("status", status);
+      const [taskRows, matchedRows, projectRows, workRows, userRows] =
+        await Promise.all([
+          api.tasks.list(baseParams),
+          timeScope === "all"
+            ? Promise.resolve(null)
+            : api.tasks.list(matchedParams),
+          api.projects.list(),
+          api.departmentWorks.list(),
+          api.users.candidates(),
+        ]);
       setTasks(taskRows);
+      setMatchedIds(
+        matchedRows
+          ? new Set(matchedRows.map((task) => task.id))
+          : null,
+      );
       setProjects(projectRows);
       setDepartmentWorks(
         workRows.filter((work) => work.status !== "archived"),
@@ -149,12 +162,12 @@ export function TasksView({
           [
             task.title,
             userNames.get(task.owner_id),
-            taskSourceName(task, projectNames, workNames),
+            ...task.collaborator_ids.map((id) => userNames.get(id)),
           ],
           search,
         );
       }),
-    [tasks, sourceFilter, search, userNames, projectNames, workNames],
+    [tasks, sourceFilter, search, userNames],
   );
 
   const taskGroups = useMemo<TaskGroup[]>(() => {
@@ -190,6 +203,29 @@ export function TasksView({
   const detailTask = detailTaskId
     ? (tasks.find((task) => task.id === detailTaskId) ?? null)
     : null;
+
+  const matchedTaskIds = matchedIds;
+  const matchedGroups = useMemo(
+    () =>
+      matchedTaskIds
+        ? taskGroups.filter((group) =>
+            group.tasks.some((task) => matchedTaskIds.has(task.id)),
+          )
+        : taskGroups,
+    [taskGroups, matchedTaskIds],
+  );
+  const restGroups = useMemo(
+    () =>
+      matchedTaskIds
+        ? taskGroups.filter(
+            (group) =>
+              !group.tasks.some((task) => matchedTaskIds.has(task.id)),
+          )
+        : [],
+    [taskGroups, matchedTaskIds],
+  );
+  const scopeHint =
+    timeScope === "today" ? "无今日截止任务" : "无本周到期任务";
 
   function collectDescendants(taskId: string) {
     const collected: Task[] = [];
@@ -227,6 +263,137 @@ export function TasksView({
         caught instanceof ApiClientError ? caught.message : "状态更新失败",
       );
     }
+  }
+
+  function renderTaskCard(task: Task) {
+    const terminal = TERMINAL_STATUSES.has(task.status);
+    return (
+      <article className="task-card" key={task.id}>
+        <div className={`priority-rail priority-${task.priority}`} />
+        <header>
+          <span className="task-card-badges">
+            <span className={`priority-label priority-${task.priority}`}>
+              {task.priority.toUpperCase()}
+            </span>
+            {task.level > 0 ? (
+              <span className="task-level-tag">L{task.level + 1} 子任务</span>
+            ) : null}
+          </span>
+          <StatusBadge status={task.status} />
+        </header>
+        <h3>{task.title}</h3>
+        <p>{task.description || "暂未填写任务说明。"}</p>
+        <dl>
+          <div>
+            <dt>来源</dt>
+            <dd>
+              <span
+                className={`source-tag ${
+                  task.project_id ? "source-project" : "source-work"
+                }`}
+              >
+                {task.project_id ? "项目" : "部门工作"}
+              </span>
+              {taskSourceName(task, projectNames, workNames)}
+            </dd>
+          </div>
+          <div>
+            <dt>负责人</dt>
+            <dd>{userNames.get(task.owner_id) ?? "未知用户"}</dd>
+          </div>
+          <div>
+            <dt>截止日期</dt>
+            <dd>{task.due_date ?? "未设置"}</dd>
+          </div>
+        </dl>
+        {task.progress_enabled ? (
+          <div className="task-progress">
+            <div className="task-progress-track">
+              <div
+                className="task-progress-fill"
+                style={{ width: `${task.progress_percent ?? 0}%` }}
+              />
+            </div>
+            <span className="task-progress-value">
+              {task.progress_percent ?? 0}%
+            </span>
+          </div>
+        ) : null}
+        {task.blocker_reason ? (
+          <div className="blocker-note">阻塞：{task.blocker_reason}</div>
+        ) : null}
+        <footer>
+          {canManageTaskObject(
+            canEdit,
+            currentUser,
+            task,
+            task.project_id
+              ? projectOwners.get(task.project_id)
+              : workOwners.get(task.department_work_id ?? ""),
+          )
+            ? (
+              <>
+                <button
+                  className="text-button"
+                  onClick={() => setEditingTask(task)}
+                >
+                  编辑
+                </button>
+                <button
+                  className="text-button"
+                  onClick={() => setReassigningTask(task)}
+                >
+                  转派
+                </button>
+                {nextTaskActions(task.status).map((action) => (
+                  <button
+                    key={action.status}
+                    className={action.primary ? "small-primary" : "text-button"}
+                    onClick={() => requestTransition(task, action.status)}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+                {!terminal ? (
+                  <button
+                    className="text-button"
+                    onClick={() => setProgressTask(task)}
+                  >
+                    更新进度
+                  </button>
+                ) : null}
+                {task.progress_enabled ? (
+                  <button
+                    className="text-button"
+                    onClick={() => setHistoryTask(task)}
+                  >
+                    进度历史
+                  </button>
+                ) : null}
+                {canCreate && task.level < 2 && !terminal ? (
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setCreateParent(task);
+                      setCreateOpen(true);
+                    }}
+                  >
+                    新建子任务
+                  </button>
+                ) : null}
+                <button
+                  className="text-button"
+                  style={{ color: "var(--red)" }}
+                  onClick={() => setDeletingTask(task)}
+                >
+                  删除
+                </button>
+              </>
+            )
+            : null}
+        </footer>
+      </article>
+    );
   }
 
   return (
@@ -327,7 +494,7 @@ export function TasksView({
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索任务、负责人或来源"
+            placeholder="搜索任务或参与人"
           />
         </label>
         <div className="toolbar-meta">
@@ -354,10 +521,26 @@ export function TasksView({
             onOpenTask={(task) => setDetailTaskId(task.id)}
           />
         ) : taskGroups.length ? (
-          <TaskGroupOverview
-            groups={taskGroups}
-            onOpenGroup={(group) => setOpenGroupKey(group.key)}
-          />
+          <>
+            <TaskGroupOverview
+              groups={matchedGroups}
+              onOpenGroup={(group) => setOpenGroupKey(group.key)}
+            />
+            {restGroups.length ? (
+              <>
+                <div className="task-filter-divider">
+                  {matchedGroups.length === 0 ? <p>{scopeHint}</p> : null}
+                  <div className="task-filter-divider-line">
+                    <span>其他任务</span>
+                  </div>
+                </div>
+                <TaskGroupOverview
+                  groups={restGroups}
+                  onOpenGroup={(group) => setOpenGroupKey(group.key)}
+                />
+              </>
+            ) : null}
+          </>
         ) : (
           <div className="board-empty">
             <EmptyState
@@ -374,142 +557,28 @@ export function TasksView({
             <span>正在载入任务…</span>
           </div>
         ) : visibleTasks.length ? (
-          visibleTasks.map((task) => {
-            const terminal = TERMINAL_STATUSES.has(task.status);
+          (() => {
+            const matchedTasks = matchedIds
+              ? visibleTasks.filter((task) => matchedIds.has(task.id))
+              : visibleTasks;
+            const restTasks = matchedIds
+              ? visibleTasks.filter((task) => !matchedIds.has(task.id))
+              : [];
             return (
-              <article className="task-card" key={task.id}>
-                <div className={`priority-rail priority-${task.priority}`} />
-                <header>
-                  <span className="task-card-badges">
-                    <span
-                      className={`priority-label priority-${task.priority}`}
-                    >
-                      {task.priority.toUpperCase()}
-                    </span>
-                    {task.level > 0 ? (
-                      <span className="task-level-tag">
-                        L{task.level + 1} 子任务
-                      </span>
-                    ) : null}
-                  </span>
-                  <StatusBadge status={task.status} />
-                </header>
-                <h3>{task.title}</h3>
-                <p>{task.description || "暂未填写任务说明。"}</p>
-                <dl>
-                  <div>
-                    <dt>来源</dt>
-                    <dd>
-                      <span
-                        className={`source-tag ${
-                          task.project_id ? "source-project" : "source-work"
-                        }`}
-                      >
-                        {task.project_id ? "项目" : "部门工作"}
-                      </span>
-                      {taskSourceName(task, projectNames, workNames)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>负责人</dt>
-                    <dd>{userNames.get(task.owner_id) ?? "未知用户"}</dd>
-                  </div>
-                  <div>
-                    <dt>截止日期</dt>
-                    <dd>{task.due_date ?? "未设置"}</dd>
-                  </div>
-                </dl>
-                {task.progress_enabled ? (
-                  <div className="task-progress">
-                    <div className="task-progress-track">
-                      <div
-                        className="task-progress-fill"
-                        style={{ width: `${task.progress_percent ?? 0}%` }}
-                      />
+              <>
+                {matchedTasks.map(renderTaskCard)}
+                {matchedIds && restTasks.length ? (
+                  <div className="task-filter-divider">
+                    {matchedTasks.length === 0 ? <p>{scopeHint}</p> : null}
+                    <div className="task-filter-divider-line">
+                      <span>其他任务</span>
                     </div>
-                    <span className="task-progress-value">
-                      {task.progress_percent ?? 0}%
-                    </span>
                   </div>
                 ) : null}
-                {task.blocker_reason ? (
-                  <div className="blocker-note">阻塞：{task.blocker_reason}</div>
-                ) : null}
-                <footer>
-                  {canManageTaskObject(
-                    canEdit,
-                    currentUser,
-                    task,
-                    task.project_id
-                      ? projectOwners.get(task.project_id)
-                      : workOwners.get(task.department_work_id ?? ""),
-                  )
-                    ? (
-                      <>
-                        <button
-                          className="text-button"
-                          onClick={() => setEditingTask(task)}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          className="text-button"
-                          onClick={() => setReassigningTask(task)}
-                        >
-                          转派
-                        </button>
-                        {nextTaskActions(task.status).map((action) => (
-                          <button
-                            key={action.status}
-                            className={
-                              action.primary ? "small-primary" : "text-button"
-                            }
-                            onClick={() => requestTransition(task, action.status)}
-                          >
-                            {action.label}
-                          </button>
-                        ))}
-                        {!terminal ? (
-                          <button
-                            className="text-button"
-                            onClick={() => setProgressTask(task)}
-                          >
-                            更新进度
-                          </button>
-                        ) : null}
-                        {task.progress_enabled ? (
-                          <button
-                            className="text-button"
-                            onClick={() => setHistoryTask(task)}
-                          >
-                            进度历史
-                          </button>
-                        ) : null}
-                        {canCreate && task.level < 2 && !terminal ? (
-                          <button
-                            className="text-button"
-                            onClick={() => {
-                              setCreateParent(task);
-                              setCreateOpen(true);
-                            }}
-                          >
-                            新建子任务
-                          </button>
-                        ) : null}
-                        <button
-                          className="text-button"
-                          style={{ color: "var(--red)" }}
-                          onClick={() => setDeletingTask(task)}
-                        >
-                          删除
-                        </button>
-                      </>
-                    )
-                    : null}
-                </footer>
-              </article>
+                {restTasks.map(renderTaskCard)}
+              </>
             );
-          })
+          })()
         ) : (
           <div className="board-empty">
             <EmptyState

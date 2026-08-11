@@ -293,7 +293,7 @@ a {
 
 .brand-lockup small {
   color: #93b4d7;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -472,7 +472,7 @@ a {
 .field-hint {
   color: var(--muted);
   display: block;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.5;
   margin-top: 6px;
 }
@@ -680,7 +680,7 @@ a {
 
 .nav-caption {
   color: #8ba3ba;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.17em;
   margin: 0 11px 10px;
@@ -730,7 +730,7 @@ a {
 
 .primary-nav small {
   color: #8ba3ba;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .primary-nav button.active small {
@@ -739,7 +739,7 @@ a {
 
 .nav-index {
   color: #9db4c8;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -790,7 +790,7 @@ a {
 
 .ai-entry small {
   color: #7c93a8;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .ai-orbit,
@@ -842,7 +842,7 @@ a {
 
 .account-profile-button small {
   color: #8ba3ba;
-  font-size: 9px;
+  font-size: 10px;
   margin-top: 2px;
 }
 
@@ -934,7 +934,7 @@ a {
 
 .profile-identity-card p {
   color: #b8d5f0;
-  font-size: 9px;
+  font-size: 10px;
   margin: 0;
 }
 
@@ -942,7 +942,7 @@ a {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 999px;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
   padding: 7px 10px;
 }
@@ -978,7 +978,7 @@ a {
 
 .settings-card > header p:last-child {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.65;
   margin: 0;
 }
@@ -1030,7 +1030,7 @@ a {
 
 .avatar-picker > button > span:last-child {
   color: var(--ink-soft);
-  font-size: 7px;
+  font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1088,7 +1088,7 @@ a {
 
 .settings-loading {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   margin: 0;
   padding: 0 26px 24px;
 }
@@ -1112,7 +1112,7 @@ a {
 
 .avatar-setting-summary p {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.65;
   margin: 7px 0 0;
 }
@@ -1147,7 +1147,7 @@ a {
 
 .avatar-modal-summary p {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.55;
   margin: 5px 0 0;
 }
@@ -1189,7 +1189,7 @@ a {
 .avatar-style-tabs span {
   background: #e8eef6;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 10px;
   margin-left: 5px;
   padding: 2px 5px;
 }
@@ -1219,7 +1219,7 @@ a {
 
 .settings-card-actions p {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.55;
   margin: 0;
 }
@@ -1255,7 +1255,7 @@ a {
 
 .credential-result dt {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .credential-result dd {
@@ -1283,7 +1283,7 @@ a {
 
 .copy-feedback {
   color: var(--blue);
-  font-size: 8px;
+  font-size: 10px;
   margin: -7px 0 14px;
   text-align: right;
 }
@@ -1413,7 +1413,7 @@ a {
 
 .toolbar-meta span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .segmented-filter {
@@ -1545,7 +1545,7 @@ a {
 
 .project-identity small {
   color: #7d92a7;
-  font-size: 9px;
+  font-size: 10px;
   grid-column: 1 / -1;
   letter-spacing: 0.06em;
 }
@@ -1562,7 +1562,7 @@ a {
   background: #eaf1f8;
   border-radius: 4px;
   color: #647c93;
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   padding: 3px 5px;
   width: max-content;
@@ -1580,7 +1580,7 @@ a {
   border-radius: 999px;
   color: #4e6478;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 750;
   padding: 4px 8px;
@@ -1678,7 +1678,7 @@ a {
   border-radius: 50%;
   color: #4e6478;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   height: 24px;
   justify-content: center;
@@ -1916,7 +1916,7 @@ a {
 
 .tag-options label small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   grid-column: 2;
 }
 
@@ -1976,14 +1976,14 @@ a {
 }
 
 .duplicate-panel div span {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 
 .duplicate-panel div small,
 .duplicate-panel > label {
   color: #82602d;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .duplicate-panel > label {
@@ -2065,7 +2065,7 @@ a {
 .detail-grid dt,
 .meta-lines span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   margin-bottom: 4px;
 }
 
@@ -2083,7 +2083,7 @@ a {
 
 .section-heading small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .action-chip-list {
@@ -2098,7 +2098,7 @@ a {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   gap: 5px;
   min-height: 34px;
   padding: 0 10px;
@@ -2130,12 +2130,12 @@ a {
 }
 
 .people-list strong {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .people-list small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .inline-adder {
@@ -2146,7 +2146,7 @@ a {
 
 .inline-adder select {
   flex: 1;
-  font-size: 9px;
+  font-size: 10px;
   min-height: 38px;
 }
 
@@ -2165,7 +2165,7 @@ a {
 }
 
 .meta-lines strong {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .compact-adders {
@@ -2220,7 +2220,7 @@ a {
 
 .priority-label {
   color: var(--accent);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 850;
   letter-spacing: 0.09em;
 }
@@ -2241,7 +2241,7 @@ a {
 
 .task-card > p {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.65;
   min-height: 30px;
 }
@@ -2261,11 +2261,11 @@ a {
 
 .task-card dt {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .task-card dd {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 650;
   margin: 0;
 }
@@ -2291,7 +2291,7 @@ a {
   background: var(--red-pale);
   border-radius: 7px;
   color: var(--red);
-  font-size: 8px;
+  font-size: 10px;
   margin-top: 11px;
   padding: 7px 8px;
 }
@@ -2366,7 +2366,7 @@ a {
 }
 
 .record-project-line span {
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -2392,7 +2392,7 @@ a {
   border-radius: 999px;
   color: var(--blue);
   display: inline-flex;
-  font-size: 7px;
+  font-size: 10px;
   font-style: normal;
   height: 19px;
   justify-content: center;
@@ -2412,12 +2412,12 @@ a {
 
 .record-task {
   color: var(--blue);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .record-editor-note {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 10px;
   margin-top: 7px;
 }
 
@@ -2436,13 +2436,13 @@ a {
 
 .record-meta dt {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 750;
   margin-bottom: 4px;
 }
 
 .record-meta dd {
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.5;
   margin: 0;
 }
@@ -2463,7 +2463,7 @@ a {
   border-radius: 7px;
   color: var(--accent);
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   gap: 2px;
   padding: 5px 8px;
 }
@@ -2514,7 +2514,7 @@ a {
 .section-tabs button span {
   background: #e8eef6;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 10px;
   margin-left: 5px;
   padding: 2px 6px;
 }
@@ -2556,7 +2556,7 @@ a {
 .user-card p,
 .user-card > small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   margin: 0;
 }
 
@@ -2568,7 +2568,7 @@ a {
   background: #eef3f8;
   border-radius: 999px;
   color: #647c93;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
   padding: 4px 7px;
 }
@@ -2602,13 +2602,13 @@ a {
 
 .user-card-management > span {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 750;
 }
 
 .user-card-management strong {
   color: var(--ink);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .user-card-actions {
@@ -2650,7 +2650,7 @@ a {
 
 .permission-groups header > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -2678,12 +2678,12 @@ a {
 }
 
 .permission-option strong {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .permission-option small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.5;
 }
 
@@ -2691,7 +2691,7 @@ a {
   background: #eef2f5;
   border-radius: 999px;
   color: #64748b;
-  font-size: 7px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 800;
   padding: 4px 7px;
@@ -2731,7 +2731,7 @@ a {
   border-radius: 8px;
   color: var(--green);
   display: flex;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 850;
   height: 34px;
   justify-content: center;
@@ -2761,7 +2761,7 @@ a {
 .tag-admin-list p,
 .tag-admin-list small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   margin: 0;
 }
 
@@ -2799,7 +2799,7 @@ a {
 .audit-admin-list article > div span,
 .audit-admin-list time {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   overflow-wrap: anywhere;
 }
 
@@ -2807,7 +2807,7 @@ a {
   background: #e8eef6;
   border-radius: 999px;
   color: #647c93;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   padding: 5px 8px;
 }
@@ -2854,7 +2854,7 @@ a {
   background: var(--blue-pale);
   border-radius: 999px;
   color: var(--blue);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
   padding: 5px 9px;
 }
@@ -2892,7 +2892,7 @@ a {
 .weekly-report-list summary small,
 .weekly-report-list summary i {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
 }
 
@@ -2927,7 +2927,7 @@ a {
 
 .report-week-picker > span {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
@@ -2970,7 +2970,7 @@ a {
 .team-report-content {
   color: var(--ink-soft);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.8;
   margin: 0;
   min-height: 300px;
@@ -3002,7 +3002,7 @@ a {
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   display: flex;
-  font-size: 9px;
+  font-size: 10px;
   gap: 7px;
   padding: 9px 24px;
 }
@@ -3041,7 +3041,7 @@ a {
 
 .ai-welcome p {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.7;
   margin: 0 auto;
   max-width: 330px;
@@ -3070,7 +3070,7 @@ a {
 
 .answer-label {
   color: var(--accent);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 850;
   letter-spacing: 0.1em;
 }
@@ -3100,7 +3100,7 @@ a {
 .weekly-report-card header p,
 .weekly-report-explainer {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.6;
   margin: 0;
 }
@@ -3110,7 +3110,7 @@ a {
   border-radius: 999px;
   color: var(--blue);
   flex: none;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 800;
   padding: 5px 8px;
 }
@@ -3123,7 +3123,7 @@ a {
 .weekly-report-editor {
   background: #f8fafc;
   font-family: inherit;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.75;
   min-height: 260px;
   resize: vertical;
@@ -3209,7 +3209,7 @@ a {
 .ai-chat-bubble > span {
   color: #6a82a0;
   display: block;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
   margin-bottom: 6px;
@@ -3231,7 +3231,7 @@ a {
   border-top: 1px solid #dbe5ef;
   color: #71839a;
   display: block;
-  font-size: 7px;
+  font-size: 10px;
   margin-top: 10px;
   padding-top: 8px;
 }
@@ -3293,7 +3293,7 @@ a {
 
 .ai-composer small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 /* AI configuration */
@@ -3348,7 +3348,7 @@ a {
   border-radius: 999px;
   color: var(--green);
   flex: none;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 800;
   padding: 6px 9px;
 }
@@ -3431,7 +3431,7 @@ a {
 
 .provider-option small {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 10px;
   grid-column: 2 / span 2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3471,7 +3471,7 @@ a {
 .access-mode-label {
   color: var(--ink-soft);
   display: block;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
   margin-bottom: 9px;
 }
@@ -3519,7 +3519,7 @@ a {
   background: #e7edf5;
   border-radius: 999px;
   color: #64748b;
-  font-size: 7px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 750;
   padding: 3px 6px;
@@ -3532,7 +3532,7 @@ a {
 
 .access-mode-option small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.55;
 }
 
@@ -3553,7 +3553,7 @@ a {
 
 .ai-config-fields .field > small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.55;
 }
 
@@ -3573,7 +3573,7 @@ a {
 
 .provider-links a {
   color: var(--green);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 750;
 }
 
@@ -3603,7 +3603,7 @@ a {
   color: #fff;
   display: flex;
   flex: none;
-  font-size: 9px;
+  font-size: 10px;
   height: 23px;
   justify-content: center;
   width: 23px;
@@ -3621,7 +3621,7 @@ a {
 
 .connection-result small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .config-actions {
@@ -3677,11 +3677,11 @@ a {
 
 .config-meta-list dt {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .config-meta-list dd {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
   margin: 0;
   text-align: right;
@@ -3699,12 +3699,12 @@ a {
 }
 
 .config-security-note strong {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .config-security-note p {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.7;
   margin: 6px 0 0;
 }
@@ -4713,7 +4713,7 @@ a {
 
 .war-stage-stepper > span > b {
   color: #20364d;
-  font-size: 9px;
+  font-size: 10px;
   left: 50%;
   position: absolute;
   top: 13px;
@@ -4820,7 +4820,7 @@ a {
   border-radius: 50%;
   color: #617991;
   display: inline-flex;
-  font-size: 8px;
+  font-size: 10px;
   height: 28px;
   justify-content: center;
   margin-left: -7px;
@@ -4932,7 +4932,7 @@ a {
 
 .war-feed-list small {
   color: #91a3b5;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .war-empty-copy {
@@ -4982,7 +4982,7 @@ a {
 
 .war-task-node text {
   fill: #486078;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .war-project-node {
@@ -5003,7 +5003,7 @@ a {
 
 .war-project-node .war-node-sub {
   fill: #778da3;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 500;
 }
 
@@ -5346,7 +5346,7 @@ a {
 
 .war-submit-ring span {
   color: #7a8fa4;
-  font-size: 9px;
+  font-size: 10px;
   position: relative;
 }
 
@@ -5420,7 +5420,7 @@ a {
 }
 
 .war-project-columns .war-attention-pill {
-  font-size: 9px;
+  font-size: 10px;
   padding: 4px 6px;
 }
 
@@ -5633,7 +5633,7 @@ a {
 
 .war-trend-chart .war-chart-value {
   fill: #1677ff;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -5652,7 +5652,7 @@ a {
 
 .war-trend-chart .war-chart-deliverables {
   fill: #6b5cff;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
 }
 
@@ -6240,7 +6240,7 @@ a {
   border: 1px solid #c9d8ec;
   border-radius: 6px;
   color: var(--accent-strong);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
   padding: 2px 6px;
@@ -6249,7 +6249,7 @@ a {
 .source-tag {
   border-radius: 6px;
   display: inline-block;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
   margin-right: 6px;
@@ -6290,7 +6290,7 @@ a {
 
 .task-progress-value {
   color: var(--accent-strong);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   min-width: 30px;
   text-align: right;
@@ -6333,13 +6333,13 @@ a {
 
 .progress-history .history-head span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   white-space: nowrap;
 }
 
 .progress-history .history-line {
   color: var(--ink-soft);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.6;
   margin-top: 6px;
 }
@@ -6357,7 +6357,7 @@ a {
   border-radius: 999px;
   color: #3e6688;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   line-height: 1.4;
   padding: 2px 7px;
@@ -6979,7 +6979,7 @@ a {
 
 .task-detail-grid dt {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   margin-bottom: 4px;
 }
 
@@ -7004,7 +7004,7 @@ a {
 }
 
 .task-detail-people .avatar {
-  font-size: 9px;
+  font-size: 10px;
   height: 24px;
   width: 24px;
 }
@@ -7041,4 +7041,32 @@ a {
 
 .task-detail-actions {
   flex-wrap: wrap;
+}
+
+/* Task filter partition divider (today/week scope) */
+.task-filter-divider {
+  grid-column: 1 / -1;
+  margin: 14px 0 6px;
+}
+
+.task-filter-divider p {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 12px;
+  text-align: center;
+}
+
+.task-filter-divider-line {
+  align-items: center;
+  color: #8ba3ba;
+  display: flex;
+  font-size: 11px;
+  gap: 12px;
+}
+
+.task-filter-divider-line::before,
+.task-filter-divider-line::after {
+  border-top: 1px dashed #c4d6e6;
+  content: "";
+  flex: 1;
 }
