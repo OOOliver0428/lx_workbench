@@ -6,10 +6,13 @@ import { api, ApiClientError } from "../api";
 import { createClientMessageId } from "../client-id";
 import { localDateInputValue } from "../date-utils";
 import type {
+  Department,
   DepartmentWork,
   PermissionKey,
   ProjectSummary,
   Task,
+  UserCandidate,
+  UserRole,
   WorkRecord,
 } from "../types";
 import { AvatarImage } from "./avatar";
@@ -31,7 +34,9 @@ export function RecordsView({
   const [records, setRecords] = useState<WorkRecord[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [departmentWorks, setDepartmentWorks] = useState<DepartmentWork[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<UserCandidate[]>([]);
   const [projectId, setProjectId] = useState("");
   const [departmentWorkId, setDepartmentWorkId] = useState("");
   const [unassignedOnly, setUnassignedOnly] = useState(false);
@@ -39,11 +44,14 @@ export function RecordsView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<WorkRecord | null>(null);
   const [deletingRecordId, setDeletingRecordId] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole>("member");
+  const [currentDepartmentId, setCurrentDepartmentId] = useState<
+    string | null
+  >(null);
   const [permissions, setPermissions] = useState<PermissionKey[]>([]);
 
   useEffect(() => {
@@ -53,6 +61,8 @@ export function RecordsView({
       .then((context) => {
         if (cancelled) return;
         setCurrentUserId(context.user.id);
+        setCurrentUserRole(context.user.role);
+        setCurrentDepartmentId(context.user.primary_department_id);
         setPermissions(context.permissions);
       })
       .catch((caught) => {
@@ -98,6 +108,17 @@ export function RecordsView({
       setProjects(projectRows);
       setDepartmentWorks(departmentWorkRows);
       setTasks(taskRows);
+      // 负责人/部门候选：失败（如无候选人权限）时降级为空，弹窗隐藏对应字段
+      if (canManage) {
+        const [userRows, departmentRows] = await Promise.all([
+          api.users.candidates().catch(() => []),
+          canViewDepartmentWorks
+            ? api.departments.list().catch(() => [])
+            : Promise.resolve([]),
+        ]);
+        setUsers(userRows);
+        setDepartments(departmentRows.filter((item) => item.is_active));
+      }
     } catch (caught) {
       setError(
         caught instanceof ApiClientError ? caught.message : "工作记录加载失败",
@@ -106,6 +127,7 @@ export function RecordsView({
       setLoading(false);
     }
   }, [
+    canManage,
     canViewDepartmentWorks,
     canViewProjects,
     canViewTasks,
@@ -175,20 +197,12 @@ export function RecordsView({
           <p>按项目或部门工作沉淀每天的有效工作，为后续周报归纳提供可追溯依据。</p>
         </div>
         {canManage ? (
-          <div className="view-header-actions">
-            <button
-              className="secondary-button"
-              onClick={() => setQuickCreateOpen(true)}
-            >
-              快速记录
-            </button>
-            <button
-              className="primary-button"
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus size={14} /> 记录工作
-            </button>
-          </div>
+          <button
+            className="primary-button"
+            onClick={() => setQuickCreateOpen(true)}
+          >
+            <Plus size={14} /> 记录工作
+          </button>
         ) : null}
       </header>
 
@@ -387,24 +401,16 @@ export function RecordsView({
         )}
       </section>
 
-      {createOpen && canManage ? (
-        <RecordCreateModal
-          projects={projects}
-          departmentWorks={departmentWorks}
-          tasks={tasks}
-          canViewDepartmentWorks={canViewDepartmentWorks}
-          onClose={() => setCreateOpen(false)}
-          onCreated={async () => {
-            setCreateOpen(false);
-            await load();
-          }}
-        />
-      ) : null}
       {quickCreateOpen && canManage ? (
         <QuickCreateModal
           projects={projects}
           departmentWorks={departmentWorks}
+          departments={departments}
           tasks={tasks}
+          users={users}
+          currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
+          currentDepartmentId={currentDepartmentId}
           canViewProjects={canViewProjects}
           canViewDepartmentWorks={canViewDepartmentWorks}
           canCreateProjects={canCreateProjects}
@@ -434,250 +440,6 @@ export function RecordsView({
         />
       ) : null}
     </div>
-  );
-}
-
-function RecordCreateModal({
-  projects,
-  departmentWorks,
-  tasks,
-  canViewDepartmentWorks,
-  onClose,
-  onCreated,
-}: {
-  projects: ProjectSummary[];
-  departmentWorks: DepartmentWork[];
-  tasks: Task[];
-  canViewDepartmentWorks: boolean;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [sourceType, setSourceType] = useState<RecordSourceType>("project");
-  const [selectedProject, setSelectedProject] = useState("");
-  const [selectedDepartmentWork, setSelectedDepartmentWork] = useState("");
-  const [deliverableEnabled, setDeliverableEnabled] = useState(false);
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const visibleTasks = tasks.filter((task) => {
-    if (sourceType === "project") {
-      return selectedProject
-        ? task.project_id === selectedProject
-        : Boolean(task.project_id);
-    }
-    if (sourceType === "department_work") {
-      return selectedDepartmentWork
-        ? task.department_work_id === selectedDepartmentWork
-        : Boolean(task.department_work_id);
-    }
-    return true;
-  });
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    const form = new FormData(event.currentTarget);
-    const taskId = optional(form.get("task_id"));
-    const task = tasks.find((item) => item.id === taskId);
-    let projectId: string | null = null;
-    let departmentWorkId: string | null = null;
-    if (task) {
-      projectId = task.project_id;
-      departmentWorkId = task.department_work_id;
-    } else if (sourceType === "project") {
-      projectId = selectedProject || null;
-    } else if (sourceType === "department_work") {
-      departmentWorkId = selectedDepartmentWork || null;
-    }
-    const hours = Number(form.get("hours"));
-    const deliverableName = optional(form.get("deliverable_name"));
-    const deliverableUrl = optional(form.get("deliverable_url"));
-    try {
-      await api.records.create({
-        work_date: String(form.get("work_date")),
-        content: String(form.get("content")),
-        minutes: hours * 60,
-        project_id: projectId,
-        department_work_id: departmentWorkId,
-        task_id: taskId,
-        risk: optional(form.get("risk")),
-        next_action: optional(form.get("next_action")),
-        deliverables:
-          deliverableEnabled && deliverableName && deliverableUrl
-            ? [{ name: deliverableName, url: deliverableUrl }]
-            : [],
-      });
-      onCreated();
-    } catch (caught) {
-      setError(
-        caught instanceof ApiClientError ? caught.message : "工作记录保存失败",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal title="记录今天的有效工作" eyebrow="NEW WORK LOG" onClose={onClose} wide>
-      <form className="modal-form" onSubmit={submit}>
-        <div className="form-grid">
-          <label className="field">
-            <span>工作日期 *</span>
-            <input
-              name="work_date"
-              type="date"
-              defaultValue={localDateInputValue()}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>投入时长（小时）*</span>
-            <input
-              name="hours"
-              type="number"
-              min="0.5"
-              max="24"
-              step="0.5"
-              defaultValue="1"
-              required
-            />
-          </label>
-          <fieldset className="source-options field-span-two">
-            <legend>工作来源</legend>
-            <label>
-              <input
-                type="radio"
-                name="source_type"
-                checked={sourceType === "project"}
-                onChange={() => setSourceType("project")}
-              />
-              <span>项目</span>
-            </label>
-            {canViewDepartmentWorks ? (
-              <label>
-                <input
-                  type="radio"
-                  name="source_type"
-                  checked={sourceType === "department_work"}
-                  onChange={() => setSourceType("department_work")}
-                />
-                <span>部门工作</span>
-              </label>
-            ) : null}
-            <label>
-              <input
-                type="radio"
-                name="source_type"
-                checked={sourceType === "none"}
-                onChange={() => setSourceType("none")}
-              />
-              <span>暂不关联</span>
-            </label>
-          </fieldset>
-          {sourceType === "project" ? (
-            <label className="field">
-              <span>关联项目</span>
-              <select
-                name="project_id"
-                value={selectedProject}
-                onChange={(event) => setSelectedProject(event.target.value)}
-              >
-                <option value="">请选择项目</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {sourceType === "department_work" ? (
-            <label className="field">
-              <span>关联部门工作</span>
-              <select
-                name="department_work_id"
-                value={selectedDepartmentWork}
-                onChange={(event) =>
-                  setSelectedDepartmentWork(event.target.value)
-                }
-              >
-                <option value="">请选择部门工作</option>
-                {departmentWorks.map((work) => (
-                  <option key={work.id} value={work.id}>
-                    {work.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <label className="field">
-            <span>关联任务</span>
-            <select name="task_id" defaultValue="">
-              <option value="">不关联具体任务</option>
-              {visibleTasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field field-span-two">
-            <span>工作内容 *</span>
-            <textarea
-              name="content"
-              rows={5}
-              placeholder="说明完成了什么、产生了什么结果"
-              required
-              autoFocus
-            />
-          </label>
-          <label className="field">
-            <span>风险或阻塞</span>
-            <textarea name="risk" rows={3} placeholder="没有可留空" />
-          </label>
-          <label className="field">
-            <span>下一步行动</span>
-            <textarea name="next_action" rows={3} placeholder="下一步准备做什么" />
-          </label>
-          <div className="field-span-two deliverable-toggle">
-            <label className="toggle-filter">
-              <input
-                type="checkbox"
-                checked={deliverableEnabled}
-                onChange={(event) => setDeliverableEnabled(event.target.checked)}
-              />
-              <span />
-              添加产出物链接
-            </label>
-          </div>
-          {deliverableEnabled ? (
-            <>
-              <label className="field">
-                <span>产出物名称</span>
-                <input name="deliverable_name" placeholder="例如 总体方案 V3" />
-              </label>
-              <label className="field">
-                <span>访问地址</span>
-                <input
-                  name="deliverable_url"
-                  type="url"
-                  placeholder="https://intranet.example/..."
-                />
-              </label>
-            </>
-          ) : null}
-        </div>
-        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
-        <footer className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>
-            取消
-          </button>
-          <button className="primary-button" disabled={submitting}>
-            {submitting ? "正在保存…" : "保存记录"}
-          </button>
-        </footer>
-      </form>
-    </Modal>
   );
 }
 
@@ -980,7 +742,12 @@ function RecordEditModal({
 function QuickCreateModal({
   projects,
   departmentWorks,
+  departments,
   tasks,
+  users,
+  currentUserId,
+  currentUserRole,
+  currentDepartmentId,
   canViewProjects,
   canViewDepartmentWorks,
   canCreateProjects,
@@ -991,7 +758,12 @@ function QuickCreateModal({
 }: {
   projects: ProjectSummary[];
   departmentWorks: DepartmentWork[];
+  departments: Department[];
   tasks: Task[];
+  users: UserCandidate[];
+  currentUserId: string;
+  currentUserRole: UserRole;
+  currentDepartmentId: string | null;
   canViewProjects: boolean;
   canViewDepartmentWorks: boolean;
   canCreateProjects: boolean;
@@ -1016,6 +788,11 @@ function QuickCreateModal({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const hasSource = sourceType !== "none";
+  // 隐藏超管不能担任负责人（后端 ensure_user 会拒绝）；无主部门用户必须显式选部门
+  const isSuperAdmin = currentUserRole === "super_admin";
+  const ownerRequired = isSuperAdmin;
+  const ownerDefault = isSuperAdmin ? "" : currentUserId;
+  const needsDepartmentPick = isSuperAdmin || !currentDepartmentId;
   const visibleTasks = tasks.filter((task) => {
     if (sourceType === "project") {
       return selectedProject ? task.project_id === selectedProject : false;
@@ -1070,20 +847,60 @@ function QuickCreateModal({
       }
       payload.department_work_id = selectedDepartmentWork;
     } else if (sourceType === "new_project") {
+      const newProjectName = String(form.get("new_project_name") ?? "").trim();
+      if (!newProjectName) {
+        setError("请填写新项目名称。");
+        return;
+      }
+      const ownerId = String(form.get("new_project_owner_id") ?? "");
+      if (ownerRequired && !ownerId) {
+        setError("超级管理员创建项目时必须指定项目负责人。");
+        return;
+      }
       payload.new_project = {
-        name: String(form.get("new_project_name") ?? "").trim(),
+        name: newProjectName,
+        owner_id: ownerId || undefined,
       };
     } else if (sourceType === "new_department_work") {
+      const newWorkName = String(
+        form.get("new_department_work_name") ?? "",
+      ).trim();
+      if (!newWorkName) {
+        setError("请填写部门工作名称。");
+        return;
+      }
+      const ownerId = String(form.get("new_department_work_owner_id") ?? "");
+      if (ownerRequired && !ownerId) {
+        setError("超级管理员创建部门工作时必须指定负责人。");
+        return;
+      }
+      const departmentId = String(
+        form.get("new_department_work_department_id") ?? "",
+      );
+      if (needsDepartmentPick && !departmentId) {
+        setError("请选择部门工作所属部门。");
+        return;
+      }
       payload.new_department_work = {
-        name: String(form.get("new_department_work_name") ?? "").trim(),
+        name: newWorkName,
         visibility: String(
           form.get("new_department_work_visibility") ?? "department_only",
         ),
+        owner_id: ownerId || undefined,
+        department_id: departmentId || undefined,
       };
     }
     const taskTitle = newTaskTitle.trim();
     if (hasSource && taskTitle) {
-      payload.new_task = { title: taskTitle };
+      const ownerId = String(form.get("new_task_owner_id") ?? "");
+      if (ownerRequired && !ownerId) {
+        setError("超级管理员新建任务时必须指定任务负责人。");
+        return;
+      }
+      payload.new_task = {
+        title: taskTitle,
+        owner_id: ownerId || undefined,
+      };
     } else if (selectedTask) {
       payload.task_id = selectedTask;
     }
@@ -1118,8 +935,8 @@ function QuickCreateModal({
 
   return (
     <Modal
-      title="快速记录工作"
-      eyebrow="QUICK WORK LOG"
+      title="记录工作"
+      eyebrow="WORK LOG"
       onClose={onClose}
       wide
     >
@@ -1239,14 +1056,35 @@ function QuickCreateModal({
             </label>
           ) : null}
           {sourceType === "new_project" ? (
-            <label className="field">
-              <span>新项目名称 *</span>
-              <input
-                name="new_project_name"
-                placeholder="例如 某集团集采平台二期"
-                required
-              />
-            </label>
+            <>
+              <label className="field">
+                <span>新项目名称 *</span>
+                <input
+                  name="new_project_name"
+                  placeholder="例如 某集团集采平台二期"
+                  required
+                />
+              </label>
+              {users.length ? (
+                <label className="field">
+                  <span>项目负责人{ownerRequired ? " *" : ""}</span>
+                  <select
+                    name="new_project_owner_id"
+                    defaultValue={ownerDefault}
+                    required={ownerRequired}
+                  >
+                    {isSuperAdmin ? (
+                      <option value="">请选择负责人</option>
+                    ) : null}
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </>
           ) : null}
           {sourceType === "new_department_work" ? (
             <>
@@ -1258,6 +1096,23 @@ function QuickCreateModal({
                   required
                 />
               </label>
+              {needsDepartmentPick ? (
+                <label className="field">
+                  <span>所属部门 *</span>
+                  <select
+                    name="new_department_work_department_id"
+                    defaultValue=""
+                    required
+                  >
+                    <option value="">请选择部门</option>
+                    {departments.map((department) => (
+                      <option key={department.id} value={department.id}>
+                        {department.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="field">
                 <span>可见性</span>
                 <select
@@ -1268,6 +1123,25 @@ function QuickCreateModal({
                   <option value="public">全员公开</option>
                 </select>
               </label>
+              {users.length ? (
+                <label className="field">
+                  <span>负责人{ownerRequired ? " *" : ""}</span>
+                  <select
+                    name="new_department_work_owner_id"
+                    defaultValue={ownerDefault}
+                    required={ownerRequired}
+                  >
+                    {isSuperAdmin ? (
+                      <option value="">请选择负责人</option>
+                    ) : null}
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </>
           ) : null}
           {sourceType === "project" || sourceType === "department_work" ? (
@@ -1288,15 +1162,36 @@ function QuickCreateModal({
             </label>
           ) : null}
           {hasSource && canCreateTasks ? (
-            <label className="field">
-              <span>新建任务标题</span>
-              <input
-                name="new_task_title"
-                value={newTaskTitle}
-                onChange={(event) => changeNewTaskTitle(event.target.value)}
-                placeholder="留空则不新建任务"
-              />
-            </label>
+            <>
+              <label className="field">
+                <span>新建任务标题</span>
+                <input
+                  name="new_task_title"
+                  value={newTaskTitle}
+                  onChange={(event) => changeNewTaskTitle(event.target.value)}
+                  placeholder="留空则不新建任务"
+                />
+              </label>
+              {users.length && newTaskTitle.trim() ? (
+                <label className="field">
+                  <span>任务负责人{ownerRequired ? " *" : ""}</span>
+                  <select
+                    name="new_task_owner_id"
+                    defaultValue={ownerDefault}
+                    required={ownerRequired}
+                  >
+                    {isSuperAdmin ? (
+                      <option value="">请选择负责人</option>
+                    ) : null}
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </>
           ) : null}
           <label className="field field-span-two">
             <span>工作内容 *</span>
