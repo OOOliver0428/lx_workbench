@@ -18,6 +18,12 @@ import type {
 import { AvatarImage } from "./avatar";
 import { Plus, Search } from "./icons";
 import { EmptyState, InlineNotice, Modal, StatusBadge } from "./ui";
+import {
+  TaskDetailModal,
+  TaskGroupDetail,
+  TaskGroupOverview,
+  type TaskGroup,
+} from "./task-canvas";
 
 const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
   "done",
@@ -51,6 +57,9 @@ export function TasksView({
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [boardMode, setBoardMode] = useState<"overview" | "board">("overview");
+  const [openGroupKey, setOpenGroupKey] = useState<string | null>(null);
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -148,6 +157,40 @@ export function TasksView({
     [tasks, sourceFilter, search, userNames, projectNames, workNames],
   );
 
+  const taskGroups = useMemo<TaskGroup[]>(() => {
+    const groups = new Map<string, TaskGroup>();
+    for (const task of visibleTasks) {
+      const kind = task.project_id ? "project" : "work";
+      const id = task.project_id ?? task.department_work_id ?? "ungrouped";
+      const key = `${kind}:${id}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          kind,
+          id,
+          name:
+            kind === "project"
+              ? (projectNames.get(id) ?? "未知项目")
+              : id === "ungrouped"
+                ? "未分组"
+                : (workNames.get(id) ?? "未知部门工作"),
+          tasks: [],
+        };
+        groups.set(key, group);
+      }
+      group.tasks.push(task);
+    }
+    return [...groups.values()].sort(
+      (a, b) => b.tasks.length - a.tasks.length,
+    );
+  }, [visibleTasks, projectNames, workNames]);
+
+  const openGroup = taskGroups.find((group) => group.key === openGroupKey) ?? null;
+  const detailTask = detailTaskId
+    ? (tasks.find((task) => task.id === detailTaskId) ?? null)
+    : null;
+
   function collectDescendants(taskId: string) {
     const collected: Task[] = [];
     const queue: string[] = [taskId];
@@ -207,8 +250,23 @@ export function TasksView({
         ) : null}
       </header>
 
-      <section className="toolbar">
-        <div className="segmented-filter" aria-label="时间范围筛选">
+      {boardMode === "board" || !openGroup ? (
+        <section className="toolbar">
+          <div className="segmented-filter" aria-label="显示模式">
+            <button
+              className={boardMode === "overview" ? "active" : ""}
+              onClick={() => setBoardMode("overview")}
+            >
+              总览
+            </button>
+            <button
+              className={boardMode === "board" ? "active" : ""}
+              onClick={() => setBoardMode("board")}
+            >
+              看板
+            </button>
+          </div>
+          <div className="segmented-filter" aria-label="时间范围筛选">
           {(
             [
               ["today", "今天"],
@@ -277,8 +335,38 @@ export function TasksView({
           <span>项任务</span>
         </div>
       </section>
+      ) : null}
 
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+
+      {boardMode === "overview" ? (
+        loading ? (
+          <div className="list-loading">
+            <i />
+            <span>正在载入任务…</span>
+          </div>
+        ) : openGroup ? (
+          <TaskGroupDetail
+            key={openGroup.key}
+            group={openGroup}
+            userNames={userNames}
+            onBack={() => setOpenGroupKey(null)}
+            onOpenTask={(task) => setDetailTaskId(task.id)}
+          />
+        ) : taskGroups.length ? (
+          <TaskGroupOverview
+            groups={taskGroups}
+            onOpenGroup={(group) => setOpenGroupKey(group.key)}
+          />
+        ) : (
+          <div className="board-empty">
+            <EmptyState
+              title="当前没有任务"
+              description="调整筛选条件，或创建任务，让推进有明确的责任与结果。"
+            />
+          </div>
+        )
+      ) : (
       <section className="task-board">
         {loading ? (
           <div className="list-loading">
@@ -431,6 +519,57 @@ export function TasksView({
           </div>
         )}
       </section>
+      )}
+
+      {detailTask ? (
+        <TaskDetailModal
+          task={detailTask}
+          sourceName={taskSourceName(detailTask, projectNames, workNames)}
+          childTasks={childrenByParent.get(detailTask.id) ?? []}
+          userNames={userNames}
+          users={users}
+          canManage={canManageTaskObject(
+            canEdit,
+            currentUser,
+            detailTask,
+            detailTask.project_id
+              ? projectOwners.get(detailTask.project_id)
+              : workOwners.get(detailTask.department_work_id ?? ""),
+          )}
+          canCreate={canCreate}
+          transitionActions={nextTaskActions(detailTask.status)}
+          onClose={() => setDetailTaskId(null)}
+          onEdit={() => {
+            setDetailTaskId(null);
+            setEditingTask(detailTask);
+          }}
+          onReassign={() => {
+            setDetailTaskId(null);
+            setReassigningTask(detailTask);
+          }}
+          onTransition={(target) => {
+            setDetailTaskId(null);
+            requestTransition(detailTask, target);
+          }}
+          onProgress={() => {
+            setDetailTaskId(null);
+            setProgressTask(detailTask);
+          }}
+          onHistory={() => {
+            setDetailTaskId(null);
+            setHistoryTask(detailTask);
+          }}
+          onNewSubtask={() => {
+            setDetailTaskId(null);
+            setCreateParent(detailTask);
+            setCreateOpen(true);
+          }}
+          onDelete={() => {
+            setDetailTaskId(null);
+            setDeletingTask(detailTask);
+          }}
+        />
+      ) : null}
 
       {createOpen && canCreate ? (
         <TaskCreateModal
