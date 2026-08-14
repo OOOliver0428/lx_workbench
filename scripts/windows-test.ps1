@@ -19,6 +19,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
 $RunRoot = Join-Path $ProjectRoot ".run\windows-test"
+$NpmCacheRoot = Join-Path $ProjectRoot ".run\npm-cache"
 $DefaultBackendPort = 8787
 $DefaultFrontendPort = 5174
 
@@ -375,6 +376,60 @@ function Start-Backend {
     }
 }
 
+function Ensure-FrontendDependencies {
+    param([Parameter(Mandatory = $true)][string]$NpmPath)
+
+    $lockFile = Join-Path $FrontendRoot "package-lock.json"
+    $vinextPath = Join-Path $FrontendRoot "node_modules\vinext"
+    $stampFile = Join-Path $RunRoot "frontend-package-lock.sha256"
+    if (-not (Test-Path -LiteralPath $lockFile)) {
+        throw "Frontend package-lock.json is missing."
+    }
+
+    $lockHash = (Get-FileHash -LiteralPath $lockFile -Algorithm SHA256).Hash
+    $recordedHash = if (Test-Path -LiteralPath $stampFile) {
+        (Get-Content -LiteralPath $stampFile -Raw).Trim()
+    }
+    else {
+        ""
+    }
+    $dependenciesReady = (
+        (Test-Path -LiteralPath $vinextPath) -and
+        $recordedHash -eq $lockHash
+    )
+
+    if ($dependenciesReady) {
+        & $NpmPath --prefix $FrontendRoot ls --depth=0 --silent 1>$null 2>$null
+        $dependenciesReady = $LASTEXITCODE -eq 0
+    }
+
+    if ($dependenciesReady) {
+        return
+    }
+
+    Write-Host "Frontend dependencies changed or are incomplete; running npm ci..."
+    if (-not (Test-Path -LiteralPath $NpmCacheRoot)) {
+        New-Item -ItemType Directory -Path $NpmCacheRoot -Force | Out-Null
+    }
+    & $NpmPath `
+        --prefix $FrontendRoot `
+        ci `
+        --cache $NpmCacheRoot `
+        --include=dev `
+        --prefer-offline `
+        --no-audit `
+        --no-fund
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend dependency installation failed with exit code $LASTEXITCODE."
+    }
+
+    $installedLockHash = (Get-FileHash -LiteralPath $lockFile -Algorithm SHA256).Hash
+    if ($installedLockHash -ne $lockHash) {
+        throw "Frontend package-lock.json changed during dependency installation; run start again."
+    }
+    Set-Content -LiteralPath $stampFile -Value $lockHash -Encoding ASCII
+}
+
 function Start-Frontend {
     $managed = Get-ManagedProcess -Name "frontend"
     if ($null -ne $managed) {
@@ -394,9 +449,7 @@ function Start-Frontend {
     if ($null -eq $npm) {
         throw "npm.cmd was not found. Install Node.js 22.13 or newer."
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $FrontendRoot "node_modules\vinext"))) {
-        throw "Frontend dependencies are missing. Run: cd frontend; npm.cmd ci"
-    }
+    Ensure-FrontendDependencies -NpmPath $npm.Source
     if (-not (Test-Path -LiteralPath (Join-Path $FrontendRoot ".env.local"))) {
         Copy-Item -LiteralPath (Join-Path $FrontendRoot ".env.example") `
             -Destination (Join-Path $FrontendRoot ".env.local")
@@ -477,11 +530,18 @@ function Start-All {
         Start-Frontend
     }
     catch {
+        $startFailure = $_
         Write-Host ""
-        Write-Host "Start failed: $($_.Exception.Message)" -ForegroundColor Red
-        Stop-ManagedService -Name "frontend"
-        Stop-ManagedService -Name "backend"
-        throw
+        Write-Host "Start failed: $($startFailure.Exception.Message)" -ForegroundColor Red
+        foreach ($serviceName in @("frontend", "backend")) {
+            try {
+                Stop-ManagedService -Name $serviceName
+            }
+            catch {
+                Write-Warning "Could not stop $serviceName after the failed start: $($_.Exception.Message)"
+            }
+        }
+        throw $startFailure
     }
 
     Write-Host ""
