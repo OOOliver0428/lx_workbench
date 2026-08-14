@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from typing import Any
 
@@ -14,16 +15,25 @@ from app.models import (
     DepartmentWorkStatus,
     DepartmentWorkVisibility,
     PermissionKey,
+    Project,
+    ProjectStatus,
     Task,
     TaskPriority,
     TaskStatus,
     User,
     UserPermission,
     WorkRecord,
+    utc_now,
 )
 from app.services import ai as ai_service
+from app.services import ai_context as ai_context_module
 from app.services.ai_context import build_chat_context, build_weekly_report_context
 from tests.conftest import login
+
+UUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+WEEKDAY_NAMES = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
 
 
 class FakeResponse:
@@ -156,9 +166,9 @@ def test_ai_context_omits_project_and_task_data_without_view_permissions(
         assert context["department_works"] == []
         assert context["tasks"] == []
         assert context["work_records"]
-        assert "project_id" not in context["work_records"][0]
-        assert "department_work_id" not in context["work_records"][0]
-        assert "task_id" not in context["work_records"][0]
+        assert "project_name" not in context["work_records"][0]
+        assert "department_work_name" not in context["work_records"][0]
+        assert "task_title" not in context["work_records"][0]
 
 
 def test_ai_context_includes_only_visible_related_department_work(api: dict) -> None:
@@ -278,14 +288,6 @@ def test_ai_context_includes_only_visible_related_department_work(api: dict) -> 
             )
         )
         db.flush()
-        expected = {
-            "local_work": local_work.id,
-            "public_work": public_work.id,
-            "hidden_work": hidden_work.id,
-            "local_task": local_task.id,
-            "public_task": public_task.id,
-            "hidden_task": hidden_task.id,
-        }
 
     with api["app"].state.session_factory() as db:
         actor = db.get(User, api["users"]["member"])
@@ -295,35 +297,155 @@ def test_ai_context_includes_only_visible_related_department_work(api: dict) -> 
             build_weekly_report_context(db, actor, today, today)
         )
 
-    assert {row["id"] for row in chat_context["department_works"]} == {
-        expected["local_work"],
-        expected["public_work"],
+    assert {row["code"] for row in chat_context["department_works"]} == {
+        "DWK-AI-LOCAL",
+        "DWK-AI-PUBLIC",
     }
-    assert {row["id"] for row in chat_context["tasks"]} == {
-        expected["local_task"],
-        expected["public_task"],
+    assert {row["title"] for row in chat_context["tasks"]} == {
+        "Tracked local task",
+        "Tracked public task",
     }
     local_task_row = next(
-        row for row in chat_context["tasks"] if row["id"] == expected["local_task"]
+        row for row in chat_context["tasks"] if row["title"] == "Tracked local task"
     )
-    assert local_task_row["department_work_id"] == expected["local_work"]
-    assert local_task_row["parent_id"] is None
+    assert local_task_row["department_work_name"] == "Local department work"
+    assert "parent_id" not in local_task_row
     assert local_task_row["level"] == 0
-    assert local_task_row["progress_enabled"] is True
+    assert local_task_row["owner_name"] == "成员甲"
+    assert local_task_row["mine"] is True
+    assert local_task_row["status"] == "处理中"
     assert local_task_row["progress_percent"] == 45
-    assert chat_context["work_records"][0]["department_work_id"] == expected[
-        "local_work"
-    ]
+    assert chat_context["work_records"][0]["department_work_name"] == "Local department work"
+    assert chat_context["work_records"][0]["task_title"] == "Tracked local task"
 
-    assert [row["id"] for row in weekly_context["department_works"]] == [
-        expected["local_work"]
+    assert [row["code"] for row in weekly_context["department_works"]] == [
+        "DWK-AI-LOCAL"
     ]
-    assert [row["id"] for row in weekly_context["tasks"]] == [
-        expected["local_task"]
+    assert [row["title"] for row in weekly_context["tasks"]] == [
+        "Tracked local task"
     ]
-    assert weekly_context["work_records"][0]["department_work_id"] == expected[
-        "local_work"
-    ]
+    assert weekly_context["work_records"][0]["department_work_name"] == "Local department work"
+
+
+def test_ai_context_humanizes_names_labels_and_dates(api: dict) -> None:
+    today = date.today()
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        project = Project(
+            code="AI-HUM-001",
+            name="人话化验证项目",
+            normalized_name="人话化验证项目",
+            description="验证上下文中的名称与标签",
+            status=ProjectStatus.ACTIVE.value,
+            owner_id=actor.id,
+            proposed_by=actor.id,
+            planned_start_date=today,
+            planned_end_date=today,
+        )
+        db.add(project)
+        db.flush()
+        db.add(
+            Task(
+                project_id=project.id,
+                level=0,
+                title="验证任务",
+                owner_id=actor.id,
+                created_by=actor.id,
+                priority=TaskPriority.P2.value,
+                status=TaskStatus.DONE.value,
+                completed_at=utc_now(),
+                progress_enabled=False,
+                progress_percent=None,
+            )
+        )
+        db.flush()
+        db.add(
+            WorkRecord(
+                author_id=actor.id,
+                work_date=today,
+                content="人话化验证记录",
+                minutes=60,
+                project_id=project.id,
+                last_edited_by=actor.id,
+            )
+        )
+        db.flush()
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        context_text = build_chat_context(db, actor)
+    context = json.loads(context_text)
+
+    assert context["current_user"] == {"display_name": "成员甲"}
+    assert context["today"] == today.isoformat()
+    assert context["weekday"] in WEEKDAY_NAMES
+    assert context["week_start"] <= context["today"] <= context["week_end"]
+
+    project_row = next(
+        row for row in context["projects"] if row["code"] == "AI-HUM-001"
+    )
+    assert project_row["owner_name"] == "成员甲"
+    assert project_row["mine"] is True
+    assert project_row["status"] == "进行中"
+    assert "owner_id" not in project_row
+    assert "id" not in project_row
+
+    task_row = next(row for row in context["tasks"] if row["title"] == "验证任务")
+    assert task_row["project_name"] == "人话化验证项目"
+    assert task_row["owner_name"] == "成员甲"
+    assert task_row["mine"] is True
+    assert task_row["status"] == "已完成"
+    assert task_row["priority"] == "P2"
+    assert task_row["updated_at"]
+    assert task_row["completed_at"]
+    assert "description" not in task_row
+    assert "progress_enabled" not in task_row
+
+    record_row = context["work_records"][0]
+    assert record_row["project_name"] == "人话化验证项目"
+    assert "null" not in context_text
+    assert not UUID_PATTERN.search(context_text)
+
+
+def test_ai_context_marks_truncated_sections(api: dict, monkeypatch) -> None:
+    monkeypatch.setattr(ai_context_module, "CONTEXT_TASK_LIMIT", 1)
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        project = Project(
+            code="AI-TRN-001",
+            name="截断验证项目",
+            normalized_name="截断验证项目",
+            status=ProjectStatus.ACTIVE.value,
+            owner_id=actor.id,
+            proposed_by=actor.id,
+        )
+        db.add(project)
+        db.flush()
+        for index in range(2):
+            db.add(
+                Task(
+                    project_id=project.id,
+                    level=0,
+                    title=f"截断验证任务 {index}",
+                    owner_id=actor.id,
+                    created_by=actor.id,
+                    priority=TaskPriority.P1.value,
+                    status=TaskStatus.TODO.value,
+                )
+            )
+        db.flush()
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        context = json.loads(build_chat_context(db, actor))
+
+    assert context["counts"]["tasks"] == 1
+    assert "tasks" in context["truncated_sections"]
+    assert "截断" in context["scope"]
 
 
 class ProviderResponse:

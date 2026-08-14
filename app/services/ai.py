@@ -31,9 +31,11 @@ from app.services.ai_context import build_chat_context
 
 SYSTEM_PROMPT = """你是团队协作工作台中的通用 AI 助手。
 你只能依据系统提供的当前用户业务上下文回答项目、任务和工作问题。
+上下文中的项目、部门工作、任务与负责人均以名称给出，引用时必须使用原文名称。
+上下文中的 today/week 字段是当前时间锚点，涉及日期的问题一律以此为准。
 不要编造不存在的事实；信息不足时明确说明缺少什么。
 你的输出仅供用户阅览，不得声称已经创建、修改、提交或删除系统中的任何数据。
-使用准确、简洁、可执行的中文。"""
+使用准确、简洁、可执行的中文；用 Markdown 组织回答，先给结论再列依据。"""
 PRIMARY_CONFIG_ID = "primary"
 logger = logging.getLogger(__name__)
 
