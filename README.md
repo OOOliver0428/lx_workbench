@@ -3,7 +3,7 @@
 面向售前与解决方案团队的轻量协作系统，把商机推进、项目执行、任务协同、工作记录、周报和
 AI 辅助放在同一个工作台中。
 
-> 当前版本：**0.1.1** · 发布基线：`mvp` · 状态：可进入受控试运行部署
+> 当前版本：**0.2.1** · 发布基线：`main` · 状态：可进入受控试运行部署
 
 [查看更新日志](CHANGELOG.md) · [Ubuntu 部署与运维](docs/UBUNTU_DEPLOYMENT.md) ·
 [版本发布规范](docs/RELEASING.md) · [API 契约](docs/API_CONTRACT.md)
@@ -23,7 +23,7 @@ AI 辅助放在同一个工作台中。
 - **权限体系**：按功能递增授权，商机、项目、任务、作战台、工作记录、周报和系统设置相互隔离。
 - **安全与审计**：本地账号、服务端 Session、CSRF、乐观锁、软删除和操作审计。
 
-## 0.1.1 运行基线
+## 0.2.1 运行基线
 
 | 项目 | 当前基线 |
 |---|---|
@@ -106,7 +106,7 @@ uv run python -m app.cli seed-demo-data --password "Demo-Password-2026!"
 首次安装：
 
 ```bash
-git clone --branch mvp --single-branch https://github.com/OOOliver0428/lx_workbench.git
+git clone --branch main --single-branch https://github.com/OOOliver0428/lx_workbench.git
 cd lx_workbench
 sudo bash deploy/ubuntu/install.sh --public-host 服务器IP或内网域名
 sudo solution-workspace create-admin admin "系统管理员"
@@ -131,7 +131,7 @@ sudo solution-workspace db-info
 从 GitHub 正常更新：
 
 ```bash
-sudo solution-workspace update origin mvp
+sudo solution-workspace update origin main
 sudo solution-workspace health
 sudo systemctl is-enabled solution-workspace-backup.timer
 sudo systemctl is-active solution-workspace-backup.timer
@@ -142,7 +142,7 @@ sudo systemctl is-active solution-workspace-backup.timer
 回滚、备份恢复、试用库切正式库和故障排查步骤见
 [Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。
 
-Windows 上可直接双击根目录的 `生成离线升级包.cmd`。工具会自动同步 `origin/mvp`，
+Windows 上可直接双击根目录的 `生成离线升级包.cmd`。工具会自动同步 `origin/main`，
 在 `outputs/offline-updates/` 生成从发布基线 `v0.1.0` 开始的小型 bundle、SHA-256 校验文件和逐步升级说明，
 不会切换分支、修改当前工作区或把未提交文件混入升级包。
 
@@ -232,10 +232,13 @@ tests/               后端及部署资产自动化测试
 
 ## 版本与更新日志
 
-当前发布基线为 **0.1.1**。每个影响用户、部署、配置、数据库、安全或兼容性的
+当前发布基线为 **0.2.1**。每个影响用户、部署、配置、数据库、安全或兼容性的
 变更，都必须先写入 [CHANGELOG.md](CHANGELOG.md) 的 `Unreleased`；发布时再归档到对应版本，并同步
 后端、前端和锁文件中的版本号。项目采用语义化版本，完整规则见
 [版本发布规范](docs/RELEASING.md)。
+
+分支策略：`main` 是发布主线，服务器只部署带版本标签的 `main` 提交；后续开发在 `develop`
+分支进行；0.2 之前的旧原型主线冻结为只读分支 `prototype`；`mvp` 分支停止使用。
 
 ## 试运行限制
 

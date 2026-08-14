@@ -18,6 +18,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          # Keep in sync with UV_VERSION in deploy/ubuntu/install.sh: the lockfile
+          # is generated with the pinned uv, and newer uv releases may require a
+          # lockfile format upgrade that `--locked` refuses.
+          version: "0.11.32"
       - run: uv sync --locked --all-groups
       - name: Validate deployment shell scripts
         run: find deploy -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
