@@ -4,7 +4,7 @@ param(
     [string]$Remote = "origin",
 
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
-    [string]$Branch = "mvp",
+    [string]$Branch = "main",
 
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
     [string]$BaseRef = "v0.1.0",

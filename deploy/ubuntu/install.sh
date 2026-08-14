@@ -36,7 +36,7 @@ Usage:
   sudo bash deploy/ubuntu/install.sh --public-host HOST [options]
 
 Options:
-  --source-dir PATH        Source mvp checkout (default: repository root)
+  --source-dir PATH        Source release checkout (main branch or a version tag)
   --install-dir PATH       Root-owned release checkout below /opt
                            (default: /opt/solution-workspace)
   --public-host HOST       Required server IP or DNS name allowed by backend
@@ -181,7 +181,10 @@ valid_port "${BACKEND_PORT}" || fail "invalid backend port: ${BACKEND_PORT}"
 [[ "${FRONTEND_PORT}" != "${BACKEND_PORT}" ]] || fail "frontend and backend ports must differ"
 
 source_branch="$(git -C "${SOURCE_DIR}" branch --show-current)"
-[[ "${source_branch}" == "mvp" ]] || fail "source checkout must be on the mvp branch"
+source_tag="$(git -C "${SOURCE_DIR}" describe --tags --exact-match HEAD 2>/dev/null || true)"
+[[ "${source_branch}" == "main" || -n "${source_tag}" ]] || {
+  fail "source checkout must be on the main branch or a version tag"
+}
 source_changes="$(git -C "${SOURCE_DIR}" status --porcelain)"
 [[ -z "${source_changes}" ]] || fail "source checkout has uncommitted changes"
 if [[ -d "${PROJECT_DIR}/.git" ]]; then
@@ -376,12 +379,12 @@ origin_url="$(git -C "${SOURCE_DIR}" remote get-url origin 2>/dev/null || true)"
 if [[ "${SOURCE_DIR}" != "${PROJECT_DIR}" ]]; then
   if [[ ! -d "${PROJECT_DIR}/.git" ]]; then
     [[ ! -e "${PROJECT_DIR}" ]] || fail "install directory exists but is not a Git checkout"
-    git clone --no-local --branch mvp "${SOURCE_DIR}" "${PROJECT_DIR}"
+    git clone --no-local --branch main "${SOURCE_DIR}" "${PROJECT_DIR}"
   else
     deployed_changes="$(git -C "${PROJECT_DIR}" status --porcelain --untracked-files=no)"
     [[ -z "${deployed_changes}" ]] || fail "managed install checkout has tracked changes"
-    git -C "${PROJECT_DIR}" fetch --force "${SOURCE_DIR}" refs/heads/mvp:refs/remotes/source/mvp
-    git -C "${PROJECT_DIR}" checkout --force -B mvp refs/remotes/source/mvp
+    git -C "${PROJECT_DIR}" fetch --force "${SOURCE_DIR}" refs/heads/main:refs/remotes/source/main
+    git -C "${PROJECT_DIR}" checkout --force -B main refs/remotes/source/main
   fi
   if [[ -n "${origin_url}" ]]; then
     git -C "${PROJECT_DIR}" remote set-url origin "${origin_url}"

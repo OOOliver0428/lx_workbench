@@ -1,8 +1,8 @@
 # Ubuntu 部署与运维手册
 
-> 适用版本：**0.1.1** · 最后复核：2026-08-06 · 发布分支：`mvp`
+> 适用版本：**0.2.1** · 最后复核：2026-08-14 · 发布分支：`main`
 
-本文适用于 `mvp` 分支当前架构：Ubuntu 单节点、单应用实例、本机 SQLite、前端同源代理后端。
+本文适用于 `main` 分支当前架构：Ubuntu 单节点、单应用实例、本机 SQLite、前端同源代理后端。
 试运行期间可使用独立试用库；业务确认后可切换到新的正式库，或者把试用数据完整提升为正式库。
 
 ## 1. 部署边界
@@ -47,14 +47,19 @@ systemd 服务：
 
 ### 3.1 准备代码
 
-在服务器上检出明确的 `mvp` 分支并确认提交号：
+在服务器上检出发布分支 `main` 并确认提交号；推荐先定位到要部署的版本标签（服务器只部署
+带版本标签的 `main` 提交，安装器接受 `main` 分支或版本标签检出的干净源码）：
 
 ```bash
-git clone --branch mvp --single-branch https://github.com/OOOliver0428/lx_workbench.git
+git clone --branch main --single-branch https://github.com/OOOliver0428/lx_workbench.git
 cd lx_workbench
+git checkout v0.2.1   # 可选：锁定到已评审的版本标签；标签提交与 main 一致时等效
 git status --short --branch
 git rev-parse HEAD
 ```
+
+如果 `main` 已前进到更新的发布提交，而需要部署历史标签，请改用 8.1 节的离线 bundle 流程，
+或先把本地 `main` 定位到该标签后再执行安装。
 
 不要把本地 `.env`、测试数据库、备份或日志上传到仓库后再部署。
 
@@ -68,7 +73,7 @@ sudo bash deploy/ubuntu/install.sh --public-host 10.20.30.40
 
 脚本会重复安全地执行以下工作：
 
-1. 校验 Ubuntu、干净的 `mvp` 源码和项目结构；
+1. 校验 Ubuntu、干净的 `main` 源码（或版本标签检出）和项目结构；
 2. 安装 Git、Node.js 22、`uv` 和构建依赖（已有合格版本时复用）；
 3. 创建不可登录且彼此隔离的前端、后端服务账号；
 4. 把指定提交复制为 `/opt/solution-workspace` 下 root 持有、运行账号只读的发布目录；
@@ -319,7 +324,7 @@ sudo solution-workspace switch-db \
 依赖或构建失败，当前线上版本保持运行，不会清空正在使用的 `node_modules`：
 
 ```bash
-sudo solution-workspace update origin mvp
+sudo solution-workspace update origin main
 sudo solution-workspace health
 sudo solution-workspace db-info
 sudo systemctl is-enabled solution-workspace-backup.timer
@@ -364,19 +369,19 @@ sudo systemctl is-active solution-workspace-backup.timer
 sudo git -C /opt/solution-workspace rev-parse HEAD
 ```
 
-在能访问 GitHub 的受信任电脑上更新 `mvp`，用上一步提交号生成并校验增量包：
+在能访问 GitHub 的受信任电脑上更新 `main`，用上一步提交号生成并校验增量包：
 
 ```bash
-git fetch origin mvp
-git switch mvp
-git merge --ff-only origin/mvp
-git bundle create solution-workspace-update.bundle 服务器当前提交号..mvp
+git fetch origin main
+git switch main
+git merge --ff-only origin/main
+git bundle create solution-workspace-update.bundle 服务器当前提交号..main
 git bundle verify solution-workspace-update.bundle
 sha256sum solution-workspace-update.bundle
 ```
 
 如果制作包的电脑是 Windows，可直接双击仓库根目录的
-`生成离线升级包.cmd`。它会自动同步 `origin/mvp`，在 `outputs/offline-updates/` 生成：
+`生成离线升级包.cmd`。它会自动同步 `origin/main`，在 `outputs/offline-updates/` 生成：
 
 - 从已发布基线 `v0.1.0` 开始的小型 `.bundle`，无需事先查询服务器当前提交；
 - 可由 `sha256sum -c` 校验的 `.bundle.sha256`；
@@ -409,7 +414,7 @@ sudo install -m 0600 -o root -g root \
 sudo git -C /opt/solution-workspace bundle verify \
   /var/lib/solution-workspace/releases/solution-workspace-update.bundle
 sudo solution-workspace update \
-  /var/lib/solution-workspace/releases/solution-workspace-update.bundle mvp
+  /var/lib/solution-workspace/releases/solution-workspace-update.bundle main
 sudo solution-workspace health
 ```
 
@@ -431,14 +436,14 @@ sudo bash -c '
   project=/opt/solution-workspace
   candidate=/usr/local/sbin/solution-workspace.next
   git -C "$project" bundle verify "$bundle"
-  git -C "$project" fetch "$bundle" mvp
+  git -C "$project" fetch "$bundle" main
   git -C "$project" show FETCH_HEAD:deploy/ubuntu/ops.sh >"$candidate"
   test -s "$candidate"
   bash -n "$candidate"
   cp -a /usr/local/sbin/solution-workspace \
     /usr/local/sbin/solution-workspace.before-staged-update
   install -m 0755 -o root -g root "$candidate" /usr/local/sbin/solution-workspace
-  /usr/local/sbin/solution-workspace update "$bundle" mvp
+  /usr/local/sbin/solution-workspace update "$bundle" main
   /usr/local/sbin/solution-workspace health
 '
 ```
@@ -721,7 +726,7 @@ sudo solution-workspace logs backup 200
 - [ ] 自动备份成功，异机复制和告警已配置。
 - [ ] 至少完成一次从备份复制为新库、切换、健康检查和业务对账演练。
 - [ ] 创建了独立管理员账号，默认/试用密码已更换。
-- [ ] 正式生产开放前已单独评审并提高密码长度和强度策略；0.1.1 试运行阶段仍保留现有策略。
+- [ ] 正式生产开放前已单独评审并提高密码长度和强度策略；0.2.1 试运行阶段仍保留现有策略。
 - [ ] 试用转正式的“丢弃数据”或“保留数据”方案已由业务负责人确认。
 - [ ] 切库前后记录数、关键样本、周报和审计事件完成对账。
 - [ ] 回滚窗口、责任人、RPO/RTO 和备份保留期已确认。

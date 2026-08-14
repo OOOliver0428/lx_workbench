@@ -26,7 +26,7 @@ Commands:
   migrate                        Offline backup, then apply pending migrations
   create-admin LOGIN DISPLAY     Create a super administrator interactively
   update [REMOTE] [BRANCH]       Offline backup, fast-forward, build and deploy
-                                 (defaults: origin mvp)
+                                 (defaults: origin main)
   help                           Show this help
 
 Mutating commands use the root-owned deployment lock, so a backup,
@@ -589,7 +589,7 @@ case "${COMMAND}" in
     ;;
   update)
     remote="${1:-origin}"
-    branch="${2:-mvp}"
+    branch="${2:-main}"
     frontend_stage_dir=""
     frontend_runtime_swapped="false"
     cleanup_frontend_stage() {

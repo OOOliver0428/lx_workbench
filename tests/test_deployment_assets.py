@@ -228,10 +228,10 @@ def test_deployment_manual_covers_bundle_and_dependency_escape_paths() -> None:
 
     assert "GitHub 不可达时使用增量 bundle" in manual
     assert "bundle 只替代 GitHub 代码传输" in manual
-    assert "服务器当前提交号..mvp" in manual
+    assert "服务器当前提交号..main" in manual
     assert "solution-workspace.next" in manual
     assert 'test -s "$candidate"' in manual
-    assert '/usr/local/sbin/solution-workspace update "$bundle" mvp' in manual
+    assert '/usr/local/sbin/solution-workspace update "$bundle" main' in manual
     assert "不能直接调用旧版 `update`" in manual
     assert "FRONTEND_RUNTIME_SWAPPED" in manual
     assert "--include=dev --prefer-offline" in manual
