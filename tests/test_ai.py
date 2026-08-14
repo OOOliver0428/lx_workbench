@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
 from app.models import (
+    AIChatMessage,
     AIProviderConfig,
+    AuditEvent,
     Department,
     DepartmentWork,
     DepartmentWorkStatus,
@@ -27,6 +29,7 @@ from app.models import (
 )
 from app.services import ai as ai_service
 from app.services import ai_context as ai_context_module
+from app.services import ai_history
 from app.services.ai_context import build_chat_context, build_weekly_report_context
 from tests.conftest import login
 
@@ -702,3 +705,238 @@ def test_admin_can_test_then_save_encrypted_provider_configuration(
     assert chat.status_code == 200, chat.text
     assert chat.json()["answer"] == "建议先确认项目范围。"
     assert ProviderClient.calls[-1]["headers"]["Authorization"] == f"Bearer {secret}"
+
+
+class HistoryClient:
+    calls: list[dict[str, Any]] = []
+
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 60
+
+    def __enter__(self) -> HistoryClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, Any],
+    ) -> FakeResponse:
+        assert url == "https://api.minimaxi.com/v1/chat/completions"
+        self.calls.append({"json": json})
+        return FakeResponse()
+
+
+def test_ai_chat_replays_persisted_history(api: dict, monkeypatch) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member")
+    api["app"].state.settings.minimax_api_key = "test-token"
+    api["app"].state.llm_guard.cooldown_seconds["chat"] = 0
+    HistoryClient.calls.clear()
+    monkeypatch.setattr(ai_service.httpx, "Client", HistoryClient)
+
+    first = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "第一个问题"},
+    )
+    assert first.status_code == 200, first.text
+    second = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "追问一下"},
+    )
+    assert second.status_code == 200, second.text
+
+    first_messages = HistoryClient.calls[0]["json"]["messages"]
+    assert [message["role"] for message in first_messages] == [
+        "system",
+        "system",
+        "user",
+    ]
+    assert first_messages[-1]["content"] == "第一个问题"
+
+    second_messages = HistoryClient.calls[1]["json"]["messages"]
+    roles = [message["role"] for message in second_messages]
+    contents = [message["content"] for message in second_messages]
+    assert roles[:2] == ["system", "system"]
+    assert roles[-1] == "user"
+    assert contents[-1] == "追问一下"
+    first_index = contents.index("第一个问题")
+    answer_index = contents.index("建议先确认项目负责人。")
+    assert first_index < answer_index
+
+    with api["app"].state.session_factory() as db:
+        rows = db.scalars(
+            select(AIChatMessage)
+            .where(AIChatMessage.user_id == api["users"]["member"])
+            .order_by(AIChatMessage.seq)
+        ).all()
+        assert [row.role for row in rows] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+        ]
+
+
+def test_ai_chat_history_endpoints_and_clear(api: dict, monkeypatch) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member")
+    api["app"].state.settings.minimax_api_key = "test-token"
+    HistoryClient.calls.clear()
+    monkeypatch.setattr(ai_service.httpx, "Client", HistoryClient)
+
+    chat = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "记住这个问题"},
+    )
+    assert chat.status_code == 200, chat.text
+
+    history = client.get("/api/v1/ai/chat/history")
+    assert history.status_code == 200
+    assert history.json() == {
+        "messages": [
+            {"role": "user", "content": "记住这个问题"},
+            {"role": "assistant", "content": "建议先确认项目负责人。"},
+        ]
+    }
+
+    cleared = client.delete(
+        "/api/v1/ai/chat/history",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json() == {"cleared": 2}
+
+    empty = client.get("/api/v1/ai/chat/history")
+    assert empty.json() == {"messages": []}
+
+    with api["app"].state.session_factory() as db:
+        audit_rows = db.scalars(
+            select(AuditEvent).where(AuditEvent.action == "ai.chat.clear")
+        ).all()
+        assert len(audit_rows) == 1
+
+
+def test_ai_history_trimming_keeps_newest_within_budget(api: dict) -> None:
+    with api["app"].state.session_factory.begin() as db:
+        user_id = api["users"]["member"]
+        for index in range(3):
+            ai_history.append_turn(
+                db,
+                user_id,
+                user_prompt=f"用户问题{index}",
+                assistant_answer=f"助手回答{index}",
+                message_max_chars=1000,
+                max_messages=4,
+                max_chars=40,
+            )
+        rows = ai_history.recent_messages(
+            db, user_id, max_messages=100, max_chars=10000
+        )
+        assert [row.content for row in rows] == [
+            "用户问题1",
+            "助手回答1",
+            "用户问题2",
+            "助手回答2",
+        ]
+        assert sum(len(row.content) for row in rows) <= 40
+
+
+def test_ai_chat_context_respects_char_budget(api: dict) -> None:
+    today = date.today()
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        project = Project(
+            code="AI-BUD-001",
+            name="预算验证项目",
+            normalized_name="预算验证项目",
+            status=ProjectStatus.ACTIVE.value,
+            owner_id=actor.id,
+            proposed_by=actor.id,
+        )
+        db.add(project)
+        db.flush()
+        for index in range(20):
+            db.add(
+                Task(
+                    project_id=project.id,
+                    level=0,
+                    title=f"预算验证任务 {index:02d}：需要完成详细的需求分析与方案设计",
+                    description="包含接口梳理、数据迁移评估与联调计划安排，覆盖多个子系统。",
+                    owner_id=actor.id,
+                    created_by=actor.id,
+                    priority=TaskPriority.P1.value,
+                    status=TaskStatus.IN_PROGRESS.value,
+                )
+            )
+        db.flush()
+        for index in range(20):
+            db.add(
+                WorkRecord(
+                    author_id=actor.id,
+                    work_date=today,
+                    content=f"完成预算验证任务 {index:02d} 的接口梳理与联调工作，整理问题清单。",
+                    minutes=60,
+                    project_id=project.id,
+                    last_edited_by=actor.id,
+                )
+            )
+        db.flush()
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        context_text = build_chat_context(db, actor, max_chars=3000)
+    data = json.loads(context_text)
+
+    assert len(context_text) <= 3000
+    assert data["truncated_sections"]
+    assert data["counts"]["tasks"] < 20 or data["counts"]["work_records"] < 20
+
+
+def test_anthropic_path_merges_consecutive_user_messages(
+    api: dict, monkeypatch
+) -> None:
+    client: TestClient = api["client"]
+    with api["app"].state.session_factory.begin() as db:
+        db.add_all(
+            [
+                AIChatMessage(
+                    user_id=api["users"]["member"],
+                    seq=1,
+                    role="user",
+                    content="历史问题A",
+                ),
+                AIChatMessage(
+                    user_id=api["users"]["member"],
+                    seq=2,
+                    role="user",
+                    content="历史问题B",
+                ),
+            ]
+        )
+    settings = api["app"].state.settings
+    settings.minimax_api_key = "sk-cp-test.key"
+    settings.minimax_access_mode = "token_plan"
+    TokenPlanClient.calls.clear()
+    monkeypatch.setattr(ai_service.httpx, "Client", TokenPlanClient)
+
+    csrf = login(client, "member")
+    response = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "当前问题"},
+    )
+    assert response.status_code == 200, response.text
+    call = TokenPlanClient.calls[-1]
+    assert call["json"]["messages"] == [
+        {"role": "user", "content": "历史问题A\n\n历史问题B\n\n当前问题"},
+    ]

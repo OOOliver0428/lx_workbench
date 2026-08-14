@@ -34,6 +34,19 @@ CONTEXT_TASK_LIMIT = 200
 CONTEXT_RECORD_LIMIT = 200
 CONTEXT_TAG_LIMIT_PER_PROJECT = 20
 
+SECTION_ORDER = ("projects", "department_works", "tasks", "work_records")
+# Share of the remaining char budget each section may fill; the unused share
+# of one section spills over to the next in SECTION_ORDER.
+SECTION_BUDGET_FRACTIONS = {
+    "projects": 0.20,
+    "department_works": 0.10,
+    "tasks": 0.40,
+    "work_records": 0.30,
+}
+TRUNCATION_SUFFIX = (
+    "；truncated_sections 列出的部分已按规则截断，未包含的数据不得假设存在"
+)
+
 SHANGHAI = timezone(timedelta(hours=8), name="Asia/Shanghai")
 WEEKDAY_LABELS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
@@ -321,6 +334,26 @@ def _render_work_record(
     return row
 
 
+def _fill_section(
+    rows: list[dict[str, Any]], budget: int
+) -> tuple[list[dict[str, Any]], int]:
+    """Take the longest prefix whose serialized char cost fits the budget.
+
+    Always keeps at least the first row so a tiny budget slice never empties a
+    section; the drop is surfaced through the section's truncated flag.
+    """
+
+    taken: list[dict[str, Any]] = []
+    used = 0
+    for row in rows:
+        cost = len(_json_text(row))
+        if taken and used + cost > budget:
+            break
+        taken.append(row)
+        used += cost
+    return taken, used
+
+
 def _assemble_context(
     db: Session,
     actor: User,
@@ -338,6 +371,7 @@ def _assemble_context(
     department_works_truncated: bool = False,
     tasks_truncated: bool = False,
     records_truncated: bool = False,
+    max_chars: int | None = None,
 ) -> str:
     tags_by_project = _load_project_tags(db, {project.id for project in projects})
     owner_ids = (
@@ -366,35 +400,7 @@ def _assemble_context(
         if missing_task_ids:
             task_titles.update(_task_titles(db, missing_task_ids))
 
-    truncated_sections = [
-        name
-        for name, truncated in (
-            ("projects", projects_truncated),
-            ("department_works", department_works_truncated),
-            ("tasks", tasks_truncated),
-            ("work_records", records_truncated),
-        )
-        if truncated
-    ]
-    scope_text = scope
-    if truncated_sections:
-        scope_text += "；truncated_sections 列出的部分已按规则截断，未包含的数据不得假设存在"
-
-    today = _local_today()
-    payload: dict[str, Any] = {
-        "scope": scope_text,
-        "today": today.isoformat(),
-        "weekday": WEEKDAY_LABELS[today.weekday()],
-        "week_start": week_start.isoformat(),
-        "week_end": week_end.isoformat(),
-        "current_user": {"display_name": actor.display_name},
-        "counts": {
-            "projects": len(projects),
-            "department_works": len(works),
-            "tasks": len(tasks),
-            "work_records": len(records),
-        },
-        "truncated_sections": truncated_sections,
+    section_rows: dict[str, list[dict[str, Any]]] = {
         "projects": [
             _render_project(
                 project,
@@ -428,10 +434,81 @@ def _assemble_context(
             for record in records
         ],
     }
-    return _json_text(payload)
+    truncated = {
+        "projects": projects_truncated,
+        "department_works": department_works_truncated,
+        "tasks": tasks_truncated,
+        "work_records": records_truncated,
+    }
+    today = _local_today()
+    if max_chars is not None and max_chars > 0:
+        # Reserve the meta envelope (including the worst-case truncation
+        # suffix and section keys) so the fill pass has a realistic budget.
+        meta_placeholder = _json_text(
+            {
+                "scope": scope + TRUNCATION_SUFFIX,
+                "today": today.isoformat(),
+                "weekday": WEEKDAY_LABELS[today.weekday()],
+                "week_start": week_start.isoformat(),
+                "week_end": week_end.isoformat(),
+                "current_user": {"display_name": actor.display_name},
+                "counts": {
+                    name: len(rows) for name, rows in section_rows.items()
+                },
+                "truncated_sections": list(SECTION_ORDER),
+                "projects": [],
+                "department_works": [],
+                "tasks": [],
+                "work_records": [],
+            }
+        )
+        remaining = max(0, max_chars - len(meta_placeholder))
+        carried = 0
+        for name in SECTION_ORDER:
+            quota = int(remaining * SECTION_BUDGET_FRACTIONS[name]) + carried
+            taken, used = _fill_section(section_rows[name], quota)
+            if len(taken) < len(section_rows[name]):
+                truncated[name] = True
+            section_rows[name] = taken
+            carried = quota - used
+
+    def render_payload() -> str:
+        truncated_sections = [name for name in SECTION_ORDER if truncated[name]]
+        payload: dict[str, Any] = {
+            "scope": scope + (TRUNCATION_SUFFIX if truncated_sections else ""),
+            "today": today.isoformat(),
+            "weekday": WEEKDAY_LABELS[today.weekday()],
+            "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+            "current_user": {"display_name": actor.display_name},
+            "counts": {name: len(section_rows[name]) for name in SECTION_ORDER},
+            "truncated_sections": truncated_sections,
+            "projects": section_rows["projects"],
+            "department_works": section_rows["department_works"],
+            "tasks": section_rows["tasks"],
+            "work_records": section_rows["work_records"],
+        }
+        return _json_text(payload)
+
+    text = render_payload()
+    if max_chars is not None and max_chars > 0:
+        # Hard cap: the fill pass keeps at least one row per section, which can
+        # overshoot a small budget. Drop trailing rows until the cap holds.
+        while len(text) > max_chars:
+            for name in reversed(SECTION_ORDER):
+                if section_rows[name]:
+                    section_rows[name].pop()
+                    truncated[name] = True
+                    break
+            else:
+                break
+            text = render_payload()
+    return text
 
 
-def build_chat_context(db: Session, actor: User) -> str:
+def build_chat_context(
+    db: Session, actor: User, *, max_chars: int | None = None
+) -> str:
     """Build server-owned context for free-form chat.
 
     A project is related when the user owns or joins it, owns/collaborates on one
@@ -615,6 +692,7 @@ def build_chat_context(db: Session, actor: User) -> str:
         department_works_truncated=department_works_truncated,
         tasks_truncated=tasks_truncated,
         records_truncated=records_truncated,
+        max_chars=max_chars,
     )
 
 

@@ -583,6 +583,14 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ prompt, client_request_id: clientRequestId }),
       }),
+    history: () =>
+      request<{
+        messages: Array<{ role: "user" | "assistant"; content: string }>;
+      }>("/api/v1/ai/chat/history"),
+    clearHistory: () =>
+      request<{ cleared: number }>("/api/v1/ai/chat/history", {
+        method: "DELETE",
+      }),
   },
   weeklyReports: {
     current: () =>
