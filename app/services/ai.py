@@ -52,6 +52,7 @@ class AccessModeDefinition:
     default_model: str
     models: tuple[str, ...]
     docs_url: str
+    thinking_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
                 default_model="deepseek-v4-flash",
                 models=("deepseek-v4-flash", "deepseek-v4-pro"),
                 docs_url="https://api-docs.deepseek.com/",
+                thinking_mode="disabled",
             ),
         ),
         api_key_url="https://platform.deepseek.com/",
@@ -551,6 +553,13 @@ def _openai_chat_completion(
     messages: list[dict[str, str]],
     max_tokens: int,
 ) -> AIChatOut:
+    request_body: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if access_mode.thinking_mode:
+        request_body["thinking"] = {"type": access_mode.thinking_mode}
     try:
         with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
             response = client.post(
@@ -559,11 +568,7 @@ def _openai_chat_completion(
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                },
+                json=request_body,
             )
     except httpx.RequestError as error:
         logger.warning(
@@ -580,8 +585,15 @@ def _openai_chat_completion(
 
     try:
         data: dict[str, Any] = response.json()
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        message = choice["message"]
+        content = message["content"]
     except (KeyError, IndexError, TypeError, ValueError) as error:
+        logger.warning(
+            "OpenAI-compatible provider returned an invalid response: model=%s status=%s",
+            model,
+            response.status_code,
+        )
         raise AppError(
             "AI_INVALID_RESPONSE",
             "大模型服务返回了无法识别的结果",
@@ -590,6 +602,19 @@ def _openai_chat_completion(
 
     answer = _clean_answer(str(content))
     if not answer:
+        reasoning_content = message.get("reasoning_content")
+        raw_usage = data.get("usage") or {}
+        logger.warning(
+            "OpenAI-compatible provider returned an empty answer: "
+            "model=%s finish_reason=%s content_type=%s content_chars=%s "
+            "reasoning_chars=%s completion_tokens=%s",
+            model,
+            choice.get("finish_reason"),
+            type(content).__name__,
+            len(content) if isinstance(content, str) else 0,
+            len(reasoning_content) if isinstance(reasoning_content, str) else 0,
+            raw_usage.get("completion_tokens"),
+        )
         raise AppError(
             "AI_EMPTY_RESPONSE",
             "大模型没有返回有效内容",

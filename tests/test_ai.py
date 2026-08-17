@@ -5,9 +5,11 @@ import re
 from datetime import date
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
+from app.errors import AppError
 from app.models import (
     AIChatMessage,
     AIProviderConfig,
@@ -495,6 +497,71 @@ class ProviderClient:
         return ProviderResponse(json["model"], content)
 
 
+class EmptyThinkingResponse:
+    status_code = 200
+    is_error = False
+
+    def json(self) -> dict[str, Any]:
+        return {
+            "model": "deepseek-v4-flash",
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "private reasoning",
+                    },
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 2048,
+                "total_tokens": 2148,
+            },
+        }
+
+
+class EmptyThinkingClient:
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 60
+
+    def __enter__(self) -> EmptyThinkingClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def post(self, *_args: object, **_kwargs: object) -> EmptyThinkingResponse:
+        return EmptyThinkingResponse()
+
+
+def test_empty_thinking_response_logs_safe_metadata(
+    api: dict,
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setattr(ai_service.httpx, "Client", EmptyThinkingClient)
+    access_mode = ai_service.PROVIDERS["deepseek"].access_modes[0]
+
+    with pytest.raises(AppError) as caught:
+        ai_service._openai_chat_completion(
+            settings=api["app"].state.settings,
+            access_mode=access_mode,
+            model="deepseek-v4-flash",
+            api_key="private-api-key",
+            messages=[{"role": "user", "content": "private prompt"}],
+            max_tokens=2048,
+        )
+
+    assert caught.value.code == "AI_EMPTY_RESPONSE"
+    assert "finish_reason=length" in caplog.text
+    assert "reasoning_chars=17" in caplog.text
+    assert "completion_tokens=2048" in caplog.text
+    assert "private reasoning" not in caplog.text
+    assert "private prompt" not in caplog.text
+    assert "private-api-key" not in caplog.text
+
+
 class TokenPlanResponse:
     status_code = 200
     is_error = False
@@ -664,6 +731,7 @@ def test_admin_can_test_then_save_encrypted_provider_configuration(
     assert tested.json()["usage"]["total_tokens"] == 10
     assert secret not in tested.text
     assert ProviderClient.calls[-1]["url"] == "https://api.deepseek.com/chat/completions"
+    assert ProviderClient.calls[-1]["json"]["thinking"] == {"type": "disabled"}
 
     saved = client.put(
         "/api/v1/ai/configuration",
@@ -705,6 +773,7 @@ def test_admin_can_test_then_save_encrypted_provider_configuration(
     assert chat.status_code == 200, chat.text
     assert chat.json()["answer"] == "建议先确认项目范围。"
     assert ProviderClient.calls[-1]["headers"]["Authorization"] == f"Bearer {secret}"
+    assert ProviderClient.calls[-1]["json"]["thinking"] == {"type": "disabled"}
 
 
 class HistoryClient:

@@ -93,6 +93,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, error: AppError) -> JSONResponse:
+        if error.status_code >= 500:
+            logging.getLogger(__name__).warning(
+                "application error: code=%s status=%s request_id=%s path=%s",
+                error.code,
+                error.status_code,
+                getattr(request.state, "request_id", None),
+                request.url.path,
+            )
         return JSONResponse(
             status_code=error.status_code,
             content={
