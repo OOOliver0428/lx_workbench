@@ -11,12 +11,14 @@ import type {
   PermissionKey,
   ProjectSummary,
   Task,
+  TimeBlock,
   UserCandidate,
   UserRole,
   WorkRecord,
 } from "../types";
 import { AvatarImage } from "./avatar";
 import { ArrowUpRight, Plus } from "./icons";
+import { TimeBlockPicker } from "./time-block-picker";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
 type RecordSourceType = "project" | "department_work" | "none";
@@ -472,6 +474,9 @@ function RecordEditModal({
     record.department_work_id ?? "",
   );
   const [selectedTask, setSelectedTask] = useState(record.task_id ?? "");
+  const [pickedBlocks, setPickedBlocks] = useState<TimeBlock[]>(
+    record.time_blocks ?? [],
+  );
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const delegated = record.author_id !== currentUserId;
@@ -528,9 +533,13 @@ function RecordEditModal({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
     setError("");
     const form = new FormData(event.currentTarget);
+    const totalHours = Number(form.get("time_hours"));
+    if (!totalHours && (record.time_blocks ?? []).length) {
+      setError("已移除全部时间块：请重新圈选工作时间块，或取消本次编辑。");
+      return;
+    }
     const task = tasks.find((item) => item.id === selectedTask);
     let projectId: string | null = null;
     let departmentWorkId: string | null = null;
@@ -542,21 +551,28 @@ function RecordEditModal({
     } else if (sourceType === "department_work") {
       departmentWorkId = selectedDepartmentWork || null;
     }
+    // 未圈选时不携带 time_blocks（后端约定 null = 不改动）并保留原 minutes，
+    // 避免把无区间的历史记录误清为空区间。
+    const payload: Record<string, unknown> = {
+      revision: record.revision,
+      work_date: String(form.get("work_date")),
+      content: String(form.get("content")),
+      minutes: totalHours ? Math.round(totalHours * 60) : record.minutes,
+      project_id: projectId,
+      department_work_id: departmentWorkId,
+      task_id: optional(selectedTask),
+      risk: optional(form.get("risk")),
+      next_action: optional(form.get("next_action")),
+      delegated_edit_reason: delegated
+        ? optional(form.get("delegated_edit_reason"))
+        : null,
+    };
+    if (totalHours) {
+      payload.time_blocks = JSON.parse(String(form.get("time_blocks") ?? "[]"));
+    }
+    setSubmitting(true);
     try {
-      await api.records.update(record.id, {
-        revision: record.revision,
-        work_date: String(form.get("work_date")),
-        content: String(form.get("content")),
-        minutes: Math.round(Number(form.get("hours")) * 60),
-        project_id: projectId,
-        department_work_id: departmentWorkId,
-        task_id: optional(selectedTask),
-        risk: optional(form.get("risk")),
-        next_action: optional(form.get("next_action")),
-        delegated_edit_reason: delegated
-          ? optional(form.get("delegated_edit_reason"))
-          : null,
-      });
+      await api.records.update(record.id, payload);
       onUpdated();
     } catch (caught) {
       setError(
@@ -585,18 +601,22 @@ function RecordEditModal({
               required
             />
           </label>
-          <label className="field">
-            <span>投入时长（小时）*</span>
-            <input
-              name="hours"
-              type="number"
-              min="0.5"
-              max="24"
-              step="0.5"
-              defaultValue={record.minutes / 60}
-              required
-            />
-          </label>
+          <div className="field field-span-two">
+            <span>投入时间（圈选时间块）*</span>
+            <div className="tbp-scroll">
+              <TimeBlockPicker
+                name="time"
+                defaultBlocks={record.time_blocks ?? []}
+                onChange={(blocks) => setPickedBlocks(blocks)}
+              />
+            </div>
+            {!pickedBlocks.length && record.minutes ? (
+              <small className="field-hint">
+                本条记录暂无工作区间，当前工时 {formatHours(record.minutes)}
+                ；圈选时间块后保存将自动补录区间与工时。
+              </small>
+            ) : null}
+          </div>
           <fieldset className="source-options field-span-two">
             <legend>工作来源</legend>
             <label>
@@ -826,11 +846,17 @@ function QuickCreateModal({
     if (submitting) return;
     setError("");
     const form = new FormData(event.currentTarget);
+    const totalHours = Number(form.get("time_hours"));
+    if (!totalHours) {
+      setError("请先圈选工作时间块（最小 0.5 小时）。");
+      return;
+    }
     const payload: Record<string, unknown> = {
       idempotency_key: idempotencyKey,
       work_date: String(form.get("work_date")),
       content: String(form.get("content")),
-      minutes: Math.round(Number(form.get("hours")) * 60),
+      minutes: Math.round(totalHours * 60),
+      time_blocks: JSON.parse(String(form.get("time_blocks") ?? "[]")),
       risk: optional(form.get("risk")),
       next_action: optional(form.get("next_action")),
     };
@@ -951,18 +977,12 @@ function QuickCreateModal({
               required
             />
           </label>
-          <label className="field">
-            <span>投入时长（小时）*</span>
-            <input
-              name="hours"
-              type="number"
-              min="0.5"
-              max="24"
-              step="0.5"
-              defaultValue="1"
-              required
-            />
-          </label>
+          <div className="field field-span-two">
+            <span>投入时间（圈选时间块）*</span>
+            <div className="tbp-scroll">
+              <TimeBlockPicker name="time" />
+            </div>
+          </div>
           <fieldset className="source-options field-span-two">
             <legend>工作来源</legend>
             {canViewProjects ? (
