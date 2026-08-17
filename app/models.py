@@ -20,7 +20,13 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy import DateTime as SQLAlchemyDateTime
-from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    declared_attr,
+    mapped_column,
+    relationship,
+)
 from sqlalchemy.types import TypeDecorator
 
 from app.identity import normalize_user_identifier
@@ -888,6 +894,12 @@ class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     next_action: Mapped[str | None] = mapped_column(Text)
     last_edited_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     delegated_edit_reason: Mapped[str | None] = mapped_column(Text)
+    time_blocks: Mapped[list[WorkRecordTimeBlock]] = relationship(
+        back_populates="record",
+        cascade="all, delete-orphan",
+        order_by="WorkRecordTimeBlock.start_minute",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -904,6 +916,36 @@ class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
             "department_work_id",
             "work_date",
         ),
+    )
+
+
+class WorkRecordTimeBlock(Base):
+    __tablename__ = "work_record_time_blocks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    record_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(
+            "work_records.id",
+            name="fk_wrtb_record_id_work_records",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    start_minute: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_minute: Mapped[int] = mapped_column(Integer, nullable=False)
+    record: Mapped[WorkRecord] = relationship(back_populates="time_blocks")
+
+    __table_args__ = (
+        CheckConstraint(
+            "start_minute >= 0 AND end_minute <= 1440 AND end_minute > start_minute",
+            name="ck_wrtb_range",
+        ),
+        CheckConstraint(
+            "start_minute % 30 = 0 AND end_minute % 30 = 0",
+            name="ck_wrtb_slot",
+        ),
+        Index("ix_wrtb_record", "record_id"),
     )
 
 

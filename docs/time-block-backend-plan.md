@@ -29,6 +29,7 @@ CREATE INDEX ix_wrtb_record ON work_record_time_blocks (record_id);
 
 - 新建迁移脚本（风格参考 `alembic/versions/d8e7f6a5b4c3_enforce_half_hour_work_record_steps.py`），`down_revision` 接当前链尾；
 - 新表不涉及重建 `work_records`，SQLite 直接用 `op.create_table`；注意沿用项目对 SQLite 外键的处理约定；
+- 字段类型、命名约束、取模检查和 `ON DELETE CASCADE` 均使用 SQLite/PostgreSQL 共同支持的定义，后续切库不需要改业务表模型；
 - `downgrade()` 为 `drop_table` + 删索引；
 - **无需数据回填**：历史记录无区间，`time_blocks` 返回空数组即可。
 
@@ -83,7 +84,7 @@ class TimeBlockOut(BaseModel):
 
 1. 单块：`0 <= start < end <= 1440`，30 的倍数（Field 已覆盖）；
 2. 块间：排序后**不得重叠**；相邻（`next.start == prev.end`）视为非法，要求前端先合并——**服务端不做静默合并，非法即 422**，避免客户端数据被暗中改写；
-3. **minutes 一致性（关键决策）**：载荷带 `time_blocks` 时，服务端以 `SUM(end - start)` 重算 `minutes` 并覆盖入库存储，不校验客户端传的 `minutes`。理由：单一事实来源在区间，避免双写不一致；载荷不带 `time_blocks` 时维持旧行为（老客户端兼容）。
+3. **minutes 一致性（关键决策）**：载荷带非空 `time_blocks` 时，服务端以 `SUM(end - start)` 重算 `minutes` 并覆盖入库存储，不校验客户端传的 `minutes`。理由：单一事实来源在区间，避免双写不一致；载荷不带 `time_blocks` 时维持旧行为（老客户端兼容）。更新显式传 `[]` 时清空区间但保留现有 `minutes`，因为历史兼容字段的数据库约束要求至少 30 分钟。
 
 ## 4. 服务层（`app/services/work_records.py`）
 
@@ -91,7 +92,7 @@ class TimeBlockOut(BaseModel):
 | --- | --- |
 | `create_work_record` | 事务内写入 blocks；有 blocks 时按 §3.3 重算 minutes |
 | `quick_create_work_record` | 同上；幂等重放（`replayed`）直接返回已存记录，序列化自然带出 blocks，无需特殊处理 |
-| `update_work_record` | `time_blocks is not None` 时整体替换（删除旧块→插入新块）并重算 minutes；替换走同一事务，失败整体回滚 |
+| `update_work_record` | `time_blocks is not None` 时整体替换（删除旧块→插入新块）；非空列表重算 minutes，空列表保留原 minutes；替换走同一事务，失败整体回滚 |
 | `delete_work_record` | 软删除保持不变；blocks 物理行随硬删级联，软删期间保留（恢复时区间仍在） |
 
 - 序列化器 `app/serializers.py` 的 `work_record_out` 带出 `time_blocks`（按 `start_minute` 排序）；

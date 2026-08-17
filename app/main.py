@@ -116,16 +116,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "new_password",
             "verification_token",
         }
+        message = "请求参数不符合要求"
         for item in error.errors():
             sanitized = dict(item)
             if any(str(part) in sensitive_fields for part in item.get("loc", ())):
                 sanitized["input"] = "[REDACTED]"
+            if context := sanitized.get("ctx"):
+                sanitized["ctx"] = {
+                    key: str(value) if isinstance(value, Exception) else value
+                    for key, value in context.items()
+                }
+            if "time_blocks" in item.get("loc", ()) and message == "请求参数不符合要求":
+                item_message = str(item.get("msg", ""))
+                if item_message.startswith("Value error, "):
+                    message = item_message.removeprefix("Value error, ")
+                elif item.get("type") == "too_long":
+                    message = "时间块最多允许 24 段"
+                else:
+                    message = "时间块必须位于当天 00:00–24:00 内，且起止为 30 分钟的倍数"
             errors.append(sanitized)
         return JSONResponse(
             status_code=422,
             content={
                 "code": "VALIDATION_ERROR",
-                "message": "请求参数不符合要求",
+                "message": message,
                 "request_id": getattr(request.state, "request_id", None),
                 "details": {"errors": errors},
             },
