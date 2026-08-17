@@ -2,25 +2,21 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import type { TimeBlock } from "../types";
 
 /**
- * TimeBlockPicker —— 时间块圈选组件（Demo）
+ * TimeBlockPicker —— 时间块圈选组件
  *
  * 交互：在时间轴上「按住并拖动」圈选 0.5h 粒度的时间块；
  * 支持多段区间、块体拖动平移、两端拖拽改长、相邻/重叠自动合并。
  * 触屏下需长按（约 260ms）激活拖动，避免与页面滚动手势冲突。
  *
  * 表单集成：渲染两个隐藏字段，可直接被 FormData 采集 ——
- *   hours        → 合计小时数（沿用现有提交逻辑：minutes = hours * 60）
- *   time_blocks  → JSON 字符串 [{start, end}]，单位为当天 00:00 起的分钟数
+ *   ${name}_hours  → 合计小时数（沿用现有提交逻辑：minutes = hours * 60）
+ *   ${name}_blocks → JSON 字符串 [{start, end}]，单位为当天 00:00 起的分钟数
  */
 
-export interface TimeBlock {
-  /** 起始分钟（含），30 的倍数 */
-  start: number;
-  /** 结束分钟（不含），30 的倍数 */
-  end: number;
-}
+export type { TimeBlock };
 
 const DAY_MINUTES = 24 * 60;
 const SLOT_MINUTES = 30;

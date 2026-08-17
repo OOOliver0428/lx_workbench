@@ -312,6 +312,14 @@ export interface Deliverable {
   created_at: string;
 }
 
+/** 工作时间块：当天 00:00 起的分钟数区间，30 的倍数 */
+export interface TimeBlock {
+  /** 起始分钟（含），30 的倍数 */
+  start: number;
+  /** 结束分钟（不含），30 的倍数 */
+  end: number;
+}
+
 export interface WorkRecord {
   id: string;
   author_id: string;
@@ -320,6 +328,8 @@ export interface WorkRecord {
   work_date: string;
   content: string;
   minutes: number;
+  /** 具体工作区间；后端未返回时按 [] 处理 */
+  time_blocks: TimeBlock[];
   project_id: string | null;
   project_name: string | null;
   department_work_id: string | null;

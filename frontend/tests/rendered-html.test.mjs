@@ -233,6 +233,10 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(tasksView, /task\.collaborator_ids\.includes\(user\.id\)/);
   assert.match(recordsView, /current_week_only/);
   assert.match(recordsView, /仅显示本周记录/);
+  assert.match(recordsView, /TimeBlockPicker/);
+  assert.match(recordsView, /form\.get\("time_hours"\)/);
+  assert.match(recordsView, /time_blocks/);
+  assert.match(recordsView, /圈选工作时间块/);
   assert.match(adminView, /permissionClosure/);
   assert.match(adminView, /requires_team_scope/);
   assert.match(adminView, /需团队负责人及直属成员/);
