@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     llm_global_tokens_per_day: int = Field(default=1000000, ge=6144, le=1000000000)
     llm_max_tracked_users: int = Field(default=10000, ge=100, le=1000000)
     llm_chat_cooldown_seconds: int = Field(default=2, ge=0, le=3600)
+    llm_chat_history_max_messages: int = Field(default=24, ge=2, le=200)
+    llm_chat_history_max_chars: int = Field(default=16000, ge=1000, le=200000)
+    llm_chat_message_max_chars: int = Field(default=4000, ge=500, le=40000)
+    llm_chat_context_max_chars: int = Field(default=30000, ge=2000, le=200000)
     llm_weekly_cooldown_seconds: int = Field(default=60, ge=0, le=86400)
     llm_team_summary_cooldown_seconds: int = Field(default=60, ge=0, le=86400)
     llm_config_secret: str = ""

@@ -27,13 +27,17 @@ from app.schemas import (
     AIProviderOptionOut,
     AIStatusOut,
 )
+from app.services import ai_history
 from app.services.ai_context import build_chat_context
 
 SYSTEM_PROMPT = """你是团队协作工作台中的通用 AI 助手。
 你只能依据系统提供的当前用户业务上下文回答项目、任务和工作问题。
+上下文中的项目、部门工作、任务与负责人均以名称给出，引用时必须使用原文名称。
+上下文中的 today/week 字段是当前时间锚点，涉及日期的问题一律以此为准。
+对话历史仅包含此前轮次的用户提问与助手回答；延续讨论时须与历史保持一致。
 不要编造不存在的事实；信息不足时明确说明缺少什么。
 你的输出仅供用户阅览，不得声称已经创建、修改、提交或删除系统中的任何数据。
-使用准确、简洁、可执行的中文。"""
+使用准确、简洁、可执行的中文；用 Markdown 组织回答，先给结论再列依据。"""
 PRIMARY_CONFIG_ID = "primary"
 logger = logging.getLogger(__name__)
 
@@ -412,21 +416,43 @@ def chat(
     payload: AIChatRequest,
     actor: User,
 ) -> AIChatOut:
-    context = build_chat_context(db, actor)
+    context = build_chat_context(
+        db, actor, max_chars=settings.llm_chat_context_max_chars
+    )
+    history_rows = ai_history.recent_messages(
+        db,
+        actor.id,
+        max_messages=settings.llm_chat_history_max_messages,
+        max_chars=settings.llm_chat_history_max_chars,
+    )
     messages: list[dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "system",
             "content": f"以下业务上下文由系统按当前用户权限生成，仅作为回答依据：\n{context}",
         },
+        *[
+            {"role": row.role, "content": row.content}
+            for row in history_rows
+        ],
         {"role": "user", "content": payload.prompt},
     ]
-    return complete(
+    result = complete(
         db,
         settings,
         messages=messages,
         max_tokens=2048,
     )
+    ai_history.append_turn(
+        db,
+        actor.id,
+        user_prompt=payload.prompt,
+        assistant_answer=result.answer,
+        message_max_chars=settings.llm_chat_message_max_chars,
+        max_messages=settings.llm_chat_history_max_messages,
+        max_chars=settings.llm_chat_history_max_chars,
+    )
+    return result
 
 
 def complete(
@@ -593,11 +619,20 @@ def _anthropic_chat_completion(
     system = "\n\n".join(
         message["content"] for message in messages if message["role"] == "system"
     )
-    conversation = [
-        {"role": message["role"], "content": message["content"]}
-        for message in messages
-        if message["role"] in {"user", "assistant"}
-    ]
+    # Anthropic requires strictly alternating roles; merge adjacent messages of
+    # the same role so replaying history never produces an invalid sequence.
+    conversation: list[dict[str, str]] = []
+    for message in messages:
+        if message["role"] not in {"user", "assistant"}:
+            continue
+        if conversation and conversation[-1]["role"] == message["role"]:
+            conversation[-1]["content"] = (
+                f"{conversation[-1]['content']}\n\n{message['content']}"
+            )
+        else:
+            conversation.append(
+                {"role": message["role"], "content": message["content"]}
+            )
     try:
         with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
             response = client.post(

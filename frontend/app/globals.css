@@ -3167,6 +3167,12 @@ a {
   margin-top: 24px;
 }
 
+.ai-thread-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
 .ai-chat-row {
   align-items: flex-start;
   display: flex;

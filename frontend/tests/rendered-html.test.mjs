@@ -141,7 +141,9 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
     appShell,
     /setPrompt\(""\)[\s\S]*?api\.ai\.chat\(question, questionId\)/,
   );
-  assert.match(appShell, /关闭窗口后清空本次对话/);
+  assert.match(appShell, /api\.ai\s*\.history\(\)/);
+  assert.match(appShell, /api\.ai\.clearHistory\(\)/);
+  assert.match(appShell, /对话记录会保留/);
   assert.doesNotMatch(appShell, /setAnswer|localStorage|sessionStorage/);
   assert.match(aiConfig, /测试不会自动写入系统配置/);
   assert.match(aiConfig, /Token Plan Key 与按量计费 API Key/);

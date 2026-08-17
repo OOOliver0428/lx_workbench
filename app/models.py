@@ -1109,6 +1109,41 @@ class Deliverable(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     )
 
 
+class AIChatMessage(Base):
+    """Persisted turn of the AI assistant chat, replayed as conversation history.
+
+    One row per user or assistant message; ``seq`` orders messages within a
+    user. The server trims the oldest rows against the configured message and
+    character budgets, so this table stays small. All column types are
+    dialect-neutral to keep the planned SQLite -> PostgreSQL migration a pure
+    transport change.
+    """
+
+    __tablename__ = "ai_chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "seq", name="uq_ai_chat_messages_user_seq"),
+        CheckConstraint(
+            "role IN ('user', 'assistant')", name="ck_ai_chat_messages_role"
+        ),
+        CheckConstraint("seq >= 0", name="ck_ai_chat_messages_seq"),
+    )
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 

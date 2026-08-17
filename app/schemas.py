@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -1135,6 +1135,19 @@ class AIChatOut(BaseModel):
     answer: str
     model: str
     usage: dict[str, int]
+
+
+class AIChatHistoryMessageOut(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AIChatHistoryOut(BaseModel):
+    messages: list[AIChatHistoryMessageOut]
+
+
+class AIChatHistoryClearOut(BaseModel):
+    cleared: int
 
 
 class AIProviderAccessModeOut(BaseModel):
