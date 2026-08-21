@@ -327,6 +327,7 @@ function AIDrawer({
   >([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [weekStart, setWeekStart] = useState("");
   const [weekEnd, setWeekEnd] = useState("");
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
@@ -353,6 +354,22 @@ function AIDrawer({
       })
       .catch(() => setError("无法读取 AI 服务或本周周报状态"));
   }, [canManageWeeklyReports]);
+
+  useEffect(() => {
+    if (!canUseAi) return;
+    api.ai
+      .history()
+      .then((history) => {
+        setMessages(
+          history.messages.map((message, index) => ({
+            id: `history-${index}`,
+            role: message.role,
+            content: message.content,
+          })),
+        );
+      })
+      .catch(() => setError("无法恢复历史对话"));
+  }, [canUseAi]);
 
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({
@@ -395,6 +412,27 @@ function AIDrawer({
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function clearConversation() {
+    if (
+      !window.confirm("清空后将删除服务器上的对话记录，且不可恢复。是否继续？")
+    ) {
+      return;
+    }
+    setClearing(true);
+    setError("");
+    try {
+      await api.ai.clearHistory();
+      setMessages([]);
+      setPrompt("");
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "清空对话失败",
+      );
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -538,7 +576,7 @@ function AIDrawer({
               <h3>从一个具体问题开始</h3>
               <p>
                 可以让我梳理项目目标、拆解下一步，或把工作记录整理成清晰表述。
-                本次对话在关闭窗口后清空。
+                对话记录会保留，重新打开窗口可继续，也可随时清空。
               </p>
               <div className="suggestion-list">
                 {[
@@ -646,6 +684,18 @@ function AIDrawer({
           </section>
           ) : null}
           {canUseAi && messages.length ? (
+            <div className="ai-thread-actions">
+              <button
+                type="button"
+                className="secondary-button compact"
+                disabled={clearing || submitting}
+                onClick={clearConversation}
+              >
+                {clearing ? "正在清空…" : "清空对话"}
+              </button>
+            </div>
+          ) : null}
+          {canUseAi && messages.length ? (
             <section
               className="ai-chat-thread"
               aria-label="本次 AI 对话"
@@ -714,7 +764,7 @@ function AIDrawer({
           />
           <div>
             <small>
-              Enter 发送，Shift + Enter 换行；关闭窗口后清空本次对话
+              Enter 发送，Shift + Enter 换行；对话记录会保留，可随时清空
             </small>
             <button
               type="submit"

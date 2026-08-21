@@ -9,6 +9,9 @@ from app.dependencies import (
 )
 from app.models import AIProviderConfig, PermissionKey, User
 from app.schemas import (
+    AIChatHistoryClearOut,
+    AIChatHistoryMessageOut,
+    AIChatHistoryOut,
     AIChatOut,
     AIChatRequest,
     AIConfigurationOut,
@@ -19,6 +22,7 @@ from app.schemas import (
     AIStatusOut,
 )
 from app.services import ai as ai_service
+from app.services import ai_history
 from app.services import permissions as permission_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -127,6 +131,47 @@ def save_ai_configuration(
         },
     )
     return ai_service.configuration_out(saved, request.app.state.settings)
+
+
+@router.get("/chat/history", response_model=AIChatHistoryOut)
+def ai_chat_history(
+    request: Request,
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+) -> AIChatHistoryOut:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_USE)
+    settings = request.app.state.settings
+    rows = ai_history.recent_messages(
+        db,
+        actor.id,
+        max_messages=settings.llm_chat_history_max_messages,
+        max_chars=settings.llm_chat_history_max_chars,
+    )
+    return AIChatHistoryOut(
+        messages=[
+            AIChatHistoryMessageOut(role=row.role, content=row.content)
+            for row in rows
+        ]
+    )
+
+
+@router.delete("/chat/history", response_model=AIChatHistoryClearOut)
+def clear_ai_chat_history(
+    request: Request,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db, scope="function"),
+) -> AIChatHistoryClearOut:
+    permission_service.assert_permission(db, actor, PermissionKey.AI_USE)
+    cleared = ai_history.clear_history(db, actor.id)
+    record_audit(
+        db,
+        actor=actor,
+        action="ai.chat.clear",
+        entity_type="ai_chat",
+        entity_id=None,
+        detail={"cleared": cleared},
+    )
+    return AIChatHistoryClearOut(cleared=cleared)
 
 
 @router.post("/chat", response_model=AIChatOut)

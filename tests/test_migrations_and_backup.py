@@ -93,7 +93,8 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
                     'departments',
                     'department_works',
                     'task_progress_history',
-                    'work_record_creation_requests'
+                    'work_record_creation_requests',
+                    'work_record_time_blocks'
                   )
                 """
             )
@@ -109,6 +110,20 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
         work_record_columns = {
             item[1] for item in db.execute("PRAGMA table_info(work_records)")
         }
+        time_block_columns = {
+            item[1] for item in db.execute("PRAGMA table_info(work_record_time_blocks)")
+        }
+        time_block_foreign_keys = {
+            item[3]: (item[2], item[4], item[6])
+            for item in db.execute("PRAGMA foreign_key_list(work_record_time_blocks)")
+        }
+        time_block_indexes = {
+            item[1] for item in db.execute("PRAGMA index_list(work_record_time_blocks)")
+        }
+        time_block_table_sql = db.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='table' AND name='work_record_time_blocks'"
+        ).fetchone()[0]
         deliverable_columns = {
             item[1] for item in db.execute("PRAGMA table_info(deliverables)")
         }
@@ -136,7 +151,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "c8a4d7e2f906"
+    assert revision == "a6e1c3f9b204"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -159,6 +174,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
         "department_works",
         "task_progress_history",
         "work_record_creation_requests",
+        "work_record_time_blocks",
     }
     assert "primary_department_id" in user_columns
     assert user_indexes["ix_users_primary_department_id"] is False
@@ -176,6 +192,15 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     )
     assert task_foreign_keys["parent_id"] == ("tasks", "id", "RESTRICT")
     assert "department_work_id" in work_record_columns
+    assert time_block_columns == {"id", "record_id", "start_minute", "end_minute"}
+    assert time_block_foreign_keys["record_id"] == (
+        "work_records",
+        "id",
+        "CASCADE",
+    )
+    assert "ix_wrtb_record" in time_block_indexes
+    assert "ck_wrtb_range" in time_block_table_sql
+    assert "ck_wrtb_slot" in time_block_table_sql
     assert "department_work_id" in deliverable_columns
     assert {"included_leader_count", "source_reports"} <= summary_columns
     assert "ck_tasks_exactly_one_source" in task_table_sql
@@ -191,6 +216,35 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     assert foreign_key_violations == []
     assert foreign_keys == 1
     assert journal_mode == "wal"
+    get_settings.cache_clear()
+
+
+def test_time_block_migration_can_downgrade_and_upgrade(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = upgrade_temp_database(tmp_path, monkeypatch)
+    config = Config("alembic.ini")
+
+    command.downgrade(config, "c8a4d7e2f906")
+    with closing(sqlite3.connect(database_path)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='work_record_time_blocks'"
+        ).fetchone() is None
+        assert db.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone() == ("c8a4d7e2f906",)
+
+    command.upgrade(config, "head")
+    with closing(sqlite3.connect(database_path)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='work_record_time_blocks'"
+        ).fetchone() == ("work_record_time_blocks",)
+        assert db.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone() == ("a6e1c3f9b204",)
     get_settings.cache_clear()
 
 
@@ -909,7 +963,7 @@ def test_populated_previous_revision_upgrades_without_data_loss(
             """
         ).fetchall()
 
-    assert revision == "c8a4d7e2f906"
+    assert revision == "a6e1c3f9b204"
     assert user == ("historic-user", "历史升级用户", "历史升级用户")
     assert integrity == "ok"
     assert migrated_opportunity == (
@@ -960,7 +1014,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "c8a4d7e2f906"
+    assert manifest["schemaRevision"] == "a6e1c3f9b204"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
 

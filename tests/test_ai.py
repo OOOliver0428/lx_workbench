@@ -1,29 +1,44 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
+from app.errors import AppError
 from app.models import (
+    AIChatMessage,
     AIProviderConfig,
+    AuditEvent,
     Department,
     DepartmentWork,
     DepartmentWorkStatus,
     DepartmentWorkVisibility,
     PermissionKey,
+    Project,
+    ProjectStatus,
     Task,
     TaskPriority,
     TaskStatus,
     User,
     UserPermission,
     WorkRecord,
+    utc_now,
 )
 from app.services import ai as ai_service
+from app.services import ai_context as ai_context_module
+from app.services import ai_history
 from app.services.ai_context import build_chat_context, build_weekly_report_context
 from tests.conftest import login
+
+UUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+WEEKDAY_NAMES = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
 
 
 class FakeResponse:
@@ -156,9 +171,9 @@ def test_ai_context_omits_project_and_task_data_without_view_permissions(
         assert context["department_works"] == []
         assert context["tasks"] == []
         assert context["work_records"]
-        assert "project_id" not in context["work_records"][0]
-        assert "department_work_id" not in context["work_records"][0]
-        assert "task_id" not in context["work_records"][0]
+        assert "project_name" not in context["work_records"][0]
+        assert "department_work_name" not in context["work_records"][0]
+        assert "task_title" not in context["work_records"][0]
 
 
 def test_ai_context_includes_only_visible_related_department_work(api: dict) -> None:
@@ -278,14 +293,6 @@ def test_ai_context_includes_only_visible_related_department_work(api: dict) -> 
             )
         )
         db.flush()
-        expected = {
-            "local_work": local_work.id,
-            "public_work": public_work.id,
-            "hidden_work": hidden_work.id,
-            "local_task": local_task.id,
-            "public_task": public_task.id,
-            "hidden_task": hidden_task.id,
-        }
 
     with api["app"].state.session_factory() as db:
         actor = db.get(User, api["users"]["member"])
@@ -295,35 +302,155 @@ def test_ai_context_includes_only_visible_related_department_work(api: dict) -> 
             build_weekly_report_context(db, actor, today, today)
         )
 
-    assert {row["id"] for row in chat_context["department_works"]} == {
-        expected["local_work"],
-        expected["public_work"],
+    assert {row["code"] for row in chat_context["department_works"]} == {
+        "DWK-AI-LOCAL",
+        "DWK-AI-PUBLIC",
     }
-    assert {row["id"] for row in chat_context["tasks"]} == {
-        expected["local_task"],
-        expected["public_task"],
+    assert {row["title"] for row in chat_context["tasks"]} == {
+        "Tracked local task",
+        "Tracked public task",
     }
     local_task_row = next(
-        row for row in chat_context["tasks"] if row["id"] == expected["local_task"]
+        row for row in chat_context["tasks"] if row["title"] == "Tracked local task"
     )
-    assert local_task_row["department_work_id"] == expected["local_work"]
-    assert local_task_row["parent_id"] is None
+    assert local_task_row["department_work_name"] == "Local department work"
+    assert "parent_id" not in local_task_row
     assert local_task_row["level"] == 0
-    assert local_task_row["progress_enabled"] is True
+    assert local_task_row["owner_name"] == "成员甲"
+    assert local_task_row["mine"] is True
+    assert local_task_row["status"] == "处理中"
     assert local_task_row["progress_percent"] == 45
-    assert chat_context["work_records"][0]["department_work_id"] == expected[
-        "local_work"
-    ]
+    assert chat_context["work_records"][0]["department_work_name"] == "Local department work"
+    assert chat_context["work_records"][0]["task_title"] == "Tracked local task"
 
-    assert [row["id"] for row in weekly_context["department_works"]] == [
-        expected["local_work"]
+    assert [row["code"] for row in weekly_context["department_works"]] == [
+        "DWK-AI-LOCAL"
     ]
-    assert [row["id"] for row in weekly_context["tasks"]] == [
-        expected["local_task"]
+    assert [row["title"] for row in weekly_context["tasks"]] == [
+        "Tracked local task"
     ]
-    assert weekly_context["work_records"][0]["department_work_id"] == expected[
-        "local_work"
-    ]
+    assert weekly_context["work_records"][0]["department_work_name"] == "Local department work"
+
+
+def test_ai_context_humanizes_names_labels_and_dates(api: dict) -> None:
+    today = date.today()
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        project = Project(
+            code="AI-HUM-001",
+            name="人话化验证项目",
+            normalized_name="人话化验证项目",
+            description="验证上下文中的名称与标签",
+            status=ProjectStatus.ACTIVE.value,
+            owner_id=actor.id,
+            proposed_by=actor.id,
+            planned_start_date=today,
+            planned_end_date=today,
+        )
+        db.add(project)
+        db.flush()
+        db.add(
+            Task(
+                project_id=project.id,
+                level=0,
+                title="验证任务",
+                owner_id=actor.id,
+                created_by=actor.id,
+                priority=TaskPriority.P2.value,
+                status=TaskStatus.DONE.value,
+                completed_at=utc_now(),
+                progress_enabled=False,
+                progress_percent=None,
+            )
+        )
+        db.flush()
+        db.add(
+            WorkRecord(
+                author_id=actor.id,
+                work_date=today,
+                content="人话化验证记录",
+                minutes=60,
+                project_id=project.id,
+                last_edited_by=actor.id,
+            )
+        )
+        db.flush()
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        context_text = build_chat_context(db, actor)
+    context = json.loads(context_text)
+
+    assert context["current_user"] == {"display_name": "成员甲"}
+    assert context["today"] == today.isoformat()
+    assert context["weekday"] in WEEKDAY_NAMES
+    assert context["week_start"] <= context["today"] <= context["week_end"]
+
+    project_row = next(
+        row for row in context["projects"] if row["code"] == "AI-HUM-001"
+    )
+    assert project_row["owner_name"] == "成员甲"
+    assert project_row["mine"] is True
+    assert project_row["status"] == "进行中"
+    assert "owner_id" not in project_row
+    assert "id" not in project_row
+
+    task_row = next(row for row in context["tasks"] if row["title"] == "验证任务")
+    assert task_row["project_name"] == "人话化验证项目"
+    assert task_row["owner_name"] == "成员甲"
+    assert task_row["mine"] is True
+    assert task_row["status"] == "已完成"
+    assert task_row["priority"] == "P2"
+    assert task_row["updated_at"]
+    assert task_row["completed_at"]
+    assert "description" not in task_row
+    assert "progress_enabled" not in task_row
+
+    record_row = context["work_records"][0]
+    assert record_row["project_name"] == "人话化验证项目"
+    assert "null" not in context_text
+    assert not UUID_PATTERN.search(context_text)
+
+
+def test_ai_context_marks_truncated_sections(api: dict, monkeypatch) -> None:
+    monkeypatch.setattr(ai_context_module, "CONTEXT_TASK_LIMIT", 1)
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        project = Project(
+            code="AI-TRN-001",
+            name="截断验证项目",
+            normalized_name="截断验证项目",
+            status=ProjectStatus.ACTIVE.value,
+            owner_id=actor.id,
+            proposed_by=actor.id,
+        )
+        db.add(project)
+        db.flush()
+        for index in range(2):
+            db.add(
+                Task(
+                    project_id=project.id,
+                    level=0,
+                    title=f"截断验证任务 {index}",
+                    owner_id=actor.id,
+                    created_by=actor.id,
+                    priority=TaskPriority.P1.value,
+                    status=TaskStatus.TODO.value,
+                )
+            )
+        db.flush()
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        context = json.loads(build_chat_context(db, actor))
+
+    assert context["counts"]["tasks"] == 1
+    assert "tasks" in context["truncated_sections"]
+    assert "截断" in context["scope"]
 
 
 class ProviderResponse:
@@ -368,6 +495,71 @@ class ProviderClient:
         self.calls.append({"url": url, "headers": headers, "json": json})
         content = "建议先确认项目范围。" if len(json["messages"]) > 1 else "连接成功"
         return ProviderResponse(json["model"], content)
+
+
+class EmptyThinkingResponse:
+    status_code = 200
+    is_error = False
+
+    def json(self) -> dict[str, Any]:
+        return {
+            "model": "deepseek-v4-flash",
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "private reasoning",
+                    },
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 2048,
+                "total_tokens": 2148,
+            },
+        }
+
+
+class EmptyThinkingClient:
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 60
+
+    def __enter__(self) -> EmptyThinkingClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def post(self, *_args: object, **_kwargs: object) -> EmptyThinkingResponse:
+        return EmptyThinkingResponse()
+
+
+def test_empty_thinking_response_logs_safe_metadata(
+    api: dict,
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setattr(ai_service.httpx, "Client", EmptyThinkingClient)
+    access_mode = ai_service.PROVIDERS["deepseek"].access_modes[0]
+
+    with pytest.raises(AppError) as caught:
+        ai_service._openai_chat_completion(
+            settings=api["app"].state.settings,
+            access_mode=access_mode,
+            model="deepseek-v4-flash",
+            api_key="private-api-key",
+            messages=[{"role": "user", "content": "private prompt"}],
+            max_tokens=2048,
+        )
+
+    assert caught.value.code == "AI_EMPTY_RESPONSE"
+    assert "finish_reason=length" in caplog.text
+    assert "reasoning_chars=17" in caplog.text
+    assert "completion_tokens=2048" in caplog.text
+    assert "private reasoning" not in caplog.text
+    assert "private prompt" not in caplog.text
+    assert "private-api-key" not in caplog.text
 
 
 class TokenPlanResponse:
@@ -539,6 +731,7 @@ def test_admin_can_test_then_save_encrypted_provider_configuration(
     assert tested.json()["usage"]["total_tokens"] == 10
     assert secret not in tested.text
     assert ProviderClient.calls[-1]["url"] == "https://api.deepseek.com/chat/completions"
+    assert ProviderClient.calls[-1]["json"]["thinking"] == {"type": "disabled"}
 
     saved = client.put(
         "/api/v1/ai/configuration",
@@ -580,3 +773,239 @@ def test_admin_can_test_then_save_encrypted_provider_configuration(
     assert chat.status_code == 200, chat.text
     assert chat.json()["answer"] == "建议先确认项目范围。"
     assert ProviderClient.calls[-1]["headers"]["Authorization"] == f"Bearer {secret}"
+    assert ProviderClient.calls[-1]["json"]["thinking"] == {"type": "disabled"}
+
+
+class HistoryClient:
+    calls: list[dict[str, Any]] = []
+
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 60
+
+    def __enter__(self) -> HistoryClient:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, Any],
+    ) -> FakeResponse:
+        assert url == "https://api.minimaxi.com/v1/chat/completions"
+        self.calls.append({"json": json})
+        return FakeResponse()
+
+
+def test_ai_chat_replays_persisted_history(api: dict, monkeypatch) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member")
+    api["app"].state.settings.minimax_api_key = "test-token"
+    api["app"].state.llm_guard.cooldown_seconds["chat"] = 0
+    HistoryClient.calls.clear()
+    monkeypatch.setattr(ai_service.httpx, "Client", HistoryClient)
+
+    first = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "第一个问题"},
+    )
+    assert first.status_code == 200, first.text
+    second = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "追问一下"},
+    )
+    assert second.status_code == 200, second.text
+
+    first_messages = HistoryClient.calls[0]["json"]["messages"]
+    assert [message["role"] for message in first_messages] == [
+        "system",
+        "system",
+        "user",
+    ]
+    assert first_messages[-1]["content"] == "第一个问题"
+
+    second_messages = HistoryClient.calls[1]["json"]["messages"]
+    roles = [message["role"] for message in second_messages]
+    contents = [message["content"] for message in second_messages]
+    assert roles[:2] == ["system", "system"]
+    assert roles[-1] == "user"
+    assert contents[-1] == "追问一下"
+    first_index = contents.index("第一个问题")
+    answer_index = contents.index("建议先确认项目负责人。")
+    assert first_index < answer_index
+
+    with api["app"].state.session_factory() as db:
+        rows = db.scalars(
+            select(AIChatMessage)
+            .where(AIChatMessage.user_id == api["users"]["member"])
+            .order_by(AIChatMessage.seq)
+        ).all()
+        assert [row.role for row in rows] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+        ]
+
+
+def test_ai_chat_history_endpoints_and_clear(api: dict, monkeypatch) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "member")
+    api["app"].state.settings.minimax_api_key = "test-token"
+    HistoryClient.calls.clear()
+    monkeypatch.setattr(ai_service.httpx, "Client", HistoryClient)
+
+    chat = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "记住这个问题"},
+    )
+    assert chat.status_code == 200, chat.text
+
+    history = client.get("/api/v1/ai/chat/history")
+    assert history.status_code == 200
+    assert history.json() == {
+        "messages": [
+            {"role": "user", "content": "记住这个问题"},
+            {"role": "assistant", "content": "建议先确认项目负责人。"},
+        ]
+    }
+
+    cleared = client.delete(
+        "/api/v1/ai/chat/history",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json() == {"cleared": 2}
+
+    empty = client.get("/api/v1/ai/chat/history")
+    assert empty.json() == {"messages": []}
+
+    with api["app"].state.session_factory() as db:
+        audit_rows = db.scalars(
+            select(AuditEvent).where(AuditEvent.action == "ai.chat.clear")
+        ).all()
+        assert len(audit_rows) == 1
+
+
+def test_ai_history_trimming_keeps_newest_within_budget(api: dict) -> None:
+    with api["app"].state.session_factory.begin() as db:
+        user_id = api["users"]["member"]
+        for index in range(3):
+            ai_history.append_turn(
+                db,
+                user_id,
+                user_prompt=f"用户问题{index}",
+                assistant_answer=f"助手回答{index}",
+                message_max_chars=1000,
+                max_messages=4,
+                max_chars=40,
+            )
+        rows = ai_history.recent_messages(
+            db, user_id, max_messages=100, max_chars=10000
+        )
+        assert [row.content for row in rows] == [
+            "用户问题1",
+            "助手回答1",
+            "用户问题2",
+            "助手回答2",
+        ]
+        assert sum(len(row.content) for row in rows) <= 40
+
+
+def test_ai_chat_context_respects_char_budget(api: dict) -> None:
+    today = date.today()
+    with api["app"].state.session_factory.begin() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        project = Project(
+            code="AI-BUD-001",
+            name="预算验证项目",
+            normalized_name="预算验证项目",
+            status=ProjectStatus.ACTIVE.value,
+            owner_id=actor.id,
+            proposed_by=actor.id,
+        )
+        db.add(project)
+        db.flush()
+        for index in range(20):
+            db.add(
+                Task(
+                    project_id=project.id,
+                    level=0,
+                    title=f"预算验证任务 {index:02d}：需要完成详细的需求分析与方案设计",
+                    description="包含接口梳理、数据迁移评估与联调计划安排，覆盖多个子系统。",
+                    owner_id=actor.id,
+                    created_by=actor.id,
+                    priority=TaskPriority.P1.value,
+                    status=TaskStatus.IN_PROGRESS.value,
+                )
+            )
+        db.flush()
+        for index in range(20):
+            db.add(
+                WorkRecord(
+                    author_id=actor.id,
+                    work_date=today,
+                    content=f"完成预算验证任务 {index:02d} 的接口梳理与联调工作，整理问题清单。",
+                    minutes=60,
+                    project_id=project.id,
+                    last_edited_by=actor.id,
+                )
+            )
+        db.flush()
+
+    with api["app"].state.session_factory() as db:
+        actor = db.get(User, api["users"]["member"])
+        assert actor is not None
+        context_text = build_chat_context(db, actor, max_chars=3000)
+    data = json.loads(context_text)
+
+    assert len(context_text) <= 3000
+    assert data["truncated_sections"]
+    assert data["counts"]["tasks"] < 20 or data["counts"]["work_records"] < 20
+
+
+def test_anthropic_path_merges_consecutive_user_messages(
+    api: dict, monkeypatch
+) -> None:
+    client: TestClient = api["client"]
+    with api["app"].state.session_factory.begin() as db:
+        db.add_all(
+            [
+                AIChatMessage(
+                    user_id=api["users"]["member"],
+                    seq=1,
+                    role="user",
+                    content="历史问题A",
+                ),
+                AIChatMessage(
+                    user_id=api["users"]["member"],
+                    seq=2,
+                    role="user",
+                    content="历史问题B",
+                ),
+            ]
+        )
+    settings = api["app"].state.settings
+    settings.minimax_api_key = "sk-cp-test.key"
+    settings.minimax_access_mode = "token_plan"
+    TokenPlanClient.calls.clear()
+    monkeypatch.setattr(ai_service.httpx, "Client", TokenPlanClient)
+
+    csrf = login(client, "member")
+    response = client.post(
+        "/api/v1/ai/chat",
+        headers={"X-CSRF-Token": csrf},
+        json={"prompt": "当前问题"},
+    )
+    assert response.status_code == 200, response.text
+    call = TokenPlanClient.calls[-1]
+    assert call["json"]["messages"] == [
+        {"role": "user", "content": "历史问题A\n\n历史问题B\n\n当前问题"},
+    ]
