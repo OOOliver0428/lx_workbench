@@ -235,3 +235,39 @@ def test_deployment_manual_covers_bundle_and_dependency_escape_paths() -> None:
     assert "不能直接调用旧版 `update`" in manual
     assert "FRONTEND_RUNTIME_SWAPPED" in manual
     assert "--include=dev --prefer-offline" in manual
+
+
+def test_windows_bundle_tool_is_checkout_safe_and_self_verifying() -> None:
+    wrapper = read("生成离线升级包.cmd")
+    tool = read("scripts/New-OfflineUpdateBundle.ps1")
+
+    assert "New-OfflineUpdateBundle.ps1" in wrapper
+    assert "fetch" in tool
+    assert '"refs/remotes/$Remote/$Branch"' in tool
+    assert '"${remoteRef}:refs/heads/$Branch"' in tool
+    assert '"bundle", "verify", $bundlePath' in tool
+    assert "bundle list-heads" in tool
+    assert "Get-FileHash" in tool
+    assert '[string]$BaseRef = "v0.1.0"' in tool
+    assert "merge-base" in tool
+    assert "$baseCommit..refs/heads/$Branch" in tool
+    assert "FullHistory" in tool
+    assert "git switch" not in tool
+    assert "git merge" not in tool
+    assert "outputs\\offline-updates" in tool
+
+
+def test_windows_launcher_refreshes_stale_frontend_dependencies() -> None:
+    launcher = read("scripts/windows-test.ps1")
+
+    assert "function Ensure-FrontendDependencies" in launcher
+    assert 'Join-Path $FrontendRoot "package-lock.json"' in launcher
+    assert 'Join-Path $RunRoot "frontend-package-lock.sha256"' in launcher
+    assert 'Join-Path $ProjectRoot ".run\\npm-cache"' in launcher
+    assert "Get-FileHash" in launcher
+    assert "npm ci" in launcher
+    assert "--cache $NpmCacheRoot" in launcher
+    assert "--include=dev" in launcher
+    assert "--prefer-offline" in launcher
+    assert "--no-audit" in launcher
+    assert "Ensure-FrontendDependencies -NpmPath $npm.Source" in launcher
