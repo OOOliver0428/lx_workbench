@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -78,6 +80,7 @@ def _create_work(
 
 
 def test_department_creation_assigns_initial_leader_and_rejects_duplicates(api: dict) -> None:
+    """尚无主部门的用户被任命为负责人时仍会写入主部门；同名部门仍冲突。"""
     client: TestClient = api["client"]
     admin_csrf = login(client, "admin")
     department = _create_department(
@@ -301,3 +304,156 @@ def test_department_work_lifecycle_revision_and_soft_delete(api: dict) -> None:
         )
         assert audit
         assert audit.detail == {"reason": "误建"}
+
+
+def test_same_user_can_lead_two_departments_and_manage_their_works(api: dict) -> None:
+    client: TestClient = api["client"]
+    admin_csrf = login(client, "admin")
+    first = _create_department(
+        client,
+        admin_csrf,
+        "方案一部",
+        leader_id=api["users"]["leader"],
+    )
+    second = _create_department(
+        client,
+        admin_csrf,
+        "方案二部",
+        leader_id=api["users"]["leader"],
+    )
+    assert second["leader_id"] == api["users"]["leader"]
+    with api["app"].state.session_factory() as db:
+        leader = db.get(User, api["users"]["leader"])
+        assert leader
+        assert leader.primary_department_id == first["id"]
+
+    _grant_department_permissions(api, "leader", "member2")
+    leader_csrf = login(client, "leader")
+    work_a = _create_work(
+        client,
+        leader_csrf,
+        "一部内部事项",
+        department_id=first["id"],
+    )
+    work_b = _create_work(
+        client,
+        leader_csrf,
+        "二部内部事项",
+        department_id=second["id"],
+    )
+    assert work_a["department_id"] == first["id"]
+    assert work_b["department_id"] == second["id"]
+    assert work_a["owner_id"] == api["users"]["leader"]
+    assert work_b["owner_id"] == api["users"]["leader"]
+
+    listed = client.get("/api/v1/department-works")
+    assert listed.status_code == 200, listed.text
+    listed_ids = {item["id"] for item in listed.json()}
+    assert {work_a["id"], work_b["id"]} <= listed_ids
+
+    edited_a = client.patch(
+        f"/api/v1/department-works/{work_a['id']}",
+        headers={"X-CSRF-Token": leader_csrf},
+        json={"revision": work_a["revision"], "description": "一部已更新"},
+    )
+    edited_b = client.patch(
+        f"/api/v1/department-works/{work_b['id']}",
+        headers={"X-CSRF-Token": leader_csrf},
+        json={"revision": work_b["revision"], "description": "二部已更新"},
+    )
+    assert edited_a.status_code == 200, edited_a.text
+    assert edited_b.status_code == 200, edited_b.text
+
+    task_a = client.post(
+        "/api/v1/tasks",
+        headers={"X-CSRF-Token": leader_csrf},
+        json={"department_work_id": work_a["id"], "title": "一部任务"},
+    )
+    task_b = client.post(
+        "/api/v1/tasks",
+        headers={"X-CSRF-Token": leader_csrf},
+        json={"department_work_id": work_b["id"], "title": "二部任务"},
+    )
+    assert task_a.status_code == 201, task_a.text
+    assert task_b.status_code == 201, task_b.text
+    tasks = client.get("/api/v1/tasks", params={"time_scope": "all"})
+    assert tasks.status_code == 200, tasks.text
+    task_ids = {item["id"] for item in tasks.json()}
+    assert {task_a.json()["id"], task_b.json()["id"]} <= task_ids
+
+    today = datetime.now(timezone(timedelta(hours=8))).date()
+    record = client.post(
+        "/api/v1/work-records",
+        headers={"X-CSRF-Token": leader_csrf},
+        json={
+            "work_date": today.isoformat(),
+            "content": "二部工作记录",
+            "minutes": 60,
+            "department_work_id": work_b["id"],
+        },
+    )
+    assert record.status_code == 201, record.text
+
+    login(client, "member2")
+    visible = client.get("/api/v1/department-works")
+    assert visible.status_code == 200, visible.text
+    visible_ids = {item["id"] for item in visible.json()}
+    assert work_a["id"] not in visible_ids
+    assert work_b["id"] not in visible_ids
+    hidden = client.get(f"/api/v1/department-works/{work_b['id']}")
+    assert hidden.status_code == 403
+
+
+def test_appointing_existing_primary_user_as_other_department_leader(api: dict) -> None:
+    client: TestClient = api["client"]
+    admin_csrf = login(client, "admin")
+    first = _create_department(
+        client,
+        admin_csrf,
+        "主责部门",
+        leader_id=api["users"]["leader"],
+    )
+    second = _create_department(client, admin_csrf, "兼责部门")
+    updated = client.patch(
+        f"/api/v1/departments/{second['id']}",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"revision": second["revision"], "leader_id": api["users"]["leader"]},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["leader_id"] == api["users"]["leader"]
+    with api["app"].state.session_factory() as db:
+        leader = db.get(User, api["users"]["leader"])
+        assert leader
+        assert leader.primary_department_id == first["id"]
+
+
+def test_changing_primary_department_reports_all_led_departments(api: dict) -> None:
+    client: TestClient = api["client"]
+    admin_csrf = login(client, "admin")
+    first = _create_department(
+        client,
+        admin_csrf,
+        "拦截一部",
+        leader_id=api["users"]["leader"],
+    )
+    second = _create_department(
+        client,
+        admin_csrf,
+        "拦截二部",
+        leader_id=api["users"]["leader"],
+    )
+    leader_row = next(
+        user
+        for user in client.get("/api/v1/users").json()
+        if user["id"] == api["users"]["leader"]
+    )
+    blocked = client.patch(
+        f"/api/v1/users/{leader_row['id']}",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"revision": leader_row["revision"], "primary_department_id": None},
+    )
+    assert blocked.status_code == 409, blocked.text
+    payload = blocked.json()
+    assert payload["code"] == "DEPARTMENT_LEADER_REASSIGN_REQUIRED"
+    assert set(payload["details"]["department_ids"]) == {first["id"], second["id"]}
+    assert payload["details"]["department_id"] in {first["id"], second["id"]}

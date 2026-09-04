@@ -119,7 +119,8 @@ API 地址或直接读取 CSRF。
 - `GET /api/v1/work-records?current_week_only=true` 只返回当前上海自然周（周一至周日）的记录，
   可与项目和待归集筛选组合使用。
 - 工作记录来源为项目或部门工作二者其一（响应含 `source_type`/`source_id`/`source_name`）；
-  部门工作来源的记录在归档后不可变更，且不能跨部门改派（`public` 仅扩大读取范围）。
+  部门工作来源的记录在归档后不可变更，且不能跨「主部门 ∪ 所负责部门」改派（`public` 仅扩大
+  读取范围）。
 - `POST /api/v1/work-records/quick-create` 一站式创建工作记录：可同时选择或新建项目/部门工作/
   任务并在同一事务中落库。请求必须携带 `idempotency_key`：同键同负载返回首次结果（HTTP 200
   且 `replayed=true`），同键不同负载返回 409 `IDEMPOTENCY_KEY_REUSED`。新建项目、部门工作、
@@ -137,16 +138,20 @@ API 地址或直接读取 CSRF。
 
 - `GET /api/v1/departments` 需要 `departments.view`，支持 `include_inactive` 与 `q` 名称模糊搜索。
 - 部门创建、修改、停用和删除需要 `departments.manage`，且仅系统管理员及以上可管理。部门名
-  规范化后全局唯一；创建或更换负责人时，负责人必须尚未归属任何部门或已是该部门成员；仍有
+  规范化后全局唯一；创建或更换负责人时，负责人必须是有效且可用的用户（同一用户可担任多个
+  部门的 `leader_id`，不必先把主部门改到目标部门）。创建部门时若该用户尚无主部门，可顺带
+  写入；已有主部门时不会仅为任命而改写。`departments.leader_id` 不加 unique(user)。仍有
   成员或未归档部门工作的部门不能停用或删除（409 并附带占用数量）。
-- `users.primary_department_id` 标记用户主部门。变更主部门前必须先把其负责的部门、未归档
-  部门工作和未完成任务改派完毕，否则返回对应的 409 冲突错误。
+- `users.primary_department_id` 标记用户唯一主部门。变更主部门前必须先把其负责的全部部门、
+  未归档部门工作和未完成任务改派完毕，否则返回对应的 409 冲突错误；若仍负责多个部门，错误
+  详情带 `department_ids`。
 - `GET /api/v1/department-works` 需要 `department_works.view`：全员可见 `public` 事项及本人
-  主部门事项，管理员可见全部；支持 `department_id`/`owner_id`/`status`/`visibility`/`q`/
-  `include_archived` 过滤。
+  主部门与所负责部门事项，管理员可见全部；支持 `department_id`/`owner_id`/`status`/
+  `visibility`/`q`/`include_archived` 过滤。
 - 创建部门工作需要 `department_works.create`；编辑、流转和删除需要 `department_works.edit`
-  且仅本人主部门成员或超级管理员可执行。状态机为 `in_progress ↔ completed → archived`；
-  仍有未完成任务时归档返回 `DEPARTMENT_WORK_ACTIVE_TASKS`；归档后为只读。
+  且仅本人主部门成员、所负责部门的负责人或超级管理员可执行。部门工作/任务的 owner 也须落在
+  该范围内。状态机为 `in_progress ↔ completed → archived`；仍有未完成任务时归档返回
+  `DEPARTMENT_WORK_ACTIVE_TASKS`；归档后为只读。
 
 ## 任务工作流
 

@@ -28,6 +28,7 @@ from app.schemas import (
     TaskUpdate,
 )
 from app.services import department_works as department_work_service
+from app.services.departments import is_department_member
 from app.services.projects import assert_revision, ensure_user, get_project
 
 SHANGHAI_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
@@ -163,10 +164,10 @@ def _require_user_can_own_task_source(db: Session, user: User, task: Task) -> No
     if not task.department_work_id:
         return
     department_work = department_work_service.get_department_work(db, task.department_work_id)
-    if user.primary_department_id != department_work.department_id:
+    if not is_department_member(db, user, department_work.department_id):
         raise AppError(
             "TASK_ASSIGNEE_SOURCE_INVISIBLE",
-            "部门工作任务的负责人必须是负责部门成员；公开范围仅扩大查看权限",
+            "部门工作任务的负责人必须是负责部门成员或该部门负责人；公开范围仅扩大查看权限",
         )
 
 
