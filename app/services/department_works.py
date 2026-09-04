@@ -24,7 +24,11 @@ from app.models import (
     utc_now,
 )
 from app.schemas import DepartmentWorkCreate, DepartmentWorkTransition, DepartmentWorkUpdate
-from app.services.departments import get_department, is_department_member
+from app.services.departments import (
+    get_department,
+    is_department_member,
+    visible_department_ids,
+)
 from app.services.projects import assert_revision
 
 DEPARTMENT_WORK_SNAPSHOT_FIELDS = (
@@ -70,7 +74,7 @@ def can_view_department_work(db: Session, user: User, work: DepartmentWork) -> b
         return True
     if work.visibility == DepartmentWorkVisibility.PUBLIC.value:
         return True
-    return user.primary_department_id == work.department_id
+    return work.department_id in visible_department_ids(db, user)
 
 
 def require_view_department_work(db: Session, user: User, work: DepartmentWork) -> None:
@@ -83,7 +87,7 @@ def can_manage_department_work(db: Session, user: User, work: DepartmentWork) ->
 
     if is_super_admin(user):
         return True
-    return bool(user.is_active and user.primary_department_id == work.department_id)
+    return bool(user.is_active and work.department_id in visible_department_ids(db, user))
 
 
 def require_manage_department_work(db: Session, user: User, work: DepartmentWork) -> None:
@@ -108,7 +112,7 @@ def can_create_in_department(db: Session, user: User, department: Department) ->
 
     if not user.is_active or department.deleted_at or not department.is_active:
         return False
-    return is_super_admin(user) or is_department_member(user, department)
+    return is_super_admin(user) or is_department_member(db, user, department)
 
 
 def can_create_in_department_work(
@@ -128,7 +132,7 @@ def require_create_in_department(
     department: Department,
 ) -> None:
     if not can_create_in_department(db, user, department):
-        raise PermissionDeniedError("只能在自己的有效主部门中创建部门工作")
+        raise PermissionDeniedError("只能在自己的主部门或所负责部门中创建部门工作")
 
 
 def require_create_in_department_work(
@@ -147,7 +151,7 @@ def require_create_in_department_work(
             "已归档部门工作为只读状态",
         )
     if not can_create_in_department_work(db, user, work):
-        raise PermissionDeniedError("只能在自己的有效主部门中创建任务")
+        raise PermissionDeniedError("只能在自己的主部门或所负责部门中创建任务")
 
 
 def _ensure_name_available(
@@ -186,11 +190,11 @@ def _ensure_owner(
         not owner
         or not owner.is_active
         or owner.role == UserRole.SUPER_ADMIN.value
-        or owner.primary_department_id != department_id
+        or department_id not in visible_department_ids(db, owner)
     ):
         raise AppError(
             "INVALID_DEPARTMENT_WORK_OWNER",
-            "负责人必须是负责部门的有效成员",
+            "负责人必须是负责部门的有效成员或该部门负责人",
         )
     return owner
 
@@ -209,8 +213,9 @@ def list_department_works(
     query = select(DepartmentWork).where(DepartmentWork.deleted_at.is_(None))
     if actor.role not in {UserRole.SYSTEM_ADMIN.value, UserRole.SUPER_ADMIN.value}:
         scope = [DepartmentWork.visibility == DepartmentWorkVisibility.PUBLIC.value]
-        if actor.primary_department_id:
-            scope.append(DepartmentWork.department_id == actor.primary_department_id)
+        scoped_department_ids = visible_department_ids(db, actor)
+        if scoped_department_ids:
+            scope.append(DepartmentWork.department_id.in_(scoped_department_ids))
         query = query.where(or_(*scope))
     if department_id:
         query = query.where(DepartmentWork.department_id == department_id)

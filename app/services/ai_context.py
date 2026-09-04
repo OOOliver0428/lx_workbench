@@ -20,6 +20,7 @@ from app.models import (
     WorkRecord,
 )
 from app.services import department_works as department_work_service
+from app.services.departments import visible_department_ids
 from app.services.permissions import has_permission
 
 CONTEXT_PROJECT_LIMIT = 100
@@ -223,12 +224,14 @@ def build_chat_context(db: Session, actor: User) -> str:
         ).all()
     )
     # Department work is shared by a department, so every visible source in the
-    # actor's primary department is relevant without an explicit assignment.
-    if actor.primary_department_id:
+    # actor's primary department or actively led departments is relevant
+    # without an explicit assignment.
+    scoped_department_ids = visible_department_ids(db, actor)
+    if scoped_department_ids:
         department_work_ids.update(
             db.scalars(
                 select(DepartmentWork.id).where(
-                    DepartmentWork.department_id == actor.primary_department_id,
+                    DepartmentWork.department_id.in_(scoped_department_ids),
                     DepartmentWork.deleted_at.is_(None),
                 )
             ).all()

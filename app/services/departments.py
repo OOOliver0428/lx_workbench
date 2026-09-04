@@ -82,16 +82,23 @@ def _ensure_valid_leader(
     department: Department,
     leader_id: str,
 ) -> User:
+    """A department leader must be an active, assignable user.
+
+    They do not need ``primary_department_id == department.id``: the same user
+    may lead multiple departments while keeping a single primary department.
+    """
+
+    if department.deleted_at:
+        raise NotFoundError("DEPARTMENT_NOT_FOUND", "部门不存在")
     leader = db.get(User, leader_id)
     if (
         not leader
         or not leader.is_active
         or leader.role == UserRole.SUPER_ADMIN.value
-        or leader.primary_department_id != department.id
     ):
         raise AppError(
             "INVALID_DEPARTMENT_LEADER",
-            "部门负责人必须是该部门的有效成员",
+            "部门负责人必须是有效且可用的用户",
         )
     return leader
 
@@ -112,38 +119,31 @@ def create_department(
     db.add(department)
     db.flush()
     if payload.leader_id:
-        leader = db.get(User, payload.leader_id)
-        if (
-            not leader
-            or not leader.is_active
-            or leader.role == UserRole.SUPER_ADMIN.value
-            or leader.primary_department_id is not None
-        ):
-            raise AppError(
-                "INVALID_DEPARTMENT_LEADER",
-                "新部门负责人必须是尚未归属其他部门的有效用户",
-            )
-        user_before = {
-            "primaryDepartmentId": leader.primary_department_id,
-            "revision": leader.revision,
-        }
-        leader.primary_department_id = department.id
-        leader.revision += 1
-        leader.updated_at = utc_now()
+        leader = _ensure_valid_leader(db, department, payload.leader_id)
         department.leader_id = leader.id
-        record_audit(
-            db,
-            actor=actor,
-            action="user.department.assign",
-            entity_type="user",
-            entity_id=leader.id,
-            before_data=user_before,
-            after_data={
-                "primaryDepartmentId": department.id,
+        # Only fill in a missing primary department. Never rewrite an existing
+        # one just to appoint the user as this department's leader.
+        if leader.primary_department_id is None:
+            user_before = {
+                "primaryDepartmentId": leader.primary_department_id,
                 "revision": leader.revision,
-            },
-            detail={"reason": "initial_department_leader"},
-        )
+            }
+            leader.primary_department_id = department.id
+            leader.revision += 1
+            leader.updated_at = utc_now()
+            record_audit(
+                db,
+                actor=actor,
+                action="user.department.assign",
+                entity_type="user",
+                entity_id=leader.id,
+                before_data=user_before,
+                after_data={
+                    "primaryDepartmentId": department.id,
+                    "revision": leader.revision,
+                },
+                detail={"reason": "initial_department_leader"},
+            )
     # Initial leader assignment happens after the insert because it needs the
     # generated department ID. Flush the resulting versioned UPDATE so both
     # the audit snapshot and API response carry the current revision.
@@ -291,9 +291,50 @@ def department_member_count(db: Session, department_id: str) -> int:
     )
 
 
-def is_department_member(user: User, department: Department | str) -> bool:
+def led_active_department_ids(db: Session, user_id: str) -> list[str]:
+    """Return active, non-deleted departments the user currently leads."""
+
+    return list(
+        db.scalars(
+            select(Department.id).where(
+                Department.leader_id == user_id,
+                Department.deleted_at.is_(None),
+                Department.is_active.is_(True),
+            )
+        ).all()
+    )
+
+
+def visible_department_ids(db: Session, user: User) -> set[str]:
+    """Departments the user can act in as a member-equivalent.
+
+    Union of the single primary department (if any) and active departments
+    they lead. This is not a membership M2M and does not change
+    ``User.leader_id`` reporting lines.
+    """
+
+    ids = set(led_active_department_ids(db, user.id))
+    if user.primary_department_id:
+        ids.add(user.primary_department_id)
+    return ids
+
+
+def is_department_member(
+    db: Session,
+    user: User,
+    department: Department | str,
+) -> bool:
+    """Member-equivalent scope: primary department or an actively led department.
+
+    Users still have at most one ``primary_department_id``. Leading extra
+    departments grants the same view/write/create/own scope as membership,
+    without introducing a membership table.
+    """
+
+    if not user.is_active:
+        return False
     department_id = department.id if isinstance(department, Department) else department
-    return bool(user.is_active and user.primary_department_id == department_id)
+    return department_id in visible_department_ids(db, user)
 
 
 def can_manage_department(actor: User) -> bool:
