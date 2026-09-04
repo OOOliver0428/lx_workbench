@@ -33,6 +33,7 @@ from app.schemas import (
 )
 from app.security import hash_password
 from app.services import permissions as permission_service
+from app.services.departments import led_active_department_ids
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -112,18 +113,19 @@ def _ensure_department_change_safe(
 ) -> None:
     if target_department_id == user.primary_department_id:
         return
-    led_department = db.scalar(
-        select(Department).where(
-            Department.leader_id == user.id,
-            Department.deleted_at.is_(None),
-            Department.is_active.is_(True),
-        )
-    )
-    if led_department and led_department.id != target_department_id:
+    blocking_department_ids = [
+        department_id
+        for department_id in led_active_department_ids(db, user.id)
+        if department_id != target_department_id
+    ]
+    if blocking_department_ids:
         raise ConflictError(
             "DEPARTMENT_LEADER_REASSIGN_REQUIRED",
             "该用户仍是部门负责人，请先调整部门负责人后再变更主部门",
-            {"department_id": led_department.id},
+            {
+                "department_ids": blocking_department_ids,
+                "department_id": blocking_department_ids[0],
+            },
         )
     owned_work = db.scalar(
         select(DepartmentWork).where(

@@ -31,6 +31,7 @@ from app.services import department_works as department_work_service
 from app.services import permissions as permission_service
 from app.services import projects as project_service
 from app.services import tasks as task_service
+from app.services.departments import is_department_member
 from app.services.projects import assert_revision, get_project
 
 WORK_RECORD_SNAPSHOT_FIELDS = (
@@ -86,7 +87,7 @@ def _require_department_work_record_scope(
             "DEPARTMENT_WORK_ARCHIVED",
             "已归档部门工作不能变更工作记录",
         )
-    if actor.primary_department_id != work.department_id and not is_super_admin(actor):
+    if not is_super_admin(actor) and not is_department_member(db, actor, work.department_id):
         raise PermissionDeniedError("公开范围仅允许跨部门查看，不能跨部门变更工作记录")
 
 

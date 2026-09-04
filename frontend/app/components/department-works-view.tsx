@@ -326,7 +326,23 @@ function DepartmentWorkFormModal({
   onSaved: () => Promise<void>;
 }) {
   const editing = work !== null;
+  const isSuperAdmin = context.user.role === "super_admin";
   const primaryDepartmentId = context.user.primary_department_id ?? "";
+  const selectableDepartments = isSuperAdmin
+    ? departments.filter((department) => department.is_active)
+    : departments.filter(
+        (department) =>
+          department.is_active &&
+          (department.id === primaryDepartmentId ||
+            department.leader_id === context.user.id),
+      );
+  const departmentOptions = editing
+    ? departments.filter(
+        (department) =>
+          department.id === work?.department_id ||
+          selectableDepartments.some((item) => item.id === department.id),
+      )
+    : selectableDepartments;
   const [name, setName] = useState(work?.name ?? "");
   const [departmentId, setDepartmentId] = useState(
     work?.department_id ?? primaryDepartmentId,
@@ -408,9 +424,14 @@ function DepartmentWorkFormModal({
                     : "请选择所属部门"}
                 </option>
               )}
-              {departments.map((department) => (
+              {departmentOptions.map((department) => (
                 <option key={department.id} value={department.id}>
                   {department.name}
+                  {department.id === primaryDepartmentId ? "（主部门）" : ""}
+                  {department.leader_id === context.user.id &&
+                  department.id !== primaryDepartmentId
+                    ? "（我负责）"
+                    : ""}
                 </option>
               ))}
             </select>

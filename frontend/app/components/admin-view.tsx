@@ -1281,9 +1281,7 @@ function DepartmentCreateModal({
 }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const leaderCandidates = candidates.filter(
-    (candidate) => !candidate.primary_department_id,
-  );
+  const leaderCandidates = candidates;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1325,7 +1323,7 @@ function DepartmentCreateModal({
           </select>
           <small className="field-hint">
             {leaderCandidates.length
-              ? "负责人必须是尚未归属任何部门的用户。"
+              ? "同一用户可担任多个部门的负责人；若其尚无主部门，创建时会顺带写入该部门。"
               : "当前没有可指定的用户，可先创建部门再在编辑中指定负责人。"}
           </small>
         </label>
@@ -1356,11 +1354,7 @@ function DepartmentEditModal({
 }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const leaderCandidates = candidates.filter(
-    (candidate) =>
-      candidate.primary_department_id === department.id ||
-      candidate.id === department.leader_id,
-  );
+  const leaderCandidates = candidates;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1416,7 +1410,7 @@ function DepartmentEditModal({
             ))}
           </select>
           <small className="field-hint">
-            负责人必须是主部门为本部门的用户。
+            同一用户可担任多个部门的负责人，不必先把主部门改到本部门。
           </small>
         </label>
         <label className="toggle-filter">

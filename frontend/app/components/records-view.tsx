@@ -792,7 +792,17 @@ function QuickCreateModal({
   const isSuperAdmin = currentUserRole === "super_admin";
   const ownerRequired = isSuperAdmin;
   const ownerDefault = isSuperAdmin ? "" : currentUserId;
-  const needsDepartmentPick = isSuperAdmin || !currentDepartmentId;
+  const selectableDepartments = isSuperAdmin
+    ? departments
+    : departments.filter(
+        (department) =>
+          department.id === currentDepartmentId ||
+          department.leader_id === currentUserId,
+      );
+  const needsDepartmentPick =
+    isSuperAdmin ||
+    !currentDepartmentId ||
+    selectableDepartments.length > 1;
   const visibleTasks = tasks.filter((task) => {
     if (sourceType === "project") {
       return selectedProject ? task.project_id === selectedProject : false;
@@ -1101,13 +1111,22 @@ function QuickCreateModal({
                   <span>所属部门 *</span>
                   <select
                     name="new_department_work_department_id"
-                    defaultValue=""
+                    defaultValue={
+                      isSuperAdmin ? "" : (currentDepartmentId ?? "")
+                    }
                     required
                   >
                     <option value="">请选择部门</option>
-                    {departments.map((department) => (
+                    {selectableDepartments.map((department) => (
                       <option key={department.id} value={department.id}>
                         {department.name}
+                        {department.id === currentDepartmentId
+                          ? "（主部门）"
+                          : ""}
+                        {department.leader_id === currentUserId &&
+                        department.id !== currentDepartmentId
+                          ? "（我负责）"
+                          : ""}
                       </option>
                     ))}
                   </select>
