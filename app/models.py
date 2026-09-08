@@ -20,7 +20,13 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy import DateTime as SQLAlchemyDateTime
-from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    declared_attr,
+    mapped_column,
+    relationship,
+)
 from sqlalchemy.types import TypeDecorator
 
 from app.identity import normalize_user_identifier
@@ -888,6 +894,12 @@ class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     next_action: Mapped[str | None] = mapped_column(Text)
     last_edited_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     delegated_edit_reason: Mapped[str | None] = mapped_column(Text)
+    time_blocks: Mapped[list[WorkRecordTimeBlock]] = relationship(
+        back_populates="record",
+        cascade="all, delete-orphan",
+        order_by="WorkRecordTimeBlock.start_minute",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -904,6 +916,36 @@ class WorkRecord(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
             "department_work_id",
             "work_date",
         ),
+    )
+
+
+class WorkRecordTimeBlock(Base):
+    __tablename__ = "work_record_time_blocks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    record_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(
+            "work_records.id",
+            name="fk_wrtb_record_id_work_records",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    start_minute: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_minute: Mapped[int] = mapped_column(Integer, nullable=False)
+    record: Mapped[WorkRecord] = relationship(back_populates="time_blocks")
+
+    __table_args__ = (
+        CheckConstraint(
+            "start_minute >= 0 AND end_minute <= 1440 AND end_minute > start_minute",
+            name="ck_wrtb_range",
+        ),
+        CheckConstraint(
+            "start_minute % 30 = 0 AND end_minute % 30 = 0",
+            name="ck_wrtb_slot",
+        ),
+        Index("ix_wrtb_record", "record_id"),
     )
 
 
@@ -1064,6 +1106,41 @@ class Deliverable(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
             "(task_id IS NULL AND work_record_id IS NOT NULL)",
             name="ck_deliverables_one_source",
         ),
+    )
+
+
+class AIChatMessage(Base):
+    """Persisted turn of the AI assistant chat, replayed as conversation history.
+
+    One row per user or assistant message; ``seq`` orders messages within a
+    user. The server trims the oldest rows against the configured message and
+    character budgets, so this table stays small. All column types are
+    dialect-neutral to keep the planned SQLite -> PostgreSQL migration a pure
+    transport change.
+    """
+
+    __tablename__ = "ai_chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "seq", name="uq_ai_chat_messages_user_seq"),
+        CheckConstraint(
+            "role IN ('user', 'assistant')", name="ck_ai_chat_messages_role"
+        ),
+        CheckConstraint("seq >= 0", name="ck_ai_chat_messages_seq"),
     )
 
 

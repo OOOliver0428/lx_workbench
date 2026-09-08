@@ -25,6 +25,7 @@ from app.schemas import (
     ProjectSummaryOut,
     ProjectTagOut,
     TaskOut,
+    TimeBlockOut,
     WorkRecordOut,
 )
 
@@ -163,4 +164,7 @@ def work_record_out(db: Session, record: WorkRecord) -> WorkRecordOut:
     )
     payload.last_editor_avatar_key = last_editor.avatar_key if last_editor else None
     payload.deliverables = deliverables_for_record(db, record.id)
+    payload.time_blocks = [
+        TimeBlockOut(start=block.start_minute, end=block.end_minute) for block in record.time_blocks
+    ]
     return payload

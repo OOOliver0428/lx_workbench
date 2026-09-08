@@ -8,19 +8,43 @@
 
 ## [Unreleased]
 
+本条目对应长期路径 A：将 GitHub `dev`（时间块、AI 多轮历史与上下文化）合入已含方案 B
+（多部门负责人）的 `main`。两边能力同时保留，合入后的 tip 可与现网 `eedd4f28` 再做
+merge-base 对比。
+
 ### Added
+
+- 工作记录支持时间块圈选录入：创建、编辑和快速创建可提交 `time_blocks`（当天 00:00 起的
+  半小时间隔，服务端以区间总时长覆盖 `minutes`）；工作记录页与快速创建接入时间块选择器。
+- AI 助手按用户持久化多轮对话历史，并提供 `GET/DELETE /api/v1/ai/chat/history`；历史受
+  消息数与字符双预算裁剪，最旧内容先丢弃。
+- AI 业务上下文人话化：负责人与关联对象以名称互指、状态使用中文标签、带上海时区日期锚点；
+  各分段除数量上限外还受总字符预算约束，被截断的分段写入 `truncated_sections`。
 
 ### Changed
 
 - 同一用户可被设为多个部门的 `Department.leader_id`；其对主部门与所负责部门的部门工作、任务
   和工作记录拥有与成员相当的可见/可写/可创建/可任 owner 范围。用户仍只有一个主部门，直属
-  Leader / 周报 / 作战台团队逻辑不变。
+  Leader / 周报 / 作战台团队逻辑不变。AI 聊天上下文中的部门工作范围同步为主部门 ∪ 所负责
+  的有效部门。
 
 ### Fixed
+
+- 修复 DeepSeek 聊天偶发返回空回复的问题。
 
 ### Security
 
 ### Operations
+
+- 新增 3 个 Alembic 迁移，随服务启动前的 `alembic upgrade head` 执行：
+  `d1f2a3b4c5e6`（`ai_chat_messages` 对话历史表）、`f1a6b7c8d902`（`work_record_time_blocks`
+  时间块表）、`a6e1c3f9b204`（合并上述两个 head）。新表不影响旧版本代码读取；若回滚到不含
+  这些能力的代码，需先 `alembic downgrade` 到 `c8a4d7e2f906`。
+- 可选新环境变量（均有默认值，不改 `.env` 亦可运行）：`MVP_LLM_CHAT_HISTORY_MAX_MESSAGES`、
+  `MVP_LLM_CHAT_HISTORY_MAX_CHARS`、`MVP_LLM_CHAT_MESSAGE_MAX_CHARS`、
+  `MVP_LLM_CHAT_CONTEXT_MAX_CHARS`。无新增端口、systemd 或部署依赖。
+- `dev` 合入时删除了根目录 `生成离线升级包.cmd` 包装脚本（`scripts/New-OfflineUpdateBundle.ps1`
+  仍保留）。README 与 Ubuntu 部署文档仍提及该 cmd，后续需对齐文档或恢复包装脚本。
 
 ## [0.2.1] - 2026-08-14
 

@@ -19,10 +19,12 @@ from app.models import (
     User,
     WorkRecord,
     WorkRecordCreationRequest,
+    WorkRecordTimeBlock,
     utc_now,
 )
 from app.schemas import (
     TaskCreate,
+    TimeBlockInput,
     WorkRecordCreate,
     WorkRecordQuickCreate,
     WorkRecordUpdate,
@@ -60,6 +62,31 @@ class QuickCreateResult:
     created_department_work_id: str | None
     created_task_id: str | None
     replayed: bool
+
+
+def _time_blocks_minutes(blocks: list[TimeBlockInput]) -> int:
+    return sum(block.end - block.start for block in blocks)
+
+
+def _replace_time_blocks(
+    record: WorkRecord,
+    blocks: list[TimeBlockInput],
+) -> None:
+    record.time_blocks = [
+        WorkRecordTimeBlock(
+            start_minute=block.start,
+            end_minute=block.end,
+        )
+        for block in sorted(blocks, key=lambda block: (block.start, block.end))
+    ]
+
+
+def _work_record_snapshot(record: WorkRecord) -> dict[str, object]:
+    snapshot = jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS)
+    snapshot["time_blocks"] = [
+        {"start": block.start_minute, "end": block.end_minute} for block in record.time_blocks
+    ]
+    return snapshot
 
 
 def get_work_record(db: Session, record_id: str) -> WorkRecord:
@@ -182,7 +209,9 @@ def create_work_record(
         author_id=actor.id,
         work_date=payload.work_date,
         content=payload.content.strip(),
-        minutes=payload.minutes,
+        minutes=(
+            _time_blocks_minutes(payload.time_blocks) if payload.time_blocks else payload.minutes
+        ),
         project_id=project_id,
         department_work_id=department_work_id,
         task_id=payload.task_id,
@@ -190,6 +219,7 @@ def create_work_record(
         next_action=payload.next_action,
         last_edited_by=actor.id,
     )
+    _replace_time_blocks(record, payload.time_blocks)
     db.add(record)
     db.flush()
     _add_deliverables(db, record, payload.deliverables, actor)
@@ -199,7 +229,7 @@ def create_work_record(
         action="work_record.create",
         entity_type="work_record",
         entity_id=record.id,
-        after_data=jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS),
+        after_data=_work_record_snapshot(record),
         detail={"deliverableCount": len(payload.deliverables)},
     )
     return record
@@ -254,8 +284,12 @@ def update_work_record(
     if record.author_id != actor.id and not payload.delegated_edit_reason:
         raise AppError("DELEGATED_EDIT_REASON_REQUIRED", "代改他人记录必须填写原因")
     assert_revision(record, payload.revision, entity_name="work_record")
-    before = jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS)
-    fields = payload.model_fields_set - {"revision", "delegated_edit_reason"}
+    before = _work_record_snapshot(record)
+    fields = payload.model_fields_set - {
+        "revision",
+        "delegated_edit_reason",
+        "time_blocks",
+    }
 
     task_id = payload.task_id if "task_id" in fields else record.task_id
     project_id = payload.project_id if "project_id" in fields else record.project_id
@@ -288,6 +322,10 @@ def update_work_record(
             if field == "content" and value:
                 value = value.strip()
             setattr(record, field, value)
+    if "time_blocks" in payload.model_fields_set and payload.time_blocks is not None:
+        _replace_time_blocks(record, payload.time_blocks)
+        if payload.time_blocks:
+            record.minutes = _time_blocks_minutes(payload.time_blocks)
     now = utc_now()
     moved_deliverable_count = 0
     if {"project_id", "department_work_id", "task_id"} & fields:
@@ -318,7 +356,7 @@ def update_work_record(
         entity_type="work_record",
         entity_id=record.id,
         before_data=before,
-        after_data=jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS),
+        after_data=_work_record_snapshot(record),
         detail={
             "delegatedEditReason": record.delegated_edit_reason,
             "movedDeliverableCount": moved_deliverable_count,
@@ -328,7 +366,12 @@ def update_work_record(
 
 
 def _quick_payload_hash(payload: WorkRecordQuickCreate) -> str:
-    canonical = payload.model_dump(mode="json", exclude={"idempotency_key"})
+    excluded_fields = {"idempotency_key"}
+    if "time_blocks" not in payload.model_fields_set:
+        # Keep hashes compatible with requests persisted before this optional
+        # field existed, so old clients can still replay an existing key.
+        excluded_fields.add("time_blocks")
+    canonical = payload.model_dump(mode="json", exclude=excluded_fields)
     encoded = json.dumps(
         canonical,
         ensure_ascii=False,
@@ -445,6 +488,7 @@ def quick_create_work_record(
         risk=payload.risk,
         next_action=payload.next_action,
         deliverables=payload.deliverables,
+        time_blocks=payload.time_blocks,
     )
     record = create_work_record(db, record_payload, actor)
     request = WorkRecordCreationRequest(
@@ -486,7 +530,7 @@ def delete_work_record(
             department_work_id=record.department_work_id,
         )
     assert_revision(record, revision, entity_name="work_record")
-    before = jsonable_snapshot(record, WORK_RECORD_SNAPSHOT_FIELDS)
+    before = _work_record_snapshot(record)
     now = utc_now()
     linked_deliverables = _active_deliverables_for_record(db, record.id)
     for deliverable in linked_deliverables:
