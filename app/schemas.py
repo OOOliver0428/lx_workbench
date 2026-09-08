@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -694,6 +695,38 @@ class DeliverableOut(ORMModel):
     created_at: datetime
 
 
+class TimeBlockInput(BaseModel):
+    start: int = Field(ge=0, lt=1440, multiple_of=30)
+    end: int = Field(gt=0, le=1440, multiple_of=30)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> TimeBlockInput:
+        if self.end <= self.start:
+            raise ValueError("时间块结束必须晚于开始")
+        return self
+
+
+class TimeBlockOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    start: int = Field(validation_alias=AliasChoices("start", "start_minute"))
+    end: int = Field(validation_alias=AliasChoices("end", "end_minute"))
+
+
+def _validate_time_blocks(
+    blocks: list[TimeBlockInput] | None,
+) -> list[TimeBlockInput] | None:
+    if blocks is None:
+        return None
+    ordered = sorted(blocks, key=lambda block: (block.start, block.end))
+    for previous, current in zip(ordered, ordered[1:], strict=False):
+        if current.start < previous.end:
+            raise ValueError("时间块之间不得重叠")
+        if current.start == previous.end:
+            raise ValueError("相邻时间块必须先合并")
+    return blocks
+
+
 class WorkRecordCreate(BaseModel):
     work_date: date
     content: str = Field(min_length=1, max_length=20000)
@@ -704,6 +737,12 @@ class WorkRecordCreate(BaseModel):
     risk: str | None = Field(default=None, max_length=5000)
     next_action: str | None = Field(default=None, max_length=5000)
     deliverables: list[DeliverableInput] = Field(default_factory=list, max_length=50)
+    time_blocks: list[TimeBlockInput] = Field(default_factory=list, max_length=24)
+
+    @field_validator("time_blocks")
+    @classmethod
+    def validate_time_blocks(cls, value: list[TimeBlockInput]) -> list[TimeBlockInput]:
+        return _validate_time_blocks(value) or []
 
     @model_validator(mode="after")
     def validate_source(self) -> WorkRecordCreate:
@@ -723,6 +762,15 @@ class WorkRecordUpdate(BaseModel):
     risk: str | None = Field(default=None, max_length=5000)
     next_action: str | None = Field(default=None, max_length=5000)
     delegated_edit_reason: str | None = Field(default=None, max_length=2000)
+    time_blocks: list[TimeBlockInput] | None = Field(default=None, max_length=24)
+
+    @field_validator("time_blocks")
+    @classmethod
+    def validate_time_blocks(
+        cls,
+        value: list[TimeBlockInput] | None,
+    ) -> list[TimeBlockInput] | None:
+        return _validate_time_blocks(value)
 
     @model_validator(mode="after")
     def validate_update_source(self) -> WorkRecordUpdate:
@@ -758,6 +806,7 @@ class WorkRecordOut(ORMModel):
     created_at: datetime
     updated_at: datetime
     deliverables: list[DeliverableOut] = []
+    time_blocks: list[TimeBlockOut] = Field(default_factory=list)
 
 
 class QuickTaskCreate(BaseModel):
@@ -787,12 +836,18 @@ class WorkRecordQuickCreate(BaseModel):
     risk: str | None = Field(default=None, max_length=5000)
     next_action: str | None = Field(default=None, max_length=5000)
     deliverables: list[DeliverableInput] = Field(default_factory=list, max_length=50)
+    time_blocks: list[TimeBlockInput] = Field(default_factory=list, max_length=24)
     project_id: str | None = None
     department_work_id: str | None = None
     new_project: ProjectCreate | None = None
     new_department_work: DepartmentWorkCreate | None = None
     task_id: str | None = None
     new_task: QuickTaskCreate | None = None
+
+    @field_validator("time_blocks")
+    @classmethod
+    def validate_time_blocks(cls, value: list[TimeBlockInput]) -> list[TimeBlockInput]:
+        return _validate_time_blocks(value) or []
 
     @model_validator(mode="after")
     def validate_composite_choices(self) -> WorkRecordQuickCreate:
@@ -1080,6 +1135,19 @@ class AIChatOut(BaseModel):
     answer: str
     model: str
     usage: dict[str, int]
+
+
+class AIChatHistoryMessageOut(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AIChatHistoryOut(BaseModel):
+    messages: list[AIChatHistoryMessageOut]
+
+
+class AIChatHistoryClearOut(BaseModel):
+    cleared: int
 
 
 class AIProviderAccessModeOut(BaseModel):

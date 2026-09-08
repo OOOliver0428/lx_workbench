@@ -27,13 +27,17 @@ from app.schemas import (
     AIProviderOptionOut,
     AIStatusOut,
 )
+from app.services import ai_history
 from app.services.ai_context import build_chat_context
 
 SYSTEM_PROMPT = """你是团队协作工作台中的通用 AI 助手。
 你只能依据系统提供的当前用户业务上下文回答项目、任务和工作问题。
+上下文中的项目、部门工作、任务与负责人均以名称给出，引用时必须使用原文名称。
+上下文中的 today/week 字段是当前时间锚点，涉及日期的问题一律以此为准。
+对话历史仅包含此前轮次的用户提问与助手回答；延续讨论时须与历史保持一致。
 不要编造不存在的事实；信息不足时明确说明缺少什么。
 你的输出仅供用户阅览，不得声称已经创建、修改、提交或删除系统中的任何数据。
-使用准确、简洁、可执行的中文。"""
+使用准确、简洁、可执行的中文；用 Markdown 组织回答，先给结论再列依据。"""
 PRIMARY_CONFIG_ID = "primary"
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ class AccessModeDefinition:
     default_model: str
     models: tuple[str, ...]
     docs_url: str
+    thinking_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
                 default_model="deepseek-v4-flash",
                 models=("deepseek-v4-flash", "deepseek-v4-pro"),
                 docs_url="https://api-docs.deepseek.com/",
+                thinking_mode="disabled",
             ),
         ),
         api_key_url="https://platform.deepseek.com/",
@@ -412,21 +418,43 @@ def chat(
     payload: AIChatRequest,
     actor: User,
 ) -> AIChatOut:
-    context = build_chat_context(db, actor)
+    context = build_chat_context(
+        db, actor, max_chars=settings.llm_chat_context_max_chars
+    )
+    history_rows = ai_history.recent_messages(
+        db,
+        actor.id,
+        max_messages=settings.llm_chat_history_max_messages,
+        max_chars=settings.llm_chat_history_max_chars,
+    )
     messages: list[dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "system",
             "content": f"以下业务上下文由系统按当前用户权限生成，仅作为回答依据：\n{context}",
         },
+        *[
+            {"role": row.role, "content": row.content}
+            for row in history_rows
+        ],
         {"role": "user", "content": payload.prompt},
     ]
-    return complete(
+    result = complete(
         db,
         settings,
         messages=messages,
         max_tokens=2048,
     )
+    ai_history.append_turn(
+        db,
+        actor.id,
+        user_prompt=payload.prompt,
+        assistant_answer=result.answer,
+        message_max_chars=settings.llm_chat_message_max_chars,
+        max_messages=settings.llm_chat_history_max_messages,
+        max_chars=settings.llm_chat_history_max_chars,
+    )
+    return result
 
 
 def complete(
@@ -525,6 +553,13 @@ def _openai_chat_completion(
     messages: list[dict[str, str]],
     max_tokens: int,
 ) -> AIChatOut:
+    request_body: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if access_mode.thinking_mode:
+        request_body["thinking"] = {"type": access_mode.thinking_mode}
     try:
         with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
             response = client.post(
@@ -533,11 +568,7 @@ def _openai_chat_completion(
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                },
+                json=request_body,
             )
     except httpx.RequestError as error:
         logger.warning(
@@ -554,8 +585,15 @@ def _openai_chat_completion(
 
     try:
         data: dict[str, Any] = response.json()
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        message = choice["message"]
+        content = message["content"]
     except (KeyError, IndexError, TypeError, ValueError) as error:
+        logger.warning(
+            "OpenAI-compatible provider returned an invalid response: model=%s status=%s",
+            model,
+            response.status_code,
+        )
         raise AppError(
             "AI_INVALID_RESPONSE",
             "大模型服务返回了无法识别的结果",
@@ -564,6 +602,19 @@ def _openai_chat_completion(
 
     answer = _clean_answer(str(content))
     if not answer:
+        reasoning_content = message.get("reasoning_content")
+        raw_usage = data.get("usage") or {}
+        logger.warning(
+            "OpenAI-compatible provider returned an empty answer: "
+            "model=%s finish_reason=%s content_type=%s content_chars=%s "
+            "reasoning_chars=%s completion_tokens=%s",
+            model,
+            choice.get("finish_reason"),
+            type(content).__name__,
+            len(content) if isinstance(content, str) else 0,
+            len(reasoning_content) if isinstance(reasoning_content, str) else 0,
+            raw_usage.get("completion_tokens"),
+        )
         raise AppError(
             "AI_EMPTY_RESPONSE",
             "大模型没有返回有效内容",
@@ -593,11 +644,20 @@ def _anthropic_chat_completion(
     system = "\n\n".join(
         message["content"] for message in messages if message["role"] == "system"
     )
-    conversation = [
-        {"role": message["role"], "content": message["content"]}
-        for message in messages
-        if message["role"] in {"user", "assistant"}
-    ]
+    # Anthropic requires strictly alternating roles; merge adjacent messages of
+    # the same role so replaying history never produces an invalid sequence.
+    conversation: list[dict[str, str]] = []
+    for message in messages:
+        if message["role"] not in {"user", "assistant"}:
+            continue
+        if conversation and conversation[-1]["role"] == message["role"]:
+            conversation[-1]["content"] = (
+                f"{conversation[-1]['content']}\n\n{message['content']}"
+            )
+        else:
+            conversation.append(
+                {"role": message["role"], "content": message["content"]}
+            )
     try:
         with httpx.Client(timeout=settings.llm_timeout_seconds) as client:
             response = client.post(
