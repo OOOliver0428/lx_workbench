@@ -3387,6 +3387,7 @@ a {
 }
 
 .provider-option {
+  align-items: center;
   background: #f8fbfe;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -3421,7 +3422,6 @@ a {
   display: flex;
   font-size: 10px;
   font-weight: 850;
-  grid-row: 1 / span 2;
   height: 28px;
   justify-content: center;
   width: 28px;
@@ -3430,15 +3430,6 @@ a {
 .provider-option strong {
   align-self: center;
   font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-option small {
-  color: var(--muted);
-  font-size: 10px;
-  grid-column: 2 / span 2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
