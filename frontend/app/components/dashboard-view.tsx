@@ -143,7 +143,6 @@ export function DashboardView({
   const applyDashboard = useCallback((result: Dashboard) => {
     setDashboard(result);
     setSelectedWeek(result.selected_week.week_start);
-    setSummary(result.latest_team_summary);
     setActivePage((current) =>
       result.accessible_pages.includes(current)
         ? current
