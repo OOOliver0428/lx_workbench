@@ -206,6 +206,7 @@ export const api = {
         leader_id?: string | null;
         primary_department_id?: string | null;
         is_active?: boolean;
+        current_password?: string;
       },
     ) =>
       request<User>(`/api/v1/users/${id}`, {

@@ -752,6 +752,9 @@ function UserEditModal({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [freezeBusy, setFreezeBusy] = useState(false);
+  const [freezeConfirmOpen, setFreezeConfirmOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [freezeError, setFreezeError] = useState("");
   const canFreeze =
     user.id !== currentUserId &&
     (user.role !== "system_admin" || actorRole === "super_admin");
@@ -799,22 +802,21 @@ function UserEditModal({
     }
   }
 
-  async function toggleFreeze() {
+  async function toggleFreeze(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (freezeBusy || !currentPassword) return;
     const nextActive = !user.is_active;
-    const confirmText = nextActive
-      ? `确认解冻账号「${user.display_name}」？解冻后该账号可重新登录系统。`
-      : `确认冻结账号「${user.display_name}」？冻结后该账号将无法登录系统。`;
-    if (!window.confirm(confirmText)) return;
     setFreezeBusy(true);
-    setError("");
+    setFreezeError("");
     try {
       await api.users.update(user.id, {
         revision: user.revision,
         is_active: nextActive,
+        current_password: currentPassword,
       });
       onUpdated();
     } catch (caught) {
-      setError(
+      setFreezeError(
         caught instanceof ApiClientError
           ? caught.message
           : nextActive
@@ -822,11 +824,58 @@ function UserEditModal({
             : "冻结账号失败",
       );
     } finally {
+      setCurrentPassword("");
       setFreezeBusy(false);
     }
   }
 
+  let freezeConfirmation = null;
+  if (freezeConfirmOpen) {
+    const action = user.is_active ? "冻结" : "解冻";
+    const closeConfirmation = () => {
+      if (freezeBusy) return;
+      setCurrentPassword("");
+      setFreezeError("");
+      setFreezeConfirmOpen(false);
+    };
+    freezeConfirmation = (
+      <Modal title={`确认${action}账号`} eyebrow="ACCOUNT SECURITY" onClose={closeConfirmation}>
+        <form className="modal-form" onSubmit={toggleFreeze}>
+          <p className="freeze-confirm-description">
+            即将{action} <strong>{user.display_name}</strong>（{user.login_name}）。
+            {user.is_active ? "冻结后该用户将无法访问系统。" : "解冻后该用户可恢复登录。"}
+          </p>
+          <label className="field">
+            <span>当前登录账号的密码 *</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              maxLength={256}
+              required
+              autoFocus
+              disabled={freezeBusy}
+            />
+            <small className="field-hint">请输入你自己的登录密码，以确认本次操作。</small>
+          </label>
+          {freezeError ? <InlineNotice tone="error">{freezeError}</InlineNotice> : null}
+          <footer className="modal-actions">
+            <button type="button" className="secondary-button" disabled={freezeBusy} onClick={closeConfirmation}>
+              返回
+            </button>
+            <button className="secondary-button account-danger-button" disabled={freezeBusy || !currentPassword}>
+              {freezeBusy ? "正在验证…" : `确认${action}`}
+            </button>
+          </footer>
+        </form>
+      </Modal>
+    );
+  }
+
   return (
+    <>
+    <div hidden={freezeConfirmOpen}>
     <Modal title="编辑用户资料" eyebrow="EDIT USER" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <label className="field">
@@ -916,9 +965,9 @@ function UserEditModal({
           {canFreeze ? (
             <button
               type="button"
-              className="secondary-button"
+              className="secondary-button account-danger-button"
               disabled={freezeBusy || submitting}
-              onClick={() => void toggleFreeze()}
+              onClick={() => setFreezeConfirmOpen(true)}
             >
               {freezeBusy
                 ? "处理中…"
@@ -945,6 +994,9 @@ function UserEditModal({
         </footer>
       </form>
     </Modal>
+    </div>
+    {freezeConfirmation}
+    </>
   );
 }
 

@@ -7668,16 +7668,36 @@ a {
 
 .user-freeze-row {
   align-items: center;
-  background: #fff8f0;
-  border: 1px solid #f0d9b8;
-  border-radius: 12px;
+  border-top: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
-  padding: 12px 14px;
+  padding: 16px 0 0;
 }
 
 .user-freeze-row strong.is-frozen {
-  color: #b45309;
+  color: #b42318;
+}
+
+.secondary-button.account-danger-button {
+  background: #fff;
+  border-color: #f1b5b0;
+  color: #b42318;
+}
+
+.secondary-button.account-danger-button:hover:not(:disabled) {
+  background: #fef3f2;
+  border-color: #d92d20;
+}
+
+.secondary-button.account-danger-button:focus-visible {
+  outline: 2px solid #d92d20;
+  outline-offset: 3px;
+}
+
+.freeze-confirm-description {
+  color: var(--ink-soft);
+  line-height: 1.7;
+  margin: 0;
 }

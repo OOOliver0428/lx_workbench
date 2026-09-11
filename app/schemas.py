@@ -135,6 +135,7 @@ class UserLeaderUpdate(BaseModel):
 
 class UserUpdate(BaseModel):
     revision: int = Field(ge=1)
+    current_password: str | None = Field(default=None, min_length=1, max_length=256)
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     role: UserRole | None = None
     leader_id: str | None = None
