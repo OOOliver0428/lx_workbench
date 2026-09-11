@@ -2415,6 +2415,13 @@ a {
   font-size: 10px;
 }
 
+.task-cascade {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .record-editor-note {
   color: var(--muted);
   font-size: 10px;

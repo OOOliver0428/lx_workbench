@@ -104,7 +104,11 @@ export function RecordsView({
           canViewDepartmentWorks
             ? api.departmentWorks.list()
             : Promise.resolve([]),
-          canViewTasks ? api.tasks.list() : Promise.resolve([]),
+          canViewTasks
+            ? api.tasks.list(
+                new URLSearchParams({ time_scope: "all" }),
+              )
+            : Promise.resolve([]),
         ]);
       setRecords(recordRows);
       setProjects(projectRows);
@@ -691,21 +695,17 @@ function RecordEditModal({
               </select>
             </label>
           ) : null}
-          <label className="field">
-            <span>关联任务</span>
-            <select
-              name="task_id"
-              value={selectedTask}
-              onChange={(event) => changeTask(event.target.value)}
-            >
-              <option value="">不关联具体任务</option>
-              {visibleTasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.title}
-                </option>
-              ))}
-            </select>
-          </label>
+          <CascadingTaskSelect
+            tasks={withHistoricalTask(
+              visibleTasks,
+              record.task_id,
+              record.task_title,
+            )}
+            value={selectedTask}
+            onChange={changeTask}
+            emptyLabel="不关联具体任务"
+          />
+          <input type="hidden" name="task_id" value={selectedTask} />
           <label className="field field-span-two">
             <span>工作内容 *</span>
             <textarea
@@ -1184,21 +1184,15 @@ function QuickCreateModal({
             </>
           ) : null}
           {sourceType === "project" || sourceType === "department_work" ? (
-            <label className="field">
-              <span>关联现有任务</span>
-              <select
-                name="task_id"
+            <>
+              <CascadingTaskSelect
+                tasks={visibleTasks}
                 value={selectedTask}
-                onChange={(event) => changeTask(event.target.value)}
-              >
-                <option value="">不关联任务</option>
-                {visibleTasks.map((task) => (
-                  <option key={task.id} value={task.id}>
-                    {task.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={changeTask}
+                emptyLabel="不关联任务"
+              />
+              <input type="hidden" name="task_id" value={selectedTask} />
+            </>
           ) : null}
           {hasSource && canCreateTasks ? (
             <>
@@ -1321,6 +1315,158 @@ function humanDate(value: string) {
 function formatHours(minutes: number) {
   const hours = minutes / 60;
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
+function buildTaskForest(tasks: Task[]) {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const children = new Map<string, Task[]>();
+  const roots: Task[] = [];
+  for (const task of tasks) {
+    const parentId = task.parent_id;
+    if (parentId && byId.has(parentId)) {
+      const list = children.get(parentId) ?? [];
+      list.push(task);
+      children.set(parentId, list);
+    } else {
+      roots.push(task);
+    }
+  }
+  return { roots, children, byId };
+}
+
+function taskAncestorChain(task: Task | null, byId: Map<string, Task>) {
+  if (!task) return [] as Task[];
+  const chain: Task[] = [];
+  const seen = new Set<string>();
+  let current: Task | null = task;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.unshift(current);
+    current = current.parent_id ? (byId.get(current.parent_id) ?? null) : null;
+  }
+  return chain;
+}
+
+/** 级联任务选择：根任务 →（子任务）→（孙任务），子层向右展开。 */
+function CascadingTaskSelect({
+  tasks,
+  value,
+  onChange,
+  emptyLabel = "不关联具体任务",
+}: {
+  tasks: Task[];
+  value: string;
+  onChange: (taskId: string) => void;
+  emptyLabel?: string;
+}) {
+  const { roots, children, byId } = useMemo(
+    () => buildTaskForest(tasks),
+    [tasks],
+  );
+  const selected = value ? (byId.get(value) ?? null) : null;
+  const chain = useMemo(
+    () => taskAncestorChain(selected, byId),
+    [selected, byId],
+  );
+  const rootId = chain[0]?.id ?? "";
+  const midId = chain[1]?.id ?? "";
+  const rootChildren = rootId ? (children.get(rootId) ?? []) : [];
+  const midChildren = midId ? (children.get(midId) ?? []) : [];
+
+  function selectRoot(nextId: string) {
+    onChange(nextId);
+  }
+
+  function selectMid(nextId: string) {
+    if (!nextId) {
+      onChange(rootId);
+      return;
+    }
+    onChange(nextId);
+  }
+
+  function selectLeaf(nextId: string) {
+    if (!nextId) {
+      onChange(midId || rootId);
+      return;
+    }
+    onChange(nextId);
+  }
+
+  return (
+    <div className="task-cascade">
+      <label className="field">
+        <span>关联任务</span>
+        <select value={rootId} onChange={(event) => selectRoot(event.target.value)}>
+          <option value="">{emptyLabel}</option>
+          {roots.map((task) => (
+            <option key={task.id} value={task.id}>
+              {task.title}
+            </option>
+          ))}
+          {selected && !byId.has(selected.id) ? (
+            <option value={selected.id}>{selected.title}</option>
+          ) : null}
+        </select>
+      </label>
+      {rootChildren.length ? (
+        <label className="field">
+          <span>子任务</span>
+          <select value={midId} onChange={(event) => selectMid(event.target.value)}>
+            <option value="">仅父任务本身</option>
+            {rootChildren.map((task) => (
+              <option key={task.id} value={task.id}>
+                {task.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {midId && midChildren.length ? (
+        <label className="field">
+          <span>子任务</span>
+          <select value={chain[2]?.id ?? ""} onChange={(event) => selectLeaf(event.target.value)}>
+            <option value="">仅父任务本身</option>
+            {midChildren.map((task) => (
+              <option key={task.id} value={task.id}>
+                {task.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
+function withHistoricalTask(tasks: Task[], taskId: string | null, title: string | null) {
+  if (!taskId || tasks.some((task) => task.id === taskId)) return tasks;
+  const stub: Task = {
+    id: taskId,
+    project_id: null,
+    department_work_id: null,
+    parent_id: null,
+    level: 0,
+    title: title ? `${title}（历史关联）` : "历史关联任务",
+    description: null,
+    owner_id: "",
+    created_by: "",
+    priority: "p2",
+    status: "todo",
+    due_date: null,
+    blocker_reason: null,
+    result: null,
+    cancel_reason: null,
+    started_at: null,
+    completed_at: null,
+    progress_enabled: false,
+    progress_percent: null,
+    revision: 0,
+    created_at: "",
+    updated_at: "",
+    collaborator_ids: [],
+  };
+  return [...tasks, stub];
 }
 
 /** 当前自然周（周一至周日，Asia/Shanghai）的 YYYY-MM-DD 起止。 */
