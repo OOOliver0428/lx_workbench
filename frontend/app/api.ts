@@ -32,6 +32,7 @@ import type {
   WorkRecord,
   WorkRecordQuickCreateResult,
   UserPermissions,
+  TimeBlock,
 } from "./types";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
@@ -526,6 +527,13 @@ export const api = {
       request<WorkRecord[]>(
         `/api/v1/work-records${params?.size ? `?${params}` : ""}`,
       ),
+    occupancy: (workDate: string, excludeRecordId?: string | null) => {
+      const params = new URLSearchParams({ date: workDate });
+      if (excludeRecordId) params.set("exclude_record_id", excludeRecordId);
+      return request<{ date: string; time_blocks: TimeBlock[] }>(
+        `/api/v1/work-records/occupancy?${params}`,
+      );
+    },
     create: (payload: Record<string, unknown>) =>
       request<WorkRecord>("/api/v1/work-records", {
         method: "POST",

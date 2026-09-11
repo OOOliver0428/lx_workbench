@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -270,6 +270,26 @@ def list_work_records(
         db.scalars(
             query.order_by(WorkRecord.work_date.desc(), WorkRecord.created_at.desc()).limit(1000)
         ).all()
+    )
+
+
+def list_own_day_occupancy(
+    db: Session,
+    actor: User,
+    *,
+    work_date: date,
+    exclude_record_id: str | None = None,
+) -> list[WorkRecord]:
+    """当前登录用户在指定日期已有时间块的工作记录（排除软删除与可选的本条）。"""
+    query = select(WorkRecord).where(
+        WorkRecord.deleted_at.is_(None),
+        WorkRecord.author_id == actor.id,
+        WorkRecord.work_date == work_date,
+    )
+    if exclude_record_id:
+        query = query.where(WorkRecord.id != exclude_record_id)
+    return list(
+        db.scalars(query.order_by(WorkRecord.created_at.asc())).all()
     )
 
 

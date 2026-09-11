@@ -477,11 +477,29 @@ function RecordEditModal({
   const [pickedBlocks, setPickedBlocks] = useState<TimeBlock[]>(
     record.time_blocks ?? [],
   );
+  const [workDate, setWorkDate] = useState(record.work_date);
+  const [occupiedBlocks, setOccupiedBlocks] = useState<TimeBlock[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const delegated = record.author_id !== currentUserId;
   const showDepartmentWorkSource =
     canViewDepartmentWorks || sourceType === "department_work";
+
+  useEffect(() => {
+    if (!workDate) return;
+    let cancelled = false;
+    api.records
+      .occupancy(workDate, record.id)
+      .then((result) => {
+        if (!cancelled) setOccupiedBlocks(result.time_blocks ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setOccupiedBlocks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workDate, record.id]);
   const visibleTasks = tasks.filter((task) => {
     if (sourceType === "project") {
       return selectedProject
@@ -597,7 +615,8 @@ function RecordEditModal({
             <input
               name="work_date"
               type="date"
-              defaultValue={record.work_date}
+              value={workDate}
+              onChange={(event) => setWorkDate(event.target.value)}
               required
             />
           </label>
@@ -607,9 +626,15 @@ function RecordEditModal({
               <TimeBlockPicker
                 name="time"
                 defaultBlocks={record.time_blocks ?? []}
+                occupiedBlocks={occupiedBlocks}
                 onChange={(blocks) => setPickedBlocks(blocks)}
               />
             </div>
+            {occupiedBlocks.length ? (
+              <small className="field-hint">
+                灰色斜纹为当天已录入的时间块（仅提示，可并行重叠圈选）。
+              </small>
+            ) : null}
             {!pickedBlocks.length && record.minutes ? (
               <small className="field-hint">
                 本条记录暂无工作区间，当前工时 {formatHours(record.minutes)}
@@ -805,6 +830,8 @@ function QuickCreateModal({
   const [selectedTask, setSelectedTask] = useState("");
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [deliverableEnabled, setDeliverableEnabled] = useState(false);
+  const [workDate, setWorkDate] = useState(() => localDateInputValue());
+  const [occupiedBlocks, setOccupiedBlocks] = useState<TimeBlock[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const hasSource = sourceType !== "none";
@@ -834,6 +861,22 @@ function QuickCreateModal({
     }
     return false;
   });
+
+  useEffect(() => {
+    if (!workDate) return;
+    let cancelled = false;
+    api.records
+      .occupancy(workDate)
+      .then((result) => {
+        if (!cancelled) setOccupiedBlocks(result.time_blocks ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setOccupiedBlocks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workDate]);
 
   function changeSourceType(value: QuickSourceType) {
     setSourceType(value);
@@ -983,15 +1026,24 @@ function QuickCreateModal({
             <input
               name="work_date"
               type="date"
-              defaultValue={localDateInputValue()}
+              value={workDate}
+              onChange={(event) => setWorkDate(event.target.value)}
               required
             />
           </label>
           <div className="field field-span-two">
             <span>投入时间（圈选时间块）*</span>
             <div className="tbp-scroll">
-              <TimeBlockPicker name="time" />
+              <TimeBlockPicker
+                name="time"
+                occupiedBlocks={occupiedBlocks}
+              />
             </div>
+            {occupiedBlocks.length ? (
+              <small className="field-hint">
+                灰色斜纹为当天已录入的时间块（仅提示，可并行重叠圈选）。
+              </small>
+            ) : null}
           </div>
           <fieldset className="source-options field-span-two">
             <legend>工作来源</legend>

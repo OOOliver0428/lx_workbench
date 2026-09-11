@@ -713,6 +713,11 @@ class TimeBlockOut(BaseModel):
     end: int = Field(validation_alias=AliasChoices("end", "end_minute"))
 
 
+class WorkRecordOccupancyOut(BaseModel):
+    date: date
+    time_blocks: list[TimeBlockOut]
+
+
 def _validate_time_blocks(
     blocks: list[TimeBlockInput] | None,
 ) -> list[TimeBlockInput] | None:
