@@ -215,6 +215,7 @@ def submit_report(
     was_submitted = report.submitted_content is not None
     report.submitted_content = report.content
     report.submitted_to_id = leader.id if leader else None
+    report.department_id = actor.primary_department_id
     report.submitted_at = utc_now()
     report.submission_version += 1
     report.revision += 1

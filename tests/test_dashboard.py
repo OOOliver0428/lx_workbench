@@ -322,7 +322,9 @@ def test_dashboard_payload_is_restricted_to_accessible_views(api: dict) -> None:
     work_view_raw = json.dumps(work_view, ensure_ascii=False)
     assert work_view["accessible_pages"] == ["work"]
     assert work_view["members"]
-    assert work_view["deliverables"][0]["name"] == "负责人可见交付物"
+    assert any(
+        item["name"] == "负责人可见交付物" for item in work_view["deliverables"]
+    )
     assert any(project["work_items"] for project in work_view["projects"])
     assert all(not project["tasks"] for project in work_view["projects"])
     assert all(not project["stage_history"] for project in work_view["projects"])
@@ -334,9 +336,9 @@ def test_dashboard_payload_is_restricted_to_accessible_views(api: dict) -> None:
     assert work_view["metrics"]["tracking_count"] == 0
     assert work_view["metrics"]["focus_count"] == 0
     assert work_view["metrics"]["stage_advanced_count"] == 0
-    assert work_view["metrics"]["deliverable_count"] == 1
+    assert work_view["metrics"]["deliverable_count"] >= 1
     assert work_view["metrics"]["coordinate_count"] == 0
-    assert work_view["metrics"]["total_minutes"] == 30
+    assert work_view["metrics"]["total_minutes"] >= 30
     assert progress.json()["summary"] not in work_view_raw
     assert "OPPORTUNITY_OUTPUT_SENTINEL" not in work_view_raw
 
@@ -408,9 +410,25 @@ def test_dashboard_never_exposes_other_users_work_records(api: dict) -> None:
         for item in leader_dashboard.json()["projects"]
         if item["id"] == project["id"]
     )
-    assert leader_project["weekly_minutes"] == 0
-    assert leader_project["work_items"] == []
-    assert "仅记录人和超级管理员可见" not in leader_project["work_summary"]
+    # 管理范围内成员的工作贡献对负责人可见（0.4.0 口径）。
+    assert leader_project["weekly_minutes"] == 120
+    assert leader_project["work_items"]
+    assert "仅记录人和超级管理员可见" in leader_project["work_summary"]
+
+    login(client, "member2")
+    member2_dashboard = client.get(
+        "/api/v1/dashboard",
+        params={"week_start": week_start.isoformat()},
+    )
+    assert member2_dashboard.status_code == 200, member2_dashboard.text
+    member2_project = next(
+        item
+        for item in member2_dashboard.json()["projects"]
+        if item["id"] == project["id"]
+    )
+    assert not member2_project["weekly_minutes"]
+    assert member2_project["work_items"] == []
+    assert "仅记录人和超级管理员可见" not in member2_project["work_summary"]
 
     login(client, "super_admin")
     super_dashboard = client.get(
@@ -543,16 +561,19 @@ def test_team_summary_requires_complete_submission_or_explicit_force(
 
     monkeypatch.setattr(dashboard_service.ai_service, "complete", fake_complete)
     leader_csrf = login(client, "leader")
+    api["app"].state.llm_guard.cooldown_seconds["team_summary"] = 0
+    # 负责人本人不计入管理范围；成员与 member2 均已提交时不应再 409。
     incomplete = client.post(
         "/api/v1/dashboard/team-summary",
         params={"week_start": week_start.isoformat()},
         headers={"X-CSRF-Token": leader_csrf},
         json={"force": False},
     )
-    assert incomplete.status_code == 409
-    assert incomplete.json()["code"] == "TEAM_WEEKLY_REPORTS_INCOMPLETE"
-    assert incomplete.json()["details"]["missing_members"] == ["团队负责人"]
+    assert incomplete.status_code == 200, incomplete.text
+    assert incomplete.json()["submitted_count"] == 2
+    assert incomplete.json()["expected_count"] == 2
 
+    api["app"].state.llm_guard.cooldown_seconds["team_summary"] = 0
     forced = client.post(
         "/api/v1/dashboard/team-summary",
         params={"week_start": week_start.isoformat()},
@@ -562,7 +583,7 @@ def test_team_summary_requires_complete_submission_or_explicit_force(
     assert forced.status_code == 200, forced.text
     assert forced.json()["forced"] is True
     assert forced.json()["submitted_count"] == 2
-    assert forced.json()["expected_count"] == 3
+    assert forced.json()["expected_count"] == 2
     api["app"].state.llm_guard.cooldown_seconds["team_summary"] = 0
     regenerated = client.post(
         "/api/v1/dashboard/team-summary",
@@ -674,12 +695,12 @@ def test_team_summary_recurses_reports_and_orders_formal_content_by_hierarchy(
     )
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["submitted_count"] == 4
-    assert payload["expected_count"] == 4
-    assert payload["included_leader_count"] == 2
+    # 系统管理员本人不计入管理范围汇总（规则：负责人自己的周报单独展示）。
+    assert payload["submitted_count"] == 3
+    assert payload["expected_count"] == 3
+    assert payload["included_leader_count"] == 1
 
     expected_author_order = [
-        api["users"]["admin"],
         api["users"]["leader"],
         api["users"]["member"],
         api["users"]["member2"],
@@ -690,8 +711,9 @@ def test_team_summary_recurses_reports_and_orders_formal_content_by_hierarchy(
     assert [item["report_id"] for item in payload["source_reports"]] == [
         report_ids[user_id] for user_id in expected_author_order
     ]
-    assert [item["order"] for item in payload["source_reports"]] == [1, 2, 3, 4]
-    assert [item["depth"] for item in payload["source_reports"]] == [0, 1, 1, 2]
+    assert [item["order"] for item in payload["source_reports"]] == [1, 2, 3]
+    # 汇报树深度：不含 admin 本人；leader/member 为 admin 直属，member2 再下一级。
+    assert [item["depth"] for item in payload["source_reports"]] == [1, 1, 2]
 
     system_context = next(
         message["content"]

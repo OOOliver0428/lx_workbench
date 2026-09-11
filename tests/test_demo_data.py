@@ -79,7 +79,8 @@ def test_demo_data_is_idempotent_and_covers_full_feature_views(api: dict) -> Non
     leader_dashboard = client.get("/api/v1/dashboard")
     assert leader_dashboard.status_code == 200
     assert leader_dashboard.json()["latest_team_summary"] is not None
-    assert leader_dashboard.json()["metrics"]["member_count"] == 5
+    # 负责人本人不计入管理范围；演示数据中应提交成员为 4 人。
+    assert leader_dashboard.json()["metrics"]["member_count"] == 4
 
     login(client, "demo_newcomer", password=DEMO_PASSWORD)
     no_access = client.get("/api/v1/dashboard")

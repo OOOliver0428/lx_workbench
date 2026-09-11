@@ -491,6 +491,24 @@ export interface DashboardMember {
   submitted_at: string | null;
   weekly_minutes: number | null;
   submitted_weeks: string[];
+  department_id: string | null;
+  department_name: string | null;
+}
+
+export type ManagementScopeType = "all_led" | "department" | "other_direct";
+
+export interface ManagementScopeOption {
+  scope_type: ManagementScopeType;
+  department_id: string | null;
+  department_name: string | null;
+  member_count: number;
+}
+
+export interface ManagementScope {
+  scope_type: ManagementScopeType;
+  department_id: string | null;
+  options: ManagementScopeOption[];
+  other_direct_count: number;
 }
 
 export interface DashboardWorkItem {
@@ -668,6 +686,9 @@ export interface TeamWeeklySummary {
   }> | null;
   generation_model: string;
   generation_usage: AIChatResult["usage"] | null;
+  scope_type: ManagementScopeType | string;
+  department_id: string | null;
+  scope_key: string;
   created_at: string;
   revision: number;
 }
@@ -686,4 +707,5 @@ export interface Dashboard {
   stage_distribution: DashboardStageCount[];
   stage_timeline: DashboardTimelineEvent[];
   latest_team_summary: TeamWeeklySummary | null;
+  management_scope: ManagementScope | null;
 }

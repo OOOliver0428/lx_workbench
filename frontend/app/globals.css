@@ -7546,3 +7546,76 @@ a {
     padding-left: 0;
   }
 }
+
+.war-scope-panel {
+  margin-bottom: 14px;
+}
+
+.war-scope-panel header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.war-scope-panel header h3 {
+  margin: 0;
+}
+
+.war-scope-panel header span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.war-scope-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.war-scope-options button {
+  align-items: center;
+  background: var(--paper, #fff);
+  border: 1px solid var(--line, #d9e2ec);
+  border-radius: 999px;
+  color: var(--ink, #1b2430);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 8px;
+  padding: 7px 14px;
+}
+
+.war-scope-options button.active {
+  background: var(--forest-deep, #0f766e);
+  border-color: var(--forest-deep, #0f766e);
+  color: #fff;
+}
+
+.war-scope-options button small {
+  opacity: 0.75;
+}
+
+.war-dept-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.war-dept-group {
+  border: 1px solid var(--line, #d9e2ec);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.war-dept-group > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.war-dept-group > header span {
+  color: var(--muted);
+  font-size: 11px;
+}
