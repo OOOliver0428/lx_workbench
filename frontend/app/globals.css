@@ -3438,17 +3438,25 @@ a {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.09);
 }
 
-.provider-option > span {
+.provider-option > .provider-logo {
   align-items: center;
-  background: var(--forest);
+  background: #fff;
   border-radius: 8px;
-  color: #fff;
   display: flex;
-  font-size: 10px;
-  font-weight: 850;
-  height: 28px;
+  height: 36px;
   justify-content: center;
+  width: 36px;
+}
+
+.provider-logo img {
+  display: block;
+  height: 28px;
+  object-fit: contain;
   width: 28px;
+}
+
+.provider-option > .provider-logo-kimi {
+  background: #111;
 }
 
 .provider-option strong {

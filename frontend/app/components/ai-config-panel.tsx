@@ -222,7 +222,11 @@ export function AIConfigPanel() {
                 aria-pressed={provider.id === providerId}
                 onClick={() => chooseProvider(provider)}
               >
-                <span>{provider.name.slice(0, 1)}</span>
+                <span className={`provider-logo provider-logo-${provider.id}`} aria-hidden="true">
+                  {/* Local SVG brand assets do not need image optimization. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/providers/${provider.id}.svg`} alt="" width={28} height={28} />
+                </span>
                 <strong>{provider.name}</strong>
                 <i aria-hidden="true" />
               </button>
