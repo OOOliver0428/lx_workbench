@@ -647,14 +647,16 @@ export const api = {
       }),
   },
   dashboard: {
-    get: (weekStart?: string) =>
-      request<Dashboard>(
-        `/api/v1/dashboard${
-          weekStart
-            ? `?week_start=${encodeURIComponent(weekStart)}`
-            : ""
-        }`,
-      ),
+    get: (weekStart?: string, scopeType?: string, departmentId?: string) => {
+      const params = new URLSearchParams();
+      if (weekStart) params.set("week_start", weekStart);
+      if (scopeType) params.set("scope_type", scopeType);
+      if (departmentId) params.set("department_id", departmentId);
+      const query = params.toString();
+      return request<Dashboard>(
+        `/api/v1/dashboard${query ? `?${query}` : ""}`,
+      );
+    },
     recordProgress: (
       opportunityId: string,
       payload: {
@@ -671,14 +673,23 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       }),
-    generateTeamSummary: (weekStart: string, force: boolean) =>
+    generateTeamSummary: (
+      weekStart: string,
+      force: boolean,
+      scopeType?: string,
+      departmentId?: string | null,
+    ) =>
       request<TeamWeeklySummary>(
         `/api/v1/dashboard/team-summary?week_start=${encodeURIComponent(
           weekStart,
         )}`,
         {
           method: "POST",
-          body: JSON.stringify({ force }),
+          body: JSON.stringify({
+            force,
+            scope_type: scopeType || "all_led",
+            department_id: departmentId || null,
+          }),
         },
       ),
   },

@@ -896,6 +896,7 @@ class WeeklyReportOut(ORMModel):
     generation_usage: dict[str, int] | None
     submitted_at: datetime | None
     submission_version: int
+    department_id: str | None = None
     revision: int
     created_at: datetime
     updated_at: datetime
@@ -934,6 +935,22 @@ class DashboardMemberOut(BaseModel):
     submitted_at: datetime | None
     weekly_minutes: int | None
     submitted_weeks: list[date]
+    department_id: str | None = None
+    department_name: str | None = None
+
+
+class ManagementScopeOptionOut(BaseModel):
+    scope_type: str
+    department_id: str | None
+    department_name: str | None
+    member_count: int
+
+
+class ManagementScopeOut(BaseModel):
+    scope_type: str
+    department_id: str | None
+    options: list[ManagementScopeOptionOut]
+    other_direct_count: int = 0
 
 
 class DashboardWorkItemOut(BaseModel):
@@ -1087,12 +1104,17 @@ class TeamWeeklySummaryOut(ORMModel):
     source_reports: list[dict[str, Any]] | None = None
     generation_model: str
     generation_usage: dict[str, int] | None
+    scope_type: str = "all_led"
+    department_id: str | None = None
+    scope_key: str = "all_led"
     created_at: datetime
     revision: int
 
 
 class TeamWeeklySummaryGenerate(BaseModel):
     force: bool = False
+    scope_type: str = Field(default="all_led", min_length=1, max_length=32)
+    department_id: str | None = Field(default=None, max_length=36)
 
 
 class DashboardOut(BaseModel):
@@ -1109,6 +1131,7 @@ class DashboardOut(BaseModel):
     stage_distribution: list[DashboardStageCountOut]
     stage_timeline: list[DashboardTimelineEventOut]
     latest_team_summary: TeamWeeklySummaryOut | None
+    management_scope: ManagementScopeOut | None = None
 
 
 class AuditEventOut(ORMModel):

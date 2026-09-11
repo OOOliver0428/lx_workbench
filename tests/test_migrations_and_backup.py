@@ -151,7 +151,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "b7e4c1a9d2f3"
+    assert revision == "c9d0e1f2a3b4"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -244,7 +244,7 @@ def test_time_block_migration_can_downgrade_and_upgrade(
         ).fetchone() == ("work_record_time_blocks",)
         assert db.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("b7e4c1a9d2f3",)
+        ).fetchone() == ("c9d0e1f2a3b4",)
     get_settings.cache_clear()
 
 
@@ -346,7 +346,7 @@ def test_team_summary_migration_keeps_latest_duplicate(
     assert summaries == [
         ("33333333-3333-4333-8333-333333333333", "最新版本")
     ]
-    assert ("generated_by", "week_start") in unique_column_sets
+    assert ("generated_by", "week_start", "scope_key") in unique_column_sets
     get_settings.cache_clear()
 
 
@@ -963,7 +963,7 @@ def test_populated_previous_revision_upgrades_without_data_loss(
             """
         ).fetchall()
 
-    assert revision == "b7e4c1a9d2f3"
+    assert revision == "c9d0e1f2a3b4"
     assert user == ("historic-user", "历史升级用户", "历史升级用户")
     assert integrity == "ok"
     assert migrated_opportunity == (
@@ -1014,7 +1014,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "b7e4c1a9d2f3"
+    assert manifest["schemaRevision"] == "c9d0e1f2a3b4"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
 
