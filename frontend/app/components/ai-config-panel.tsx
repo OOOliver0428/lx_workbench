@@ -83,12 +83,13 @@ export function AIConfigPanel() {
       setConfiguration(current);
       setProviderId(initialProvider?.id ?? "");
       setAccessModeId(initialAccessMode?.id ?? "");
+      // 仅回显已保存且与当前选中厂商/接入方式一致的模型；不预填厂商默认模型。
       setModel(
         current.provider === initialProvider?.id &&
           current.access_mode === initialAccessMode?.id &&
           current.model
           ? current.model
-          : (initialAccessMode?.default_model ?? ""),
+          : "",
       );
     } catch (caught) {
       setError(errorMessage(caught, "大模型配置加载失败"));
@@ -115,7 +116,7 @@ export function AIConfigPanel() {
       ) ?? nextProvider.access_modes[0];
     setProviderId(nextProvider.id);
     setAccessModeId(defaultAccessMode?.id ?? "");
-    setModel(defaultAccessMode?.default_model ?? "");
+    setModel("");
     setApiKey("");
     invalidateTest();
   }
@@ -125,7 +126,7 @@ export function AIConfigPanel() {
       (accessMode) => accessMode.id === nextAccessModeId,
     );
     setAccessModeId(nextAccessMode?.id ?? "");
-    setModel(nextAccessMode?.default_model ?? "");
+    setModel("");
     setApiKey("");
     invalidateTest();
   }
@@ -295,7 +296,7 @@ export function AIConfigPanel() {
                       setModel(event.target.value);
                       invalidateTest();
                     }}
-                    placeholder={selectedAccessMode.default_model}
+                    placeholder="请输入模型 ID，例如从下方参考列表选择"
                   />
                   <datalist
                     id={`${selectedProvider.id}-${selectedAccessMode.id}-models`}
@@ -304,7 +305,9 @@ export function AIConfigPanel() {
                       <option value={modelName} key={modelName} />
                     ))}
                   </datalist>
-                  <small>已预填推荐模型，也可输入该服务商开放的其他模型 ID。</small>
+                  <small>
+                    需自行填写模型 ID；可从参考列表选择，也可输入该服务商开放的其他模型。
+                  </small>
                 </label>
                 <label className="field ai-key-field">
                   <span>API Key *</span>
