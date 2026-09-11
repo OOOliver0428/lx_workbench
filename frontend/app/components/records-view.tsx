@@ -18,7 +18,7 @@ import type {
 } from "../types";
 import { AvatarImage } from "./avatar";
 import { ArrowUpRight, Plus } from "./icons";
-import { TimeBlockPicker } from "./time-block-picker";
+import { TimeBlockPicker, formatMinute } from "./time-block-picker";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
 type RecordSourceType = "project" | "department_work" | "none";
@@ -320,7 +320,14 @@ export function RecordsView({
                         </span>
                       </div>
                       <div className="user-card-actions">
-                        <strong>{formatHours(record.minutes)}</strong>
+                        <div className="record-hours-block">
+                          <strong>{formatHours(record.minutes)}</strong>
+                          {formatTimeBlocks(record.time_blocks) ? (
+                            <span className="record-time-range">
+                              {formatTimeBlocks(record.time_blocks)}
+                            </span>
+                          ) : null}
+                        </div>
                         {canManage && currentUserId ? (
                           <>
                             <button
@@ -1321,6 +1328,13 @@ function humanDate(value: string) {
 function formatHours(minutes: number) {
   const hours = minutes / 60;
   return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
+function formatTimeBlocks(blocks: TimeBlock[] | null | undefined) {
+  if (!blocks?.length) return "";
+  return blocks
+    .map((block) => `${formatMinute(block.start)}–${formatMinute(block.end)}`)
+    .join(" · ");
 }
 
 /** 当前自然周（周一至周日，Asia/Shanghai）的 YYYY-MM-DD 起止。 */
