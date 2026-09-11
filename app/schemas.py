@@ -26,6 +26,7 @@ from app.models import (
     TaskPriority,
     TaskStatus,
     UserRole,
+    utc_now,
 )
 
 
@@ -1270,12 +1271,12 @@ class ChangelogEntryOut(BaseModel):
 
 
 class ChangelogEntryCreate(BaseModel):
-    occurred_at: datetime
+    occurred_at: datetime = Field(default_factory=utc_now)
     category: ChangelogCategory
     title: str = Field(min_length=1, max_length=200)
-    body: str = Field(min_length=1, max_length=20000)
+    body: str = Field(default="", max_length=20000)
 
-    @field_validator("title", "body")
+    @field_validator("title")
     @classmethod
     def strip_changelog_text(cls, value: str) -> str:
         stripped = value.strip()
@@ -1289,9 +1290,9 @@ class ChangelogEntryUpdate(BaseModel):
     occurred_at: datetime | None = None
     category: ChangelogCategory | None = None
     title: str | None = Field(default=None, min_length=1, max_length=200)
-    body: str | None = Field(default=None, min_length=1, max_length=20000)
+    body: str | None = Field(default=None, max_length=20000)
 
-    @field_validator("title", "body")
+    @field_validator("title")
     @classmethod
     def strip_optional_changelog_text(cls, value: str | None) -> str | None:
         if value is None:

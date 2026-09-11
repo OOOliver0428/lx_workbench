@@ -396,7 +396,8 @@ export type ChangelogCategory =
   | "feature"
   | "improvement"
   | "fix"
-  | "removal";
+  | "removal"
+  | "release";
 
 export interface ChangelogEntry {
   id: string;

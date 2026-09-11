@@ -10,6 +10,7 @@
 
 ### Added
 
+- 更新日志新增「版本更新」类型，仅填写版本号，列表按时间显示居中版本分割线；仍仅超管可维护。
 - 系统设置 · 部门列表增加「查看成员」：展示该部门主部门归属的全部用户（含已停用标注）。
 - 项目详情支持重命名：具有项目编辑权限者，或项目负责人（负责人无编辑权限时仅允许改名）。
 - 工作管理支持按「全部分管部门 / 单个分管部门 / 其他直属成员」切换范围；成员列表、提交进度、
@@ -39,6 +40,7 @@
 
 ### Operations
 
+- 新增迁移 `d2e3f4a5b6c7`，允许更新日志 `release` 类型；降级时将版本条目保留为普通优化日志。
 - 新增 Alembic 迁移 `c9d0e1f2a3b4_add_management_scope_fields`：为 `weekly_reports` 增加
   `department_id` 快照，为 `team_weekly_summaries` 增加范围维并调整唯一约束为
   `(generated_by, week_start, scope_key)`。

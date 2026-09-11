@@ -7517,6 +7517,47 @@ a {
   gap: 8px;
 }
 
+.changelog-release {
+  padding: 18px 0;
+}
+
+.changelog-release-divider {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+}
+
+.changelog-release-divider::before,
+.changelog-release-divider::after {
+  background: var(--accent);
+  content: "";
+  flex: 1;
+  height: 2px;
+  opacity: 0.4;
+}
+
+.changelog-release-divider h3 {
+  background: var(--accent-soft);
+  border: 1px solid #c6ddff;
+  border-radius: 999px;
+  color: var(--accent-strong);
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  margin: 0;
+  max-width: 75%;
+  overflow-wrap: anywhere;
+  padding: 7px 18px;
+  text-align: center;
+}
+
+.changelog-release-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
 .changelog-entry-body {
   border-left: 1px solid var(--line-strong);
   padding-left: 18px;

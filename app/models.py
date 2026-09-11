@@ -1163,6 +1163,7 @@ class ChangelogCategory(StrEnum):
     IMPROVEMENT = "improvement"
     FIX = "fix"
     REMOVAL = "removal"
+    RELEASE = "release"
 
 
 class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
@@ -1184,7 +1185,7 @@ class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "category IN ('feature', 'improvement', 'fix', 'removal')",
+            "category IN ('feature', 'improvement', 'fix', 'removal', 'release')",
             name="ck_changelog_entries_category",
         ),
         Index("ix_changelog_entries_occurred", "occurred_at", "created_at"),
