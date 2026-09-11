@@ -18,6 +18,7 @@ from pydantic import (
 from app.models import (
     AttentionStatus,
     BusinessStage,
+    ChangelogCategory,
     DepartmentWorkStatus,
     DepartmentWorkVisibility,
     PermissionKey,
@@ -1221,3 +1222,51 @@ class AIConfigurationSaveRequest(BaseModel):
     @classmethod
     def strip_ai_save_fields(cls, value: str) -> str:
         return value.strip()
+
+
+class ChangelogEntryOut(BaseModel):
+    id: str
+    occurred_at: datetime
+    category: ChangelogCategory
+    title: str
+    body: str
+    created_by: str
+    created_by_name: str
+    updated_by: str
+    updated_by_name: str
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChangelogEntryCreate(BaseModel):
+    occurred_at: datetime
+    category: ChangelogCategory
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=20000)
+
+    @field_validator("title", "body")
+    @classmethod
+    def strip_changelog_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
+
+
+class ChangelogEntryUpdate(BaseModel):
+    revision: int = Field(ge=1)
+    occurred_at: datetime | None = None
+    category: ChangelogCategory | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    body: str | None = Field(default=None, min_length=1, max_length=20000)
+
+    @field_validator("title", "body")
+    @classmethod
+    def strip_optional_changelog_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped

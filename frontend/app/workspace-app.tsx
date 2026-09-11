@@ -9,6 +9,7 @@ import {
   setSessionInvalidatedHandler,
 } from "./api";
 import { AdminView } from "./components/admin-view";
+import { ChangelogView } from "./components/changelog-view";
 import {
   AppShell,
   defaultWorkspaceView,
@@ -185,6 +186,9 @@ export function WorkspaceApp() {
             "dashboard.team_summary.generate",
           )}
         />
+      ) : null}
+      {activeView === "changelog" ? (
+        <ChangelogView canManage={auth.user.role === "super_admin"} />
       ) : null}
       {activeView === "profile" ? (
         <ProfileSettingsView

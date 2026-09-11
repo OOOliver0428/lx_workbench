@@ -1144,6 +1144,39 @@ class AIChatMessage(Base):
     )
 
 
+class ChangelogCategory(StrEnum):
+    FEATURE = "feature"
+    IMPROVEMENT = "improvement"
+    FIX = "fix"
+    REMOVAL = "removal"
+
+
+class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
+    __tablename__ = "changelog_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    updated_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('feature', 'improvement', 'fix', 'removal')",
+            name="ck_changelog_entries_category",
+        ),
+        Index("ix_changelog_entries_occurred", "occurred_at", "created_at"),
+    )
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 

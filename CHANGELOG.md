@@ -16,6 +16,9 @@ merge-base 对比。
 
 - 工作记录支持时间块圈选录入：创建、编辑和快速创建可提交 `time_blocks`（当天 00:00 起的
   半小时间隔，服务端以区间总时长覆盖 `minutes`）；工作记录页与快速创建接入时间块选择器。
+- 新增独立导航「更新日志」：登录用户可查看按日分组的产品变更；仅超级管理员可新建/编辑/删除
+  条目（类型：新功能/优化/修复/下线）。新增 `changelog_entries` 表与
+  `GET/POST/PATCH/DELETE /api/v1/changelog` 接口。
 - AI 助手按用户持久化多轮对话历史，并提供 `GET/DELETE /api/v1/ai/chat/history`；历史受
   消息数与字符双预算裁剪，最旧内容先丢弃。
 - AI 业务上下文人话化：负责人与关联对象以名称互指、状态使用中文标签、带上海时区日期锚点；
@@ -36,6 +39,9 @@ merge-base 对比。
 
 ### Operations
 
+- 新增 Alembic 迁移 `b7e4c1a9d2f3_add_changelog_entries`（`changelog_entries` 表），随启动前
+  `alembic upgrade head` 执行；回滚到不含该能力的代码时可 `alembic downgrade` 至
+  `a6e1c3f9b204`。
 - 新增 3 个 Alembic 迁移，随服务启动前的 `alembic upgrade head` 执行：
   `d1f2a3b4c5e6`（`ai_chat_messages` 对话历史表）、`f1a6b7c8d902`（`work_record_time_blocks`
   时间块表）、`a6e1c3f9b204`（合并上述两个 head）。新表不影响旧版本代码读取；若回滚到不含
