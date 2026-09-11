@@ -290,7 +290,9 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
     globalStyles,
     /\.sidebar-bottom \.account-summary \.account-logout-button[\s\S]*?height:\s*44px/,
   );
-  assert.match(recordsView, /defaultValue=\{localDateInputValue\(\)\}/);
+  assert.match(recordsView, /useState\(\(\) => localDateInputValue\(\)\)/);
+  assert.match(recordsView, /value=\{workDate\}/);
+  assert.match(recordsView, /onChange=\{\(event\) => setWorkDate\(event\.target\.value\)\}/);
   assert.match(recordsView, /api\.records\.update\(record\.id/);
   assert.match(recordsView, /api\.records\.delete\(record\.id,\s*record\.revision/);
   assert.match(recordsView, /window\.confirm\(`确认删除/);

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +33,7 @@ from app.services import department_works as department_work_service
 from app.services import permissions as permission_service
 from app.services import projects as project_service
 from app.services import tasks as task_service
+from app.services.departments import is_department_member
 from app.services.projects import assert_revision, get_project
 
 WORK_RECORD_SNAPSHOT_FIELDS = (
@@ -113,7 +114,7 @@ def _require_department_work_record_scope(
             "DEPARTMENT_WORK_ARCHIVED",
             "已归档部门工作不能变更工作记录",
         )
-    if actor.primary_department_id != work.department_id and not is_super_admin(actor):
+    if not is_super_admin(actor) and not is_department_member(db, actor, work.department_id):
         raise PermissionDeniedError("公开范围仅允许跨部门查看，不能跨部门变更工作记录")
 
 
@@ -269,6 +270,26 @@ def list_work_records(
         db.scalars(
             query.order_by(WorkRecord.work_date.desc(), WorkRecord.created_at.desc()).limit(1000)
         ).all()
+    )
+
+
+def list_own_day_occupancy(
+    db: Session,
+    actor: User,
+    *,
+    work_date: date,
+    exclude_record_id: str | None = None,
+) -> list[WorkRecord]:
+    """当前登录用户在指定日期已有时间块的工作记录（排除软删除与可选的本条）。"""
+    query = select(WorkRecord).where(
+        WorkRecord.deleted_at.is_(None),
+        WorkRecord.author_id == actor.id,
+        WorkRecord.work_date == work_date,
+    )
+    if exclude_record_id:
+        query = query.where(WorkRecord.id != exclude_record_id)
+    return list(
+        db.scalars(query.order_by(WorkRecord.created_at.asc())).all()
     )
 
 

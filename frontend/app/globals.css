@@ -2404,6 +2404,23 @@ a {
   font-size: 10px;
 }
 
+.record-hours-block {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+
+.record-time-range {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .record-card > p {
   font-size: 11px;
   line-height: 1.7;
@@ -2413,6 +2430,13 @@ a {
 .record-task {
   color: var(--blue);
   font-size: 10px;
+}
+
+.task-cascade {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .record-editor-note {
@@ -3387,6 +3411,7 @@ a {
 }
 
 .provider-option {
+  align-items: center;
   background: #f8fbfe;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -3413,32 +3438,30 @@ a {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.09);
 }
 
-.provider-option > span {
+.provider-option > .provider-logo {
   align-items: center;
-  background: var(--forest);
+  background: #fff;
   border-radius: 8px;
-  color: #fff;
   display: flex;
-  font-size: 10px;
-  font-weight: 850;
-  grid-row: 1 / span 2;
-  height: 28px;
+  height: 36px;
   justify-content: center;
+  width: 36px;
+}
+
+.provider-logo img {
+  display: block;
+  height: 28px;
+  object-fit: contain;
   width: 28px;
+}
+
+.provider-option > .provider-logo-kimi {
+  background: #111;
 }
 
 .provider-option strong {
   align-self: center;
   font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-option small {
-  color: var(--muted);
-  font-size: 10px;
-  grid-column: 2 / span 2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7145,6 +7168,22 @@ a {
   top: 4px;
 }
 
+.tbp-occupied {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(120, 132, 148, 0.18),
+    rgba(120, 132, 148, 0.18) 4px,
+    rgba(120, 132, 148, 0.1) 4px,
+    rgba(120, 132, 148, 0.1) 8px
+  );
+  border-radius: 4px;
+  bottom: 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  z-index: 0;
+}
+
 .tbp-block {
   align-items: center;
   background: var(--accent-soft);
@@ -7158,6 +7197,7 @@ a {
   overflow: hidden;
   position: absolute;
   top: 5px;
+  z-index: 1;
 }
 
 .time-block-picker.is-dragging .tbp-block {
@@ -7370,5 +7410,121 @@ a {
 @media (max-width: 640px) {
   .demo-panel {
     padding: 20px;
+  }
+}
+
+/* ===== 更新日志 Changelog ===== */
+.changelog-loading {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 24px 0;
+}
+
+.changelog-timeline {
+  display: grid;
+  gap: 36px;
+}
+
+.changelog-day h2 {
+  border-bottom: 1px solid var(--line);
+  font-size: 22px;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+  padding-bottom: 12px;
+}
+
+.changelog-day-entries {
+  display: grid;
+  gap: 0;
+}
+
+.changelog-entry {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 110px 1fr;
+  padding: 18px 0;
+}
+
+.changelog-entry + .changelog-entry {
+  border-top: 1px solid var(--line);
+}
+
+.changelog-entry-meta {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.changelog-entry-meta > strong {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.changelog-tag {
+  align-items: center;
+  color: var(--forest-deep, #0f766e);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.changelog-tag i {
+  background: currentColor;
+  border-radius: 999px;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+.changelog-tag.tag-feature {
+  color: #1d4ed8;
+}
+
+.changelog-tag.tag-improvement {
+  color: #0f766e;
+}
+
+.changelog-tag.tag-fix {
+  color: #b45309;
+}
+
+.changelog-tag.tag-removal {
+  color: #b91c1c;
+}
+
+.changelog-entry-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.changelog-entry-body {
+  border-left: 1px solid var(--line-strong);
+  padding-left: 18px;
+}
+
+.changelog-entry-body h3 {
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+
+.changelog-entry-body p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.75;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .changelog-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .changelog-entry-body {
+    border-left: none;
+    padding-left: 0;
   }
 }

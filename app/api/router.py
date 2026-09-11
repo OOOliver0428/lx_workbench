@@ -4,6 +4,7 @@ from app.api.routes import (
     ai,
     audit,
     auth,
+    changelog,
     dashboard,
     department_works,
     departments,
@@ -33,4 +34,5 @@ api_router.include_router(tasks.router)
 api_router.include_router(work_records.router)
 api_router.include_router(weekly_reports.router)
 api_router.include_router(audit.router)
+api_router.include_router(changelog.router)
 api_router.include_router(ai.router)

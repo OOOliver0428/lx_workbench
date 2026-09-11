@@ -18,10 +18,12 @@
 
 1. 根目录 `pyproject.toml` 的 `[project].version`；
 2. `uv.lock` 中根项目条目（`name = "team-project-mvp"`）的 `version`；
-3. `frontend/package.json` 的 `version`；
-4. `frontend/package-lock.json` 顶层和根 package 的 `version`；
-5. `CHANGELOG.md` 对应版本标题；
-6. Git 标签 `vMAJOR.MINOR.PATCH`。
+3. `app/__init__.py` 的 `__version__`；
+4. `app/main.py` 的 FastAPI `version`；
+5. `frontend/package.json` 的 `version`；
+6. `frontend/package-lock.json` 顶层和根 package 的 `version`；
+7. `CHANGELOG.md` 对应版本标题；
+8. Git 标签 `vMAJOR.MINOR.PATCH`。
 
 ## 2. 每次迭代如何维护更新日志
 
@@ -48,16 +50,16 @@
 
 - `main`：发布主线。服务器只部署带版本标签的 `main` 提交；合并进入 `main` 的内容必须已通过 CI
   并完成版本与更新日志归档。
-- `develop`：日常开发分支。功能分支从 `develop` 切出，完成后合并回 `develop`。
+- `dev`：日常开发分支。功能分支从 `dev` 切出，完成后合并回 `dev`。
 - `prototype`：0.2 之前的旧原型主线，只读保留，禁止提交与合并。
 - `mvp`：已停止使用，仅保留历史，不再作为发布或部署分支。
 
 ## 4. 发布步骤
 
-1. 确认 `main`（或待合并的 `develop`）工作区干净，目标提交通过全部 CI。
+1. 确认 `main`（或待合并的 `dev`）工作区干净，目标提交通过全部 CI。
 2. 根据变更兼容性确定新版本号。
-3. 同步修改 `pyproject.toml`、`uv.lock` 根项目条目、`frontend/package.json` 和
-   `frontend/package-lock.json`。
+3. 同步修改 `pyproject.toml`、`uv.lock` 根项目条目、`app/__init__.py`、`app/main.py`、
+   `frontend/package.json` 和 `frontend/package-lock.json`。
 4. 把 `CHANGELOG.md` 中的 `Unreleased` 内容归档为 `## [X.Y.Z] - YYYY-MM-DD`，再建立空的
    `Unreleased` 分类。
 5. 在更新日志的 `Operations` 中写明：
@@ -78,7 +80,7 @@
    bash -n deploy/ubuntu/ops.sh
    ```
 
-7. 将 `develop` 合并到 `main`（fast-forward 或合并提交）并确认 GitHub Actions 通过后创建带说明的标签：
+7. 将 `dev` 合并到 `main`（fast-forward 或合并提交）并确认 GitHub Actions 通过后创建带说明的标签：
 
    ```bash
    git tag -a vX.Y.Z -m "Solution Workspace vX.Y.Z"
