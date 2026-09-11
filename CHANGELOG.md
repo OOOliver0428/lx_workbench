@@ -10,11 +10,16 @@
 
 ### Added
 
+- 账号冻结/解冻：系统管理员与超级管理员可在「编辑资料」中冻结账号（二次确认）；冻结后无法
+  登录，已有会话失效。不能冻结自己；系统管理员账号仅超管可冻。
+
 ### Changed
 
 ### Fixed
 
 ### Security
+
+- 用户冻结写入审计（`user.freeze` / `user.unfreeze`）。
 
 ### Operations
 

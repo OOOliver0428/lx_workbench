@@ -242,7 +242,7 @@ export function AdminView({ context }: { context: AuthContext }) {
                 <span className={`role-pill role-${user.role}`}>
                   {roleLabel(user.role)}
                 </span>
-                <small>{user.is_active ? "账号正常" : "账号停用"}</small>
+                <small>{user.is_active ? "账号正常" : "已冻结"}</small>
                 <div className="user-card-management">
                   <span>
                     直属 Leader
@@ -500,6 +500,8 @@ export function AdminView({ context }: { context: AuthContext }) {
           users={users}
           departments={canViewDepartments ? departments : null}
           canManageSystemAdmins={context.user.role === "super_admin"}
+          currentUserId={context.user.id}
+          actorRole={context.user.role}
           onClose={() => setEditingUser(null)}
           onUpdated={async () => {
             setEditingUser(null);
@@ -715,6 +717,8 @@ function UserEditModal({
   users,
   departments,
   canManageSystemAdmins,
+  currentUserId,
+  actorRole,
   onClose,
   onUpdated,
 }: {
@@ -722,11 +726,17 @@ function UserEditModal({
   users: User[];
   departments: Department[] | null;
   canManageSystemAdmins: boolean;
+  currentUserId: string;
+  actorRole: UserRole;
   onClose: () => void;
   onUpdated: () => void;
 }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [freezeBusy, setFreezeBusy] = useState(false);
+  const canFreeze =
+    user.id !== currentUserId &&
+    (user.role !== "system_admin" || actorRole === "super_admin");
   const leaderCandidates = users.filter(
     (candidate) =>
       candidate.id !== user.id &&
@@ -768,6 +778,33 @@ function UserEditModal({
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function toggleFreeze() {
+    const nextActive = !user.is_active;
+    const confirmText = nextActive
+      ? `确认解冻账号「${user.display_name}」？解冻后该账号可重新登录系统。`
+      : `确认冻结账号「${user.display_name}」？冻结后该账号将无法登录系统。`;
+    if (!window.confirm(confirmText)) return;
+    setFreezeBusy(true);
+    setError("");
+    try {
+      await api.users.update(user.id, {
+        revision: user.revision,
+        is_active: nextActive,
+      });
+      onUpdated();
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError
+          ? caught.message
+          : nextActive
+            ? "解冻账号失败"
+            : "冻结账号失败",
+      );
+    } finally {
+      setFreezeBusy(false);
     }
   }
 
@@ -851,6 +888,34 @@ function UserEditModal({
         <InlineNotice>
           修改角色和直属 Leader 会进入审计日志。已有直属成员的团队负责人不能直接降级。
         </InlineNotice>
+        <div className="user-freeze-row">
+          <span>
+            账号状态：
+            <strong className={user.is_active ? "" : "is-frozen"}>
+              {user.is_active ? "在用" : "已冻结"}
+            </strong>
+          </span>
+          {canFreeze ? (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={freezeBusy || submitting}
+              onClick={() => void toggleFreeze()}
+            >
+              {freezeBusy
+                ? "处理中…"
+                : user.is_active
+                  ? "冻结账号"
+                  : "解冻账号"}
+            </button>
+          ) : (
+            <small className="field-hint">
+              {user.id === currentUserId
+                ? "不能冻结自己的账号"
+                : "仅超级管理员可冻结系统管理员"}
+            </small>
+          )}
+        </div>
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
         <footer className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>
