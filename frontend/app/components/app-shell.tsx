@@ -50,22 +50,22 @@ const navigation: Array<{
   { id: "records", label: "工作记录", index: "05", description: "个人工作沉淀" },
   { id: "reports", label: "周报", index: "06", description: "生成、提交与审阅" },
   {
-    id: "changelog",
-    label: "更新日志",
-    index: "07",
-    description: "产品变更与优化",
-  },
-  {
     id: "profile",
     label: "个人设置",
-    index: "08",
+    index: "07",
     description: "头像与密码",
   },
   {
     id: "admin",
     label: "系统设置",
-    index: "09",
+    index: "08",
     description: "用户、标签与模型",
+  },
+  {
+    id: "changelog",
+    label: "更新日志",
+    index: "09",
+    description: "产品变更与优化",
   },
 ];
 
