@@ -224,12 +224,6 @@ export function AIConfigPanel() {
               >
                 <span>{provider.name.slice(0, 1)}</span>
                 <strong>{provider.name}</strong>
-                <small>
-                  {provider.access_modes.find(
-                    (accessMode) =>
-                      accessMode.id === provider.default_access_mode,
-                  )?.default_model ?? "选择后查看"}
-                </small>
                 <i aria-hidden="true" />
               </button>
             ))}
