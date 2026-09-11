@@ -145,6 +145,7 @@ export function WorkspaceApp() {
     >
       {activeView === "dashboard" ? (
         <DashboardView
+          key={auth.user.id}
           permissions={permissions}
           currentUser={auth.user}
           onCreateProjectFromOpportunity={(draft) => {

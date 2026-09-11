@@ -316,6 +316,7 @@ function PersonalReportPanel({
       {selectedReport ? (
         <>
           <div className="report-status-line">
+            {selectedReport.submitted_at && !selectedReport.department_snapshot_known && !selectedReport.department_id ? <span>历史部门归属未知</span> : null}
             <span>
               {selectedReport.submitted_at
                 ? `已提交 V${selectedReport.submission_version}`
@@ -387,7 +388,7 @@ function TeamReportPanel({
       <div className="report-section-heading">
         <div>
           <p className="eyebrow">TEAM REPORTS</p>
-          <h2>往期团队周报</h2>
+          <h2>{selectedReport?.scope_type === "legacy" ? "历史团队汇总（旧版范围）" : "往期团队周报"}</h2>
         </div>
         <label className="report-week-picker">
           <span>选择周目</span>
@@ -398,7 +399,7 @@ function TeamReportPanel({
           >
             {reports.map((report) => (
               <option key={report.id} value={report.id}>
-                {formatWeek(report.week_start, report.week_end)} ·{" "}
+                {report.scope_type === "legacy" ? "历史团队汇总 · " : ""}{formatWeek(report.week_start, report.week_end)} ·{" "}
                 {formatDateTime(report.created_at)}
               </option>
             ))}
@@ -410,9 +411,9 @@ function TeamReportPanel({
           <div className="report-status-line">
             <span>
               汇总 {selectedReport.submitted_count}/
-              {selectedReport.expected_count} 份个人周报
+              {selectedReport.expected_count_known === false ? "未知（历史成员名单缺失）" : selectedReport.expected_count} 份个人周报
             </span>
-            <span>{selectedReport.forced ? "缺交强制生成" : "完整生成"}</span>
+            <span>{selectedReport.expected_count_known === false ? "按已知提交生成" : selectedReport.forced ? "缺交强制生成" : "完整生成"}</span>
           </div>
           <pre className="team-report-content">{selectedReport.content}</pre>
         </>

@@ -983,6 +983,14 @@ class WorkRecordCreationRequest(Base):
     )
 
 
+class WeeklyRoster(Base):
+    __tablename__ = "weekly_rosters"
+
+    week_start: Mapped[date] = mapped_column(Date, primary_key=True)
+    members: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class WeeklyReport(Base, TimestampMixin, RevisionMixin):
     __tablename__ = "weekly_reports"
 
@@ -1004,6 +1012,9 @@ class WeeklyReport(Base, TimestampMixin, RevisionMixin):
     generation_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submission_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    department_snapshot_known: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     department_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("departments.id", ondelete="SET NULL"),
@@ -1045,6 +1056,9 @@ class TeamWeeklySummary(Base, TimestampMixin, RevisionMixin):
     forced: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     submitted_count: Mapped[int] = mapped_column(Integer, nullable=False)
     expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_count_known: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
     included_leader_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source_reports: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     generation_model: Mapped[str] = mapped_column(String(120), nullable=False)

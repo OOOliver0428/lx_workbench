@@ -1580,6 +1580,8 @@ def _seed_weekly_reports(
             week_end=week + timedelta(days=6),
             content=content,
             generated_by=users["leader"].id,
+            scope_type="legacy",
+            scope_key="legacy",
             forced=forced,
             submitted_count=submitted_count,
             expected_count=expected_count,

@@ -368,6 +368,8 @@ export interface AIChatResult {
 }
 
 export interface WeeklyReport {
+  department_id: string | null;
+  department_snapshot_known: boolean;
   id: string;
   author_id: string;
   week_start: string;
@@ -492,6 +494,7 @@ export interface DashboardMember {
   submitted_at: string | null;
   weekly_minutes: number | null;
   submitted_weeks: string[];
+  eligible_weeks: string[];
   department_id: string | null;
   department_name: string | null;
 }
@@ -641,6 +644,7 @@ export interface DashboardMetrics {
   total_minutes: number;
   submitted_count: number;
   member_count: number;
+  member_count_known: boolean;
 }
 
 export interface DashboardWeekTrend {
@@ -650,6 +654,7 @@ export interface DashboardWeekTrend {
   deliverable_count: number;
   submitted_count: number;
   member_count: number;
+  member_count_known: boolean;
 }
 
 export interface DashboardStageCount {
@@ -677,6 +682,7 @@ export interface TeamWeeklySummary {
   forced: boolean;
   submitted_count: number;
   expected_count: number;
+  expected_count_known: boolean;
   included_leader_count: number;
   source_reports: Array<{
     report_id: string;

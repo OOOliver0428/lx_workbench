@@ -15,6 +15,7 @@ import type {
   ReactNode,
 } from "react";
 import { api, ApiClientError } from "../api";
+import { createLatestRequest, readManagementScope, saveManagementScope } from "../dashboard-loading";
 import { pinyinMatchAny } from "../pinyin";
 import type {
   AttentionStatus,
@@ -121,14 +122,8 @@ export function DashboardView({
   const [createOpportunityOpen, setCreateOpportunityOpen] = useState(false);
   const [relationOpen, setRelationOpen] = useState(false);
   const [summary, setSummary] = useState<TeamWeeklySummary | null>(null);
-  const [scopeType, setScopeType] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem("workMgmt.scopeType") || "";
-  });
-  const [scopeDepartmentId, setScopeDepartmentId] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem("workMgmt.departmentId") || "";
-  });
+  const selection = useRef({ week: "", scopeType: "", departmentId: "" });
+  const requests = useRef(createLatestRequest());
   const canEditTasks = permissions.includes("tasks.edit");
   const canRecordOpportunityProgress = permissions.includes(
     "dashboard.opportunity.progress",
@@ -152,43 +147,43 @@ export function DashboardView({
 
   const load = useCallback(
     async (weekStart?: string, nextScopeType?: string, nextDeptId?: string) => {
+      const next = {
+        week: weekStart ?? selection.current.week,
+        scopeType: nextScopeType ?? selection.current.scopeType,
+        departmentId: nextDeptId ?? selection.current.departmentId,
+      };
+      selection.current = next;
       setLoading(true);
       setError("");
       try {
-        const result = await api.dashboard.get(
-          weekStart,
-          nextScopeType ?? scopeType,
-          nextDeptId ?? scopeDepartmentId,
-        );
+        const result = await requests.current.run(() => api.dashboard.get(
+          next.week || undefined, next.scopeType, next.departmentId,
+        ));
+        if (!result) return;
+        selection.current = {
+          week: result.selected_week.week_start,
+          scopeType: result.management_scope?.scope_type ?? "",
+          departmentId: result.management_scope?.department_id ?? "",
+        };
+        saveManagementScope(currentUser.id, selection.current.scopeType, selection.current.departmentId);
         applyDashboard(result);
+        setLoading(false);
       } catch (caught) {
         setError(errorMessage(caught, "无法读取作战台数据"));
-      } finally {
         setLoading(false);
       }
     },
-    [applyDashboard, scopeType, scopeDepartmentId],
+    [applyDashboard, currentUser.id],
   );
 
   useEffect(() => {
-    let cancelled = false;
-    api.dashboard
-      .get(undefined, scopeType, scopeDepartmentId)
-      .then((result) => {
-        if (!cancelled) applyDashboard(result);
-      })
-      .catch((caught) => {
-        if (!cancelled) {
-          setError(errorMessage(caught, "无法读取作战台数据"));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [applyDashboard, scopeType, scopeDepartmentId]);
+    const stored = readManagementScope(currentUser.id);
+    selection.current = { week: "", ...stored };
+    let active = true;
+    void Promise.resolve().then(() => { if (active) return load(); });
+    const gate = requests.current;
+    return () => { active = false; gate.cancel(); };
+  }, [load, currentUser.id]);
 
   async function changeWeek(value: string) {
     setSelectedWeek(value);
@@ -196,15 +191,7 @@ export function DashboardView({
   }
 
   async function changeScope(nextType: string, nextDeptId: string | null) {
-    setScopeType(nextType);
-    setScopeDepartmentId(nextDeptId || "");
-    try {
-      window.localStorage.setItem("workMgmt.scopeType", nextType);
-      window.localStorage.setItem("workMgmt.departmentId", nextDeptId || "");
-    } catch {
-      // ignore storage failures
-    }
-    await load(selectedWeek, nextType, nextDeptId || "");
+    await load(undefined, nextType, nextDeptId || "");
   }
 
   if (loading && !dashboard) {
@@ -363,7 +350,7 @@ export function DashboardView({
             canGenerateSummary={canGenerateTeamSummary}
             onSummary={setSummary}
             onError={setError}
-            onReload={() => load(selectedWeek)}
+            onReload={() => load()}
             onScopeChange={changeScope}
           />
         ) : null}
@@ -404,7 +391,7 @@ export function DashboardView({
           onClose={() => setProgressOpportunity(null)}
           onSaved={async () => {
             setProgressOpportunity(null);
-            await load(selectedWeek);
+            await load();
           }}
         />
       ) : null}
@@ -414,7 +401,7 @@ export function DashboardView({
           onClose={() => setCreateOpportunityOpen(false)}
           onCreated={async () => {
             setCreateOpportunityOpen(false);
-            await load(selectedWeek);
+            await load();
           }}
         />
       ) : null}
@@ -424,7 +411,7 @@ export function DashboardView({
           onClose={() => setRelationOpen(false)}
           onSaved={async () => {
             setRelationOpen(false);
-            await load(selectedWeek);
+            await load();
           }}
         />
       ) : null}
@@ -1566,7 +1553,9 @@ function WorkPage({
 }) {
   const [summaryBusy, setSummaryBusy] = useState(false);
   const managementScope = dashboard.management_scope;
+  const countKnown = dashboard.metrics.member_count_known !== false;
   const allSubmitted =
+    countKnown &&
     dashboard.metrics.member_count > 0 &&
     dashboard.metrics.submitted_count === dashboard.metrics.member_count;
 
@@ -1620,12 +1609,12 @@ function WorkPage({
                     key={`${option.scope_type}:${option.department_id ?? ""}`}
                     value={`${option.scope_type}:${option.department_id ?? ""}`}
                   >
-                    {label} · {option.member_count} 人
+                    {label} · {countKnown ? `${option.member_count} 人` : "历史人数未知"}
                   </option>
                 );
               })}
             </select>
-            <span className="war-scope-current-count">当前范围 <b>{dashboard.metrics.member_count}</b> 人</span>
+            <span className="war-scope-current-count">当前范围 <b>{dashboard.metrics.member_count_known === false ? "未知" : dashboard.metrics.member_count}</b> 人</span>
           </section>
         ) : null}
         <section className="war-panel war-band-panel">
@@ -1654,7 +1643,7 @@ function WorkPage({
                       <header>
                         <strong>{option.department_name ?? "部门"}</strong>
                         <span>
-                          {submitted}/{deptMembers.length} 已提交
+                          {submitted}/{countKnown ? deptMembers.length : "未知"} 已提交
                         </span>
                       </header>
                       <div className="war-member-band">
@@ -1708,7 +1697,7 @@ function WorkPage({
             className="war-submit-ring"
             style={
               {
-                "--ring-pct": dashboard.metrics.member_count
+                "--ring-pct": countKnown && dashboard.metrics.member_count
                   ? Math.round(
                       (dashboard.metrics.submitted_count /
                         dashboard.metrics.member_count) *
@@ -1720,7 +1709,7 @@ function WorkPage({
           >
             <b>
               {dashboard.metrics.submitted_count}/
-              {dashboard.metrics.member_count}
+              {dashboard.metrics.member_count_known === false ? "未知" : dashboard.metrics.member_count}
             </b>
             <span>已提交</span>
           </div>
@@ -1828,14 +1817,14 @@ function WorkPage({
           <span>周报提交进度</span>
           <b>
             {dashboard.metrics.submitted_count}/
-            {dashboard.metrics.member_count}
+            {dashboard.metrics.member_count_known === false ? "未知" : dashboard.metrics.member_count}
           </b>
         </div>
         <div className="war-ai-track">
           <i
             style={{
               width: `${
-                dashboard.metrics.member_count
+                countKnown && dashboard.metrics.member_count
                   ? (dashboard.metrics.submitted_count /
                       dashboard.metrics.member_count) *
                     100
@@ -1870,7 +1859,9 @@ function WorkPage({
             团队负责人完成汇总后，可在此查看正式版本。
           </p>
         )}
-        {allSubmitted ? (
+        {!countKnown ? (
+          <p className="war-ai-hint">历史应提交人数未知，仅统计已确认归属的周报。</p>
+        ) : allSubmitted ? (
           <div className="war-ai-hint ready">
             <Check size={12} /> 全员已提交，可生成本周团队周报
           </div>
@@ -1894,7 +1885,7 @@ function WorkPage({
               dashboard.latest_team_summary.created_at,
             ).toLocaleString("zh-CN")}
           </button>
-        ) : null}
+        ) : <p className="war-ai-hint">当前范围本周尚未生成汇总</p>}
       </aside>
     </div>
   );
@@ -1960,7 +1951,7 @@ function OverviewPage({ dashboard }: { dashboard: Dashboard }) {
               {dashboard.weeks.map((week) => (
                 <b key={week.week_start}>{shortWeekLabel(week.label)}</b>
               ))}
-              <b>提交率</b>
+              <b>已知周次提交率</b>
             </div>
             {dashboard.members.map((member) => (
               <div key={member.id}>
@@ -1989,12 +1980,9 @@ function OverviewPage({ dashboard }: { dashboard: Dashboard }) {
                   </i>
                 ))}
                 <b>
-                  {Math.round(
-                    (member.submitted_weeks.length /
-                      dashboard.weeks.length) *
-                      100,
-                  )}
-                  %
+                  {member.eligible_weeks.length
+                    ? `${Math.round(member.submitted_weeks.filter((week) => member.eligible_weeks.includes(week)).length / member.eligible_weeks.length * 100)}%`
+                    : "未知"}
                 </b>
               </div>
             ))}
@@ -2703,7 +2691,7 @@ function SummaryModal({
   return (
     <Modal
       title="团队周报 · AI 汇总"
-      eyebrow={`${summary.week_start} 至 ${summary.week_end} · ${summary.submitted_count}/${summary.expected_count} 人`}
+      eyebrow={`${summary.week_start} 至 ${summary.week_end} · ${summary.submitted_count}/${summary.expected_count_known === false ? "未知" : summary.expected_count} 人`}
       onClose={onClose}
       wide
     >
@@ -2929,7 +2917,7 @@ function headlineSubtitle(page: DashboardPage, dashboard: Dashboard) {
     return `本周 ${dashboard.metrics.tracking_count} 个在跟商机，${dashboard.metrics.stage_advanced_count} 个阶段推进，${dashboard.metrics.coordinate_count} 个待协调`;
   }
   if (page === "work") {
-    return `${dashboard.selected_week.label} · 周报提交 ${dashboard.metrics.submitted_count}/${dashboard.metrics.member_count}`;
+    return `${dashboard.selected_week.label} · 周报提交 ${dashboard.metrics.submitted_count}/${dashboard.metrics.member_count_known === false ? "未知" : dashboard.metrics.member_count}`;
   }
   return `${dashboard.weeks[0]?.label.split("（")[0]} 至 ${dashboard.weeks.at(-1)?.label.split("（")[0]} · 共 ${dashboard.weeks.length} 周`;
 }

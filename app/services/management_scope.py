@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Department, User, UserRole
+from app.models import Department, User, UserRole, WeeklyReport, WeeklyRoster
+from app.services.weekly_rosters import capture_current_roster, current_week
 
 SCOPE_ALL_LED = "all_led"
 SCOPE_DEPARTMENT = "department"
@@ -45,6 +47,8 @@ class ResolvedManagementScope:
     other_direct_count: int = 0
     is_org_wide: bool = False
     includes_actor: bool = False
+    roster_known: bool = True
+    department_by_user: dict[str, str | None] = field(default_factory=dict)
 
 
 def _led_departments(db: Session, user_id: str) -> list[Department]:
@@ -111,6 +115,7 @@ def resolve_management_scope(
     *,
     scope_type: str | None = None,
     department_id: str | None = None,
+    week_start: date | None = None,
 ) -> ResolvedManagementScope:
     """Resolve work-management member scope.
 
@@ -130,9 +135,7 @@ def resolve_management_scope(
                 select(User)
                 .where(
                     User.is_active.is_(True),
-                    User.role.in_(
-                        [UserRole.MEMBER.value, UserRole.TEAM_LEADER.value]
-                    ),
+                    User.role.in_([UserRole.MEMBER.value, UserRole.TEAM_LEADER.value]),
                 )
                 .order_by(User.display_name)
             ).all()
@@ -147,18 +150,56 @@ def resolve_management_scope(
 
     led = _led_departments(db, actor.id)
     led_ids = {department.id for department in led}
+    week = week_start or current_week()
+    roster = capture_current_roster(db) if week == current_week() else db.get(WeeklyRoster, week)
+    if roster is not None:
+        entries = {entry["user_id"]: entry for entry in roster.members}
+    else:
+        # No historical denominator exists: only use formally submitted snapshots.
+        entries = {
+            report.author_id: {
+                "user_id": report.author_id,
+                "department_id": report.department_id,
+            }
+            for report in db.scalars(
+                select(WeeklyReport).where(
+                    WeeklyReport.week_start == week,
+                    WeeklyReport.submitted_at.is_not(None),
+                    WeeklyReport.submitted_content.is_not(None),
+                    (
+                        WeeklyReport.department_snapshot_known.is_(True)
+                        | WeeklyReport.department_id.is_not(None)
+                    ),
+                )
+            )
+        }
+    period_users = list(db.scalars(select(User).where(User.id.in_(entries))).all())
+    period_departments = {uid: entry.get("department_id") for uid, entry in entries.items()}
     department_buckets: dict[str, list[User]] = {
-        department.id: _department_members(
-            db, department.id, exclude_id=actor.id
-        )
+        department.id: [
+            user
+            for user in period_users
+            if user.id != actor.id and period_departments.get(user.id) == department.id
+        ]
         for department in led
     }
     tree = _reporting_tree(db, actor)
+    if roster is not None and week != current_week():
+        descendants = {actor.id}
+        while True:
+            expanded = descendants | {
+                uid for uid, entry in entries.items() if entry.get("leader_id") in descendants
+            }
+            if expanded == descendants:
+                break
+            descendants = expanded
+        tree = [user for user in period_users if user.id in descendants and user.id != actor.id]
     other_direct = [
         user
         for user in tree
-        if user.primary_department_id not in led_ids
+        if user.id in entries and period_departments.get(user.id) not in led_ids
     ]
+    period_fields = {"roster_known": roster is not None, "department_by_user": period_departments}
 
     options: list[ScopeOption] = []
     if led:
@@ -197,6 +238,7 @@ def resolve_management_scope(
             options=[],
             led_departments=led,
             other_direct_count=0,
+            **period_fields,
         )
 
     requested = (scope_type or "").strip()
@@ -216,6 +258,7 @@ def resolve_management_scope(
                 options=options,
                 led_departments=led,
                 other_direct_count=len(other_direct),
+                **period_fields,
             )
         return ResolvedManagementScope(
             scope_type=SCOPE_DEPARTMENT,
@@ -224,6 +267,7 @@ def resolve_management_scope(
             options=options,
             led_departments=led,
             other_direct_count=len(other_direct),
+            **period_fields,
         )
 
     if requested == SCOPE_OTHER_DIRECT and other_direct:
@@ -234,6 +278,7 @@ def resolve_management_scope(
             options=options,
             led_departments=led,
             other_direct_count=len(other_direct),
+            **period_fields,
         )
 
     default_type = SCOPE_ALL_LED if led else SCOPE_OTHER_DIRECT
@@ -249,6 +294,7 @@ def resolve_management_scope(
         options=options,
         led_departments=led,
         other_direct_count=len(other_direct),
+        **period_fields,
     )
 
 

@@ -250,6 +250,18 @@ def _reports_for_week(
     )
 
 
+def _management_reports(db, week, member_ids, resolved):
+    reports = _reports_for_week(db, week, member_ids)
+    if resolved.is_org_wide or resolved.scope_type == SCOPE_OTHER_DIRECT:
+        return reports
+    departments = (
+        {resolved.department_id}
+        if resolved.scope_type == SCOPE_DEPARTMENT
+        else {department.id for department in resolved.led_departments}
+    )
+    return [report for report in reports if report.department_id in departments]
+
+
 def _default_attention(tasks: list[Task]) -> str:
     if any(task.status == TaskStatus.BLOCKED.value for task in tasks):
         return AttentionStatus.COORDINATE.value
@@ -882,14 +894,18 @@ def _week_trends(
     weeks: list[date],
     member_ids: set[str],
     work_author_ids: set[str],
+    period_scopes: dict,
 ) -> list[DashboardWeekTrendOut]:
     trends: list[DashboardWeekTrendOut] = []
     for week_start in weeks:
+        period = period_scopes[week_start]
+        period_member_ids = member_ids if period.is_org_wide else {u.id for u in period.members}
+        period_author_ids = work_author_ids if period.is_org_wide else period_member_ids
         week_end = week_start + timedelta(days=6)
         total_minutes = (
             db.scalar(
                 select(func.sum(WorkRecord.minutes)).where(
-                    WorkRecord.author_id.in_(work_author_ids),
+                    WorkRecord.author_id.in_(period_author_ids),
                     WorkRecord.work_date >= week_start,
                     WorkRecord.work_date <= week_end,
                     WorkRecord.deleted_at.is_(None),
@@ -902,7 +918,7 @@ def _week_trends(
                 select(func.count(Deliverable.id))
                 .join(WorkRecord, WorkRecord.id == Deliverable.work_record_id)
                 .where(
-                    WorkRecord.author_id.in_(work_author_ids),
+                    WorkRecord.author_id.in_(period_author_ids),
                     WorkRecord.work_date >= week_start,
                     WorkRecord.work_date <= week_end,
                     WorkRecord.deleted_at.is_(None),
@@ -911,17 +927,7 @@ def _week_trends(
             )
             or 0
         )
-        submitted_count = (
-            db.scalar(
-                select(func.count(WeeklyReport.id)).where(
-                    WeeklyReport.author_id.in_(member_ids),
-                    WeeklyReport.week_start == week_start,
-                    WeeklyReport.submitted_content.is_not(None),
-                    WeeklyReport.submitted_at.is_not(None),
-                )
-            )
-            or 0
-        )
+        submitted_count = len(_management_reports(db, week_start, period_member_ids, period))
         trends.append(
             DashboardWeekTrendOut(
                 week_start=week_start,
@@ -929,7 +935,8 @@ def _week_trends(
                 total_minutes=total_minutes,
                 deliverable_count=deliverable_count,
                 submitted_count=submitted_count,
-                member_count=len(member_ids),
+                member_count=len(period_member_ids),
+                member_count_known=period.roster_known,
             )
         )
     return trends
@@ -959,36 +966,45 @@ def build_dashboard(
         actor,
         scope_type=scope_type if can_view_work or can_view_overview else None,
         department_id=department_id if can_view_work or can_view_overview else None,
+        week_start=selected_week,
     )
-    scope_users = (
-        _scope_users(db, actor) if resolved.is_org_wide else list(resolved.members)
-    )
+    scope_users = _scope_users(db, actor) if resolved.is_org_wide else list(resolved.members)
     member_ids = {user.id for user in scope_users}
     # 工作贡献统计：管理范围内成员；超管全量；普通成员仅自己。
     if is_super_admin(actor):
         visible_author_ids = {user.id for user in _business_users(db)} | {actor.id}
-    elif (
-        not resolved.is_org_wide
-        and actor.role
-        in {UserRole.TEAM_LEADER.value, UserRole.SYSTEM_ADMIN.value}
-    ):
+    elif not resolved.is_org_wide and actor.role in {
+        UserRole.TEAM_LEADER.value,
+        UserRole.SYSTEM_ADMIN.value,
+    }:
         visible_author_ids = member_ids | {actor.id}
     else:
         visible_author_ids = {actor.id}
     work_author_ids = visible_author_ids
-    submissions = _reports_for_week(db, selected_week, member_ids)
+    submissions = _management_reports(db, selected_week, member_ids, resolved)
     submission_by_author = {report.author_id: report for report in submissions}
-    submitted_week_rows = db.execute(
-        select(WeeklyReport.author_id, WeeklyReport.week_start).where(
-            WeeklyReport.author_id.in_(member_ids),
-            WeeklyReport.week_start.in_(weeks),
-            WeeklyReport.submitted_content.is_not(None),
-            WeeklyReport.submitted_at.is_not(None),
-        )
-    ).all()
     submitted_weeks_by_author: dict[str, list[date]] = defaultdict(list)
-    for author_id, report_week_start in submitted_week_rows:
-        submitted_weeks_by_author[author_id].append(report_week_start)
+    eligible_weeks_by_author: dict[str, list[date]] = defaultdict(list)
+    period_scopes = {}
+    for week in weeks:
+        period = (
+            resolved
+            if week == selected_week
+            else resolve_management_scope(
+                db,
+                actor,
+                scope_type=scope_type,
+                department_id=department_id,
+                week_start=week,
+            )
+        )
+        period_scopes[week] = period
+        ids = member_ids if period.is_org_wide else {user.id for user in period.members}
+        for report in _management_reports(db, week, ids, period):
+            submitted_weeks_by_author[report.author_id].append(week)
+        if period.roster_known:
+            for uid in ids:
+                eligible_weeks_by_author[uid].append(week)
 
     weekly_minutes_rows = db.execute(
         select(WorkRecord.author_id, func.sum(WorkRecord.minutes))
@@ -1001,9 +1017,7 @@ def build_dashboard(
         .group_by(WorkRecord.author_id)
     ).all()
     weekly_minutes = {author_id: int(minutes) for author_id, minutes in weekly_minutes_rows}
-    department_names = {
-        department.id: department.name for department in resolved.led_departments
-    }
+    department_names = {department.id: department.name for department in resolved.led_departments}
     members = [
         DashboardMemberOut(
             id=user.id,
@@ -1019,19 +1033,16 @@ def build_dashboard(
             weekly_minutes=(
                 weekly_minutes.get(user.id, 0)
                 if can_view_work
-                and (
-                    is_super_admin(actor)
-                    or user.id == actor.id
-                    or user.id in member_ids
-                )
+                and (is_super_admin(actor) or user.id == actor.id or user.id in member_ids)
                 else None
             ),
             submitted_weeks=submitted_weeks_by_author[user.id],
-            department_id=user.primary_department_id,
+            eligible_weeks=eligible_weeks_by_author[user.id],
+            department_id=resolved.department_by_user.get(user.id, user.primary_department_id),
             department_name=(
-                department_names.get(user.primary_department_id)
-                if user.primary_department_id
-                else None
+                department_names.get(
+                    resolved.department_by_user.get(user.id, user.primary_department_id)
+                )
             ),
         )
         for user in scope_users
@@ -1058,10 +1069,7 @@ def build_dashboard(
     stage_distribution = [
         DashboardStageCountOut(
             business_stage=stage,
-            count=sum(
-                opportunity.business_stage == stage
-                for opportunity in opportunities
-            ),
+            count=sum(opportunity.business_stage == stage for opportunity in opportunities),
         )
         for stage in STAGE_ORDER
     ]
@@ -1087,18 +1095,6 @@ def build_dashboard(
             .order_by(TeamWeeklySummary.created_at.desc())
             .limit(1)
         )
-        if latest_summary is None and resolved_scope_key != "all_led":
-            # 兼容范围维上线前的历史汇总（仅有 all_led 行）。
-            latest_summary = db.scalar(
-                select(TeamWeeklySummary)
-                .where(
-                    TeamWeeklySummary.week_start == selected_week,
-                    TeamWeeklySummary.generated_by == actor.id,
-                    TeamWeeklySummary.scope_key == "all_led",
-                )
-                .order_by(TeamWeeklySummary.created_at.desc())
-                .limit(1)
-            )
     project_ids = [project.id for project in projects]
     progress_summaries: dict[str, list[str]] = defaultdict(list)
     progress_outputs: dict[str, list[str]] = defaultdict(list)
@@ -1115,13 +1111,9 @@ def build_dashboard(
         )
         for progress in selected_progress:
             if progress.summary.strip():
-                progress_summaries[progress.project_id].append(
-                    progress.summary.strip()
-                )
+                progress_summaries[progress.project_id].append(progress.summary.strip())
             if progress.output_summary and progress.output_summary.strip():
-                progress_outputs[progress.project_id].append(
-                    progress.output_summary.strip()
-                )
+                progress_outputs[progress.project_id].append(progress.output_summary.strip())
 
     deliverable_names: dict[str, list[str]] = defaultdict(list)
     if can_view_work and not can_view_opportunity:
@@ -1134,24 +1126,17 @@ def build_dashboard(
             updates: dict[str, object] = {}
             if not can_view_opportunity:
                 work_summaries = [
-                    item.content.strip()
-                    for item in project.work_items
-                    if item.content.strip()
+                    item.content.strip() for item in project.work_items if item.content.strip()
                 ]
                 updates.update(
                     can_manage=False,
                     business_stage=BusinessStage.LEAD.value,
                     attention_status=AttentionStatus.STEADY.value,
                     progress_percent=0,
-                    work_summary="；".join(dict.fromkeys(work_summaries))
-                    or "本周暂无工作记录",
-                    output_summary="；".join(
-                        dict.fromkeys(deliverable_names[project.id])
-                    )
+                    work_summary="；".join(dict.fromkeys(work_summaries)) or "本周暂无工作记录",
+                    output_summary="；".join(dict.fromkeys(deliverable_names[project.id]))
                     or "本周暂无交付物记录",
-                    has_week_progress=bool(
-                        project.work_items or deliverable_names[project.id]
-                    ),
+                    has_week_progress=bool(project.work_items or deliverable_names[project.id]),
                     tasks=[],
                     stage_history=[],
                 )
@@ -1160,16 +1145,14 @@ def build_dashboard(
                 safe_outputs = progress_outputs[project.id]
                 updates.update(
                     weekly_minutes=None,
-                    work_summary="；".join(dict.fromkeys(safe_summaries))
-                    or "本周暂无项目进展记录",
-                    output_summary="；".join(dict.fromkeys(safe_outputs))
-                    or "本周暂无项目进展产出",
+                    work_summary="；".join(dict.fromkeys(safe_summaries)) or "本周暂无项目进展记录",
+                    output_summary="；".join(dict.fromkeys(safe_outputs)) or "本周暂无项目进展产出",
                     has_week_progress=bool(safe_summaries or safe_outputs),
                     work_items=[],
                 )
             projects_for_response.append(project.model_copy(update=updates))
     trends = (
-        _week_trends(db, weeks, member_ids, work_author_ids)
+        _week_trends(db, weeks, member_ids, work_author_ids, period_scopes)
         if can_view_overview
         else []
     )
@@ -1178,11 +1161,7 @@ def build_dashboard(
         selected_week=week_out(selected_week, current_week=current_week),
         weeks=[week_out(item, current_week=current_week) for item in weeks],
         metrics=DashboardMetricsOut(
-            tracking_count=(
-                len(opportunities)
-                if can_view_opportunity or can_view_overview
-                else 0
-            ),
+            tracking_count=(len(opportunities) if can_view_opportunity or can_view_overview else 0),
             focus_count=(
                 sum(
                     opportunity.attention_status == AttentionStatus.FOCUS.value
@@ -1204,6 +1183,7 @@ def build_dashboard(
             total_minutes=total_minutes if can_view_work else 0,
             submitted_count=len(submissions) if can_view_work else 0,
             member_count=len(members) if can_view_work else 0,
+            member_count_known=resolved.roster_known,
         ),
         members=members if can_view_work or can_view_overview else [],
         opportunities=opportunities if can_view_opportunity else [],
@@ -1212,15 +1192,9 @@ def build_dashboard(
         task_links=task_links if can_view_opportunity else [],
         trends=trends,
         stage_distribution=(
-            stage_distribution
-            if can_view_opportunity or can_view_overview
-            else []
+            stage_distribution if can_view_opportunity or can_view_overview else []
         ),
-        stage_timeline=(
-            stage_timeline
-            if can_view_opportunity or can_view_overview
-            else []
-        ),
+        stage_timeline=(stage_timeline if can_view_opportunity or can_view_overview else []),
         latest_team_summary=(
             TeamWeeklySummaryOut.model_validate(latest_summary)
             if latest_summary and can_view_work
@@ -1361,29 +1335,25 @@ def generate_team_summary(
         actor,
         scope_type=payload.scope_type,
         department_id=payload.department_id,
+        week_start=normalized_week,
     )
     if resolved.is_org_wide:
         scoped_users_with_depths = _scope_users_with_depths(db, actor)
         scope_users = [user for user, _depth in scoped_users_with_depths]
-        depth_by_user_id = {
-            user.id: depth for user, depth in scoped_users_with_depths
-        }
+        depth_by_user_id = {user.id: depth for user, depth in scoped_users_with_depths}
     else:
         # 管理范围不含负责人本人。
-        tree_with_depths = {
-            user.id: depth
-            for user, depth in _scope_users_with_depths(db, actor)
-        }
+        tree_with_depths = {user.id: depth for user, depth in _scope_users_with_depths(db, actor)}
         scope_users = [user for user in resolved.members if user.id != actor.id]
-        depth_by_user_id = {
-            user.id: tree_with_depths.get(user.id, 0) for user in scope_users
-        }
+        depth_by_user_id = {user.id: tree_with_depths.get(user.id, 0) for user in scope_users}
     member_ids = {user.id for user in scope_users}
-    reports = _reports_for_week(db, normalized_week, member_ids)
+    reports = _management_reports(db, normalized_week, member_ids, resolved)
     submitted_ids = {report.author_id for report in reports}
-    missing = [
-        user.display_name for user in scope_users if user.id not in submitted_ids
-    ]
+    missing = [user.display_name for user in scope_users if user.id not in submitted_ids]
+    if not resolved.roster_known and not payload.force:
+        raise ConflictError(
+            "HISTORICAL_ROSTER_UNKNOWN", "历史应提交人数未知，请选择按已提交内容直接生成"
+        )
     if missing and not payload.force:
         raise ConflictError(
             "TEAM_WEEKLY_REPORTS_INCOMPLETE",
@@ -1411,16 +1381,17 @@ def generate_team_summary(
             report.author_id,
         ),
     )
+    department_names = {d.id: d.name for d in resolved.led_departments}
     report_context = "\n\n".join(
         (
             f"## {users[report.author_id].display_name}\n"
+            f"部门：{department_names.get(report.department_id, '历史部门归属未知')}\n"
             f"{report.submitted_content or ''}"
         )
         for report in ordered_reports
     )
     included_leader_count = sum(
-        users[report.author_id].role
-        in {UserRole.TEAM_LEADER.value, UserRole.SYSTEM_ADMIN.value}
+        users[report.author_id].role in {UserRole.TEAM_LEADER.value, UserRole.SYSTEM_ADMIN.value}
         for report in ordered_reports
     )
     source_reports = [
@@ -1428,12 +1399,22 @@ def generate_team_summary(
             "report_id": report.id,
             "author_id": report.author_id,
             "submission_version": report.submission_version,
+            "department_id": report.department_id,
             "order": order,
             "depth": depth_by_user_id.get(report.author_id, 0),
         }
         for order, report in enumerate(ordered_reports, start=1)
     ]
-    missing_text = "、".join(missing) if missing else "无"
+    missing_text = (
+        ("、".join(missing) if missing else "无")
+        if resolved.roster_known
+        else "历史成员名单缺失，未提交成员未知"
+    )
+    expected_text = (
+        str(len(scope_users)) + " 位"
+        if resolved.roster_known
+        else "未知，禁止计算提交率或声称全员提交"
+    )
     scope_key = (
         "all_led"
         if resolved.is_org_wide
@@ -1443,11 +1424,7 @@ def generate_team_summary(
     if not resolved.is_org_wide:
         if resolved.scope_type == SCOPE_DEPARTMENT and resolved.department_id:
             department = next(
-                (
-                    item
-                    for item in resolved.led_departments
-                    if item.id == resolved.department_id
-                ),
+                (item for item in resolved.led_departments if item.id == resolved.department_id),
                 None,
             )
             scope_title = department.name if department else "分管部门"
@@ -1459,9 +1436,7 @@ def generate_team_summary(
         user_id=actor.id,
         purpose="team_summary",
         max_tokens=6144,
-        idempotency_key=(
-            f"team-summary:{actor.id}:{normalized_week.isoformat()}:{scope_key}"
-        ),
+        idempotency_key=(f"team-summary:{actor.id}:{normalized_week.isoformat()}:{scope_key}"),
     ) as lease:
         result = ai_service.complete(
             db,
@@ -1472,9 +1447,10 @@ def generate_team_summary(
                     "role": "system",
                     "content": (
                         f"汇总范围：{scope_title}\n"
+                        "跨部门汇总必须按已知部门分章节；未知归属单列，不得推断。\n"
                         f"统计周：{normalized_week.isoformat()} 至 "
                         f"{(normalized_week + timedelta(days=6)).isoformat()}\n"
-                        f"应提交成员：{len(scope_users)} 位\n"
+                        f"应提交成员：{expected_text}\n"
                         f"实际提交成员：{len(reports)} 位\n"
                         f"未提交成员：{missing_text}\n\n"
                         f"以下为已提交个人周报：\n{report_context}"
@@ -1499,11 +1475,7 @@ def generate_team_summary(
         )
     )
     is_regeneration = summary is not None
-    department_id = (
-        resolved.department_id
-        if resolved.scope_type == SCOPE_DEPARTMENT
-        else None
-    )
+    department_id = resolved.department_id if resolved.scope_type == SCOPE_DEPARTMENT else None
     if summary is None:
         summary = TeamWeeklySummary(
             week_start=normalized_week,
@@ -1513,6 +1485,7 @@ def generate_team_summary(
             forced=payload.force,
             submitted_count=len(reports),
             expected_count=len(scope_users),
+            expected_count_known=resolved.roster_known,
             included_leader_count=included_leader_count,
             source_reports=source_reports,
             generation_model=result.model,
@@ -1527,13 +1500,12 @@ def generate_team_summary(
         summary.forced = payload.force
         summary.submitted_count = len(reports)
         summary.expected_count = len(scope_users)
+        summary.expected_count_known = resolved.roster_known
         summary.included_leader_count = included_leader_count
         summary.source_reports = source_reports
         summary.generation_model = result.model
         summary.generation_usage = result.usage
-        summary.scope_type = (
-            resolved.scope_type if not resolved.is_org_wide else SCOPE_ALL_LED
-        )
+        summary.scope_type = resolved.scope_type if not resolved.is_org_wide else SCOPE_ALL_LED
         summary.department_id = department_id
         summary.scope_key = scope_key
         summary.revision += 1
@@ -1543,9 +1515,7 @@ def generate_team_summary(
         db,
         actor=actor,
         action=(
-            "team_weekly_summary.regenerate"
-            if is_regeneration
-            else "team_weekly_summary.generate"
+            "team_weekly_summary.regenerate" if is_regeneration else "team_weekly_summary.generate"
         ),
         entity_type="team_weekly_summary",
         entity_id=summary.id,

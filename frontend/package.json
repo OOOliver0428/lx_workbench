@@ -10,7 +10,7 @@
     "avatars:build": "node scripts/process-avatars.mjs",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/dashboard-loading.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

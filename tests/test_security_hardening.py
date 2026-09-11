@@ -224,6 +224,7 @@ def test_get_db_converts_stale_write_to_revision_conflict() -> None:
 
     db = StaleCommitSession()
     request = SimpleNamespace(
+        method="GET",
         app=SimpleNamespace(state=SimpleNamespace(session_factory=lambda: db)),
         state=SimpleNamespace(request_id="stale-write-test"),
         client=SimpleNamespace(host="testclient"),

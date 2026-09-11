@@ -900,6 +900,7 @@ class WeeklyReportOut(ORMModel):
     submitted_at: datetime | None
     submission_version: int
     department_id: str | None = None
+    department_snapshot_known: bool = False
     revision: int
     created_at: datetime
     updated_at: datetime
@@ -938,6 +939,7 @@ class DashboardMemberOut(BaseModel):
     submitted_at: datetime | None
     weekly_minutes: int | None
     submitted_weeks: list[date]
+    eligible_weeks: list[date] = Field(default_factory=list)
     department_id: str | None = None
     department_name: str | None = None
 
@@ -1067,6 +1069,7 @@ class DashboardMetricsOut(BaseModel):
     total_minutes: int
     submitted_count: int
     member_count: int
+    member_count_known: bool = True
 
 
 class DashboardWeekTrendOut(BaseModel):
@@ -1076,6 +1079,7 @@ class DashboardWeekTrendOut(BaseModel):
     deliverable_count: int
     submitted_count: int
     member_count: int
+    member_count_known: bool = True
 
 
 class DashboardStageCountOut(BaseModel):
@@ -1103,6 +1107,7 @@ class TeamWeeklySummaryOut(ORMModel):
     forced: bool
     submitted_count: int
     expected_count: int
+    expected_count_known: bool = True
     included_leader_count: int = 0
     source_reports: list[dict[str, Any]] | None = None
     generation_model: str

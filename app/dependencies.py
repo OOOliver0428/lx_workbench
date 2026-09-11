@@ -12,6 +12,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.errors import AppError, PermissionDeniedError
 from app.models import AuthSession, User
 from app.security import hash_session_token
+from app.services.weekly_rosters import capture_current_roster
 
 
 def utc_now() -> datetime:
@@ -29,7 +30,13 @@ def get_db(request: Request) -> Iterator[Session]:
     db.info["request_id"] = getattr(request.state, "request_id", None)
     db.info["client_ip"] = request.client.host if request.client else None
     try:
+        organization_write = (
+            request.method in {"POST", "PATCH", "DELETE"}
+            and request.url.path.startswith("/api/v1/users")
+        )
         yield db
+        if organization_write:
+            capture_current_roster(db)
         db.commit()
     except StaleDataError as error:
         db.rollback()

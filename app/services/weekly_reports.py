@@ -9,7 +9,7 @@ from app.audit import record_audit
 from app.config import Settings
 from app.domain import can_be_direct_leader
 from app.errors import AppError, ConflictError, NotFoundError, PermissionDeniedError
-from app.models import TeamWeeklySummary, User, UserRole, WeeklyReport, utc_now
+from app.models import TeamWeeklySummary, User, UserRole, WeeklyReport, WeeklyRoster, utc_now
 from app.schemas import (
     WeeklyReportDraftUpdate,
     WeeklyReportOut,
@@ -17,6 +17,7 @@ from app.schemas import (
 )
 from app.services import ai as ai_service
 from app.services.ai_context import build_weekly_report_context
+from app.services.weekly_rosters import capture_current_roster, current_week
 
 SHANGHAI = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
@@ -215,11 +216,22 @@ def submit_report(
     was_submitted = report.submitted_content is not None
     report.submitted_content = report.content
     report.submitted_to_id = leader.id if leader else None
-    report.department_id = actor.primary_department_id
+    if not was_submitted and report.week_start == current_week():
+        report.department_id = actor.primary_department_id
+        report.department_snapshot_known = True
+    elif not was_submitted:
+        roster = db.get(WeeklyRoster, report.week_start)
+        entry = next(
+            (item for item in roster.members if item["user_id"] == actor.id), None
+        ) if roster else None
+        if entry is not None:
+            report.department_id = entry.get("department_id")
+            report.department_snapshot_known = True
     report.submitted_at = utc_now()
     report.submission_version += 1
     report.revision += 1
     report.updated_at = utc_now()
+    capture_current_roster(db)
     record_audit(
         db,
         actor=actor,

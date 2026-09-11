@@ -251,3 +251,12 @@ API 地址或直接读取 CSRF。
   `WEEKLY_REPORT_OVERWRITE_CONFIRMATION_REQUIRED`。
 - 提交状态仅用于后端生成团队周报时判断可汇总版本，不赋予直属负责人、系统管理员或
   超级管理员直接查看该个人周报的能力。所有角色都只能通过个人周报接口读取自己的内容。
+
+## 0.4.0 周报历史口径修复
+
+- `WeeklyReportOut.department_snapshot_known` 区分首次提交时明确无部门和旧数据归属未知。
+- 工作管理 `metrics.member_count_known`、趋势 `member_count_known` 为 false 时，不得用 member_count 计算提交率。
+- 成员 `eligible_weeks` 为有可靠名单且成员位于当前所选范围的周次；矩阵提交率仅使用这些周次。
+- `TeamWeeklySummaryOut.expected_count_known=false` 表示历史应提交人数未知；生成请求需显式 force=true，默认返回 409 `HISTORICAL_ROSTER_UNKNOWN`。
+- 旧版汇总的 `scope_type/scope_key=legacy`，仅作为历史记录展示；dashboard 的 latest_team_summary 不跨范围回退。
+- 历史部门和每周名单规则见 [周报历史归属规则](WEEKLY_HISTORY.md)。

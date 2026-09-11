@@ -78,7 +78,9 @@ def test_demo_data_is_idempotent_and_covers_full_feature_views(api: dict) -> Non
     login(client, "demo_leader", password=DEMO_PASSWORD)
     leader_dashboard = client.get("/api/v1/dashboard")
     assert leader_dashboard.status_code == 200
-    assert leader_dashboard.json()["latest_team_summary"] is not None
+    assert leader_dashboard.json()["latest_team_summary"] is None
+    historical = client.get("/api/v1/weekly-reports/team-summaries").json()
+    assert historical and all(item["scope_type"] == "legacy" for item in historical)
     # 负责人本人不计入管理范围；演示数据中应提交成员为 4 人。
     assert leader_dashboard.json()["metrics"]["member_count"] == 4
 
