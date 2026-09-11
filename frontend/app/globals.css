@@ -7545,6 +7545,7 @@ a {
     border-left: none;
     padding-left: 0;
   }
+}
 
 .war-scope-panel {
   margin-bottom: 14px;
@@ -7674,6 +7675,11 @@ a {
   gap: 12px;
   justify-content: space-between;
   padding: 16px 0 0;
+  width: 100%;
+}
+
+.user-freeze-row > .account-danger-button {
+  margin-left: auto;
 }
 
 .user-freeze-row strong.is-frozen {
@@ -7681,14 +7687,14 @@ a {
 }
 
 .secondary-button.account-danger-button {
-  background: #fff;
-  border-color: #f1b5b0;
-  color: #b42318;
+  background: #d92d20;
+  border-color: #d92d20;
+  color: #fff;
 }
 
 .secondary-button.account-danger-button:hover:not(:disabled) {
-  background: #fef3f2;
-  border-color: #d92d20;
+  background: #b42318;
+  border-color: #b42318;
 }
 
 .secondary-button.account-danger-button:focus-visible {

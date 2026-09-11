@@ -30,6 +30,7 @@
 
 ### Fixed
 
+- 修复窄屏媒体查询未闭合导致桌面端新增样式失效；账号冻结按钮靠右并使用红底白字。
 ### Security
 
 - 用户冻结写入审计（`user.freeze` / `user.unfreeze`）。
