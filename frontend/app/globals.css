@@ -2014,6 +2014,24 @@ a {
   padding: 27px 30px 20px;
 }
 
+.project-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.project-rename-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-rename-row input {
+  min-width: 220px;
+}
+
 .detail-status-line {
   align-items: center;
   border-bottom: 1px solid var(--line);
