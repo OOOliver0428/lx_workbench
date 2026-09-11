@@ -28,6 +28,7 @@ export type WorkspaceView =
   | "tasks"
   | "records"
   | "reports"
+  | "changelog"
   | "profile"
   | "admin";
 
@@ -49,15 +50,21 @@ const navigation: Array<{
   { id: "records", label: "工作记录", index: "05", description: "个人工作沉淀" },
   { id: "reports", label: "周报", index: "06", description: "生成、提交与审阅" },
   {
+    id: "changelog",
+    label: "更新日志",
+    index: "07",
+    description: "产品变更与优化",
+  },
+  {
     id: "profile",
     label: "个人设置",
-    index: "07",
+    index: "08",
     description: "头像与密码",
   },
   {
     id: "admin",
     label: "系统设置",
-    index: "08",
+    index: "09",
     description: "用户、标签与模型",
   },
 ];
@@ -89,6 +96,7 @@ export function canAccessWorkspaceView(
   if (view === "tasks") return has("tasks.view");
   if (view === "records") return has("work_records.view");
   if (view === "reports") return has("weekly_reports.view");
+  if (view === "changelog") return true;
   return (
     ["system_admin", "super_admin"].includes(context.user.role) ||
     settingsPermissions.some(has)

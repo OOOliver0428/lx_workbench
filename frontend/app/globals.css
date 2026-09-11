@@ -7413,3 +7413,119 @@ a {
     padding: 20px;
   }
 }
+
+/* ===== 更新日志 Changelog ===== */
+.changelog-loading {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 24px 0;
+}
+
+.changelog-timeline {
+  display: grid;
+  gap: 36px;
+}
+
+.changelog-day h2 {
+  border-bottom: 1px solid var(--line);
+  font-size: 22px;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+  padding-bottom: 12px;
+}
+
+.changelog-day-entries {
+  display: grid;
+  gap: 0;
+}
+
+.changelog-entry {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 110px 1fr;
+  padding: 18px 0;
+}
+
+.changelog-entry + .changelog-entry {
+  border-top: 1px solid var(--line);
+}
+
+.changelog-entry-meta {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.changelog-entry-meta > strong {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.changelog-tag {
+  align-items: center;
+  color: var(--forest-deep, #0f766e);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.changelog-tag i {
+  background: currentColor;
+  border-radius: 999px;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+.changelog-tag.tag-feature {
+  color: #1d4ed8;
+}
+
+.changelog-tag.tag-improvement {
+  color: #0f766e;
+}
+
+.changelog-tag.tag-fix {
+  color: #b45309;
+}
+
+.changelog-tag.tag-removal {
+  color: #b91c1c;
+}
+
+.changelog-entry-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.changelog-entry-body {
+  border-left: 1px solid var(--line-strong);
+  padding-left: 18px;
+}
+
+.changelog-entry-body h3 {
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+
+.changelog-entry-body p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.75;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .changelog-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .changelog-entry-body {
+    border-left: none;
+    padding-left: 0;
+  }
+}

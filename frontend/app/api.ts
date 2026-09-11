@@ -33,6 +33,7 @@ import type {
   WorkRecordQuickCreateResult,
   UserPermissions,
   TimeBlock,
+  ChangelogEntry,
 } from "./types";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
@@ -597,6 +598,23 @@ export const api = {
       }>("/api/v1/ai/chat/history"),
     clearHistory: () =>
       request<{ cleared: number }>("/api/v1/ai/chat/history", {
+        method: "DELETE",
+      }),
+  },
+  changelog: {
+    list: () => request<ChangelogEntry[]>("/api/v1/changelog"),
+    create: (payload: Record<string, unknown>) =>
+      request<ChangelogEntry>("/api/v1/changelog", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (id: string, payload: Record<string, unknown>) =>
+      request<ChangelogEntry>(`/api/v1/changelog/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    remove: (id: string, revision: number) =>
+      request<void>(`/api/v1/changelog/${id}?revision=${revision}`, {
         method: "DELETE",
       }),
   },

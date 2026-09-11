@@ -392,6 +392,27 @@ export interface CurrentWeeklyReport {
   report: WeeklyReport | null;
 }
 
+export type ChangelogCategory =
+  | "feature"
+  | "improvement"
+  | "fix"
+  | "removal";
+
+export interface ChangelogEntry {
+  id: string;
+  occurred_at: string;
+  category: ChangelogCategory;
+  title: string;
+  body: string;
+  created_by: string;
+  created_by_name: string;
+  updated_by: string;
+  updated_by_name: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AIProviderAccessMode {
   id: string;
   name: string;
