@@ -109,8 +109,14 @@ def update_project(
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db, scope="function"),
 ) -> ProjectOut:
-    permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_EDIT)
     project = project_service.get_project(db, project_id)
+    # 项目改名：有编辑权限者，或项目负责人（负责人无 edit 时仅允许改名）。
+    fields = payload.model_fields_set - {"revision"}
+    name_only = fields == {"name"} or fields <= {"name"}
+    if actor.id == project.owner_id and name_only:
+        pass
+    else:
+        permission_service.assert_permission(db, actor, PermissionKey.PROJECTS_EDIT)
     return project_detail(db, project_service.update_project(db, project, payload, actor))
 
 

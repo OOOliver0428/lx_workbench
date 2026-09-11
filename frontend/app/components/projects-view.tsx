@@ -281,6 +281,9 @@ export function ProjectsView({
           tags={tags}
           users={users}
           canManage={canManageProjectObject(canEdit, currentUser, selected)}
+          canRename={
+            canEdit || selected.owner_id === currentUser.id
+          }
           canMerge={
             canManageProjectObject(canEdit, currentUser, selected) &&
             ["team_leader", "system_admin", "super_admin"].includes(
@@ -533,6 +536,7 @@ function ProjectDetailDrawer({
   tags,
   users,
   canManage,
+  canRename,
   canMerge,
   onClose,
   onChanged,
@@ -543,6 +547,7 @@ function ProjectDetailDrawer({
   tags: ProjectTag[];
   users: UserCandidate[];
   canManage: boolean;
+  canRename: boolean;
   canMerge: boolean;
   onClose: () => void;
   onChanged: () => Promise<void>;
@@ -550,6 +555,8 @@ function ProjectDetailDrawer({
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(project.name);
   const currentMembers = project.members.filter((member) => !member.left_at);
   const unusedUsers = users.filter(
     (user) => !currentMembers.some((member) => member.user_id === user.id),
@@ -571,6 +578,21 @@ function ProjectDetailDrawer({
     }
   }
 
+  async function submitRename() {
+    const nextName = renameValue.trim();
+    if (!nextName || nextName === project.name) {
+      setRenaming(false);
+      return;
+    }
+    await mutate(async () => {
+      await api.projects.update(project.id, {
+        revision: project.revision,
+        name: nextName,
+      });
+      setRenaming(false);
+    });
+  }
+
   return (
     <div className="drawer-backdrop" onMouseDown={onClose}>
       <aside
@@ -580,7 +602,61 @@ function ProjectDetailDrawer({
         <header className="detail-header">
           <div>
             <p className="eyebrow">{project.code}</p>
-            <h2>{project.name}</h2>
+            {renaming ? (
+              <div className="project-rename-row">
+                <input
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  maxLength={200}
+                  autoFocus
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void submitRename();
+                    }
+                    if (event.key === "Escape") {
+                      setRenaming(false);
+                      setRenameValue(project.name);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busy || !renameValue.trim()}
+                  onClick={() => void submitRename()}
+                >
+                  保存
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => {
+                    setRenaming(false);
+                    setRenameValue(project.name);
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <div className="project-title-row">
+                <h2>{project.name}</h2>
+                {canRename ? (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      setRenameValue(project.name);
+                      setRenaming(true);
+                    }}
+                  >
+                    重命名
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
           <button className="icon-button" onClick={onClose} aria-label="关闭">
             <Close size={14} />
