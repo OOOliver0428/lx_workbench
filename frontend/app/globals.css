@@ -7545,7 +7545,6 @@ a {
     border-left: none;
     padding-left: 0;
   }
-}
 
 .war-scope-panel {
   margin-bottom: 14px;
@@ -7618,4 +7617,51 @@ a {
 .war-dept-group > header span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.department-members-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.department-members-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.department-members-list {
+  display: grid;
+  gap: 10px;
+}
+
+.department-members-list article {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto 1fr auto auto auto;
+  padding: 12px 14px;
+}
+
+.department-members-list h3 {
+  font-size: 14px;
+  margin: 0 0 2px;
+}
+
+.department-members-list p {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.tag-muted {
+  opacity: 0.65;
+}
+
+@media (max-width: 720px) {
+  .department-members-list article {
+    grid-template-columns: auto 1fr;
+  }
 }

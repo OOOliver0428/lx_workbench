@@ -65,12 +65,16 @@ export function AdminView({ context }: { context: AuthContext }) {
     null,
   );
   const [permissionUser, setPermissionUser] = useState<User | null>(null);
+  const [departmentMembersView, setDepartmentMembersView] =
+    useState<Department | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
       const [userRows, tagRows, auditRows] = await Promise.all([
-        showUsers ? api.users.list(true) : Promise.resolve([]),
+        showUsers || canViewDepartments
+          ? api.users.list(true)
+          : Promise.resolve([]),
         canManageTags ? api.tags.list(true) : Promise.resolve([]),
         canViewAudit ? api.audit.list() : Promise.resolve([]),
       ]);
@@ -82,7 +86,7 @@ export function AdminView({ context }: { context: AuthContext }) {
         caught instanceof ApiClientError ? caught.message : "基础数据加载失败",
       );
     }
-  }, [canManageTags, canViewAudit, showUsers]);
+  }, [canManageTags, canViewAudit, showUsers, canViewDepartments]);
 
   const loadDepartments = useCallback(async () => {
     if (!canViewDepartments) return;
@@ -352,6 +356,13 @@ export function AdminView({ context }: { context: AuthContext }) {
                     {department.is_active ? "启用" : "已停用"}
                   </span>
                   <div className="user-card-actions">
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setDepartmentMembersView(department)}
+                    >
+                      查看成员
+                    </button>
                     {canManageDepartments ? (
                       <>
                         <button
@@ -462,6 +473,13 @@ export function AdminView({ context }: { context: AuthContext }) {
             setCreateDepartmentOpen(false);
             await loadDepartments();
           }}
+        />
+      ) : null}
+      {departmentMembersView ? (
+        <DepartmentMembersModal
+          department={departmentMembersView}
+          users={users}
+          onClose={() => setDepartmentMembersView(null)}
         />
       ) : null}
       {createTagOpen && canManageTags ? (
@@ -1266,6 +1284,74 @@ function TagEditModal({
           </button>
         </footer>
       </form>
+    </Modal>
+  );
+}
+
+function DepartmentMembersModal({
+  department,
+  users,
+  onClose,
+}: {
+  department: Department;
+  users: User[];
+  onClose: () => void;
+}) {
+  const members = users
+    .filter((user) => user.primary_department_id === department.id)
+    .sort((a, b) => a.display_name.localeCompare(b.display_name, "zh-CN"));
+  const activeCount = members.filter((user) => user.is_active).length;
+
+  return (
+    <Modal
+      title={`部门成员 · ${department.name}`}
+      eyebrow="DEPARTMENT MEMBERS"
+      onClose={onClose}
+      wide
+    >
+      <div className="department-members-panel">
+        <p className="department-members-meta">
+          主部门归属成员 <strong>{members.length}</strong> 人，其中在用{" "}
+          <strong>{activeCount}</strong> 人（含已停用账号）。
+        </p>
+        {members.length ? (
+          <div className="department-members-list">
+            {members.map((user) => (
+              <article key={user.id}>
+                <AvatarImage
+                  avatarKey={user.avatar_key}
+                  displayName={user.display_name}
+                  className="avatar-large"
+                  decorative
+                />
+                <div>
+                  <h3>{user.display_name}</h3>
+                  <p>@{user.login_name}</p>
+                </div>
+                <span className={`role-pill role-${user.role}`}>
+                  {roleLabel(user.role)}
+                </span>
+                <small>
+                  {user.leader_id
+                    ? `直属：${
+                        users.find((item) => item.id === user.leader_id)
+                          ?.display_name ?? "未知"
+                      }`
+                    : "直属：未指定"}
+                </small>
+                <span className={`tag${user.is_active ? "" : " tag-muted"}`}>
+                  {user.is_active ? "在用" : "已停用"}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="暂无成员"
+            description="尚未有用户的主部门归属到本部门。"
+          />
+        )}
+      </div>
     </Modal>
   );
 }
