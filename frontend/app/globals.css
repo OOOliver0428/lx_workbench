@@ -7548,53 +7548,182 @@ a {
 }
 
 .war-scope-panel {
-  margin-bottom: 14px;
+  padding: 20px;
+  background: linear-gradient(135deg, #fff 50%, #f5f9ff);
 }
 
-.war-scope-panel header {
-  align-items: baseline;
+.war-scope-heading {
+  align-items: center;
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 14px;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 18px;
 }
 
-.war-scope-panel header h3 {
+.war-scope-title {
+  align-items: center;
+  display: flex;
+  gap: 11px;
+}
+
+.war-scope-heading-icon {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid #dceafe;
+  border-radius: 11px;
+  color: var(--accent);
+  display: flex;
+  flex-shrink: 0;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.war-scope-title h3 {
   margin: 0;
 }
 
-.war-scope-panel header span {
+.war-scope-title p {
   color: var(--muted);
   font-size: 11px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+
+.war-scope-current-count {
+  align-items: baseline;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 6px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.war-scope-current-count b {
+  color: var(--accent-strong);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
 }
 
 .war-scope-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(165px, 100%), 1fr));
 }
 
-.war-scope-options button {
-  align-items: center;
-  background: var(--paper, #fff);
-  border: 1px solid var(--line, #d9e2ec);
-  border-radius: 999px;
-  color: var(--ink, #1b2430);
+.war-scope-option {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
   cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  gap: 8px;
-  padding: 7px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px 14px;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
 
-.war-scope-options button.active {
-  background: var(--forest-deep, #0f766e);
-  border-color: var(--forest-deep, #0f766e);
+.war-scope-option:hover {
+  background: #f8fbff;
+  border-color: #a6c9f7;
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.06);
+}
+
+.war-scope-option.active {
+  background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.12);
+}
+
+.war-scope-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.war-scope-option-top,
+.war-scope-option-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.war-scope-kind {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.war-scope-check {
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  display: flex;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.war-scope-option.active .war-scope-check {
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
-.war-scope-options button small {
-  opacity: 0.75;
+.war-scope-option-name {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.war-scope-option-footer {
+  margin-top: auto;
+}
+
+.war-scope-option-footer b {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.war-scope-option-footer small,
+.war-scope-selection {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.war-scope-option.active .war-scope-option-name,
+.war-scope-option.active .war-scope-selection {
+  color: var(--accent-strong);
+}
+
+@media (max-width: 600px) {
+  .war-scope-panel {
+    padding: 16px;
+  }
+
+  .war-scope-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .war-scope-option {
+    padding: 12px;
+  }
+
+  .war-scope-selection {
+    display: none;
+  }
 }
 
 .war-dept-groups {
