@@ -2404,6 +2404,23 @@ a {
   font-size: 10px;
 }
 
+.record-hours-block {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+
+.record-time-range {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .record-card > p {
   font-size: 11px;
   line-height: 1.7;
