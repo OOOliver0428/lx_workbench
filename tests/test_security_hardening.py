@@ -63,7 +63,7 @@ def test_wrong_passwords_do_not_lock_out_the_correct_password(api: dict) -> None
     assert recovered.status_code == 200, recovered.text
 
 
-def test_unknown_and_inactive_users_use_dummy_password_verification(
+def test_unknown_uses_dummy_and_inactive_uses_real_password_verification(
     api: dict,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -99,7 +99,10 @@ def test_unknown_and_inactive_users_use_dummy_password_verification(
 
     assert unknown.status_code == 401
     assert inactive.status_code == 401
-    assert calls == [None, None]
+    assert len(calls) == 2
+    assert calls[0] is None
+    assert calls[1] is not None
+    assert unknown.json()["code"] == inactive.json()["code"] == "INVALID_CREDENTIALS"
 
 
 def test_failed_login_audit_survives_request_rollback(api: dict) -> None:

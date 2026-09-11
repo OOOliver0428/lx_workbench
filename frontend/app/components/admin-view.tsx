@@ -8,6 +8,7 @@ import type {
   AuditEvent,
   AuthContext,
   Department,
+  DepartmentPerson,
   PermissionDefinition,
   PermissionKey,
   ProjectTag,
@@ -37,6 +38,7 @@ export function AdminView({ context }: { context: AuthContext }) {
   const showUsers = canManagePermissions || canManageUsers;
   const [users, setUsers] = useState<User[]>([]);
   const [tags, setTags] = useState<ProjectTag[]>([]);
+  const [departmentPeople, setDepartmentPeople] = useState<DepartmentPerson[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentCandidates, setDepartmentCandidates] = useState<
     UserCandidate[]
@@ -72,7 +74,7 @@ export function AdminView({ context }: { context: AuthContext }) {
   const load = useCallback(async () => {
     try {
       const [userRows, tagRows, auditRows] = await Promise.all([
-        showUsers || canViewDepartments
+        showUsers
           ? api.users.list(true)
           : Promise.resolve([]),
         canManageTags ? api.tags.list(true) : Promise.resolve([]),
@@ -86,7 +88,7 @@ export function AdminView({ context }: { context: AuthContext }) {
         caught instanceof ApiClientError ? caught.message : "基础数据加载失败",
       );
     }
-  }, [canManageTags, canViewAudit, showUsers, canViewDepartments]);
+  }, [canManageTags, canViewAudit, showUsers]);
 
   const loadDepartments = useCallback(async () => {
     if (!canViewDepartments) return;
@@ -94,10 +96,11 @@ export function AdminView({ context }: { context: AuthContext }) {
     try {
       const [departmentRows, candidateRows] = await Promise.all([
         api.departments.list(showInactiveDepartments),
-        api.users.candidates(),
+        api.departments.personnel(),
       ]);
       setDepartments(departmentRows);
-      setDepartmentCandidates(candidateRows);
+      setDepartmentPeople(candidateRows);
+      setDepartmentCandidates(candidateRows.filter((user) => user.is_active));
     } catch (caught) {
       setError(
         caught instanceof ApiClientError ? caught.message : "部门数据加载失败",
@@ -478,7 +481,7 @@ export function AdminView({ context }: { context: AuthContext }) {
       {departmentMembersView ? (
         <DepartmentMembersModal
           department={departmentMembersView}
-          users={users}
+          users={departmentPeople}
           onClose={() => setDepartmentMembersView(null)}
         />
       ) : null}
@@ -1411,7 +1414,7 @@ function DepartmentMembersModal({
   onClose,
 }: {
   department: Department;
-  users: User[];
+  users: DepartmentPerson[];
   onClose: () => void;
 }) {
   const members = users

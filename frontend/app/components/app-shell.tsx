@@ -76,6 +76,8 @@ const dashboardPermissions: PermissionKey[] = [
 ];
 
 const settingsPermissions: PermissionKey[] = [
+  "departments.view",
+  "departments.manage",
   "settings.users.manage",
   "settings.tags.manage",
   "settings.ai.manage",

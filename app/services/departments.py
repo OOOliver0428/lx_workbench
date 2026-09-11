@@ -335,23 +335,3 @@ def is_department_member(
         return False
     department_id = department.id if isinstance(department, Department) else department
     return department_id in visible_department_ids(db, user)
-
-
-def can_manage_department(actor: User) -> bool:
-    """Entity-level guard used in addition to the DEPARTMENTS_MANAGE permission."""
-
-    return actor.role in {
-        UserRole.SYSTEM_ADMIN.value,
-        UserRole.SUPER_ADMIN.value,
-    }
-
-
-def require_manage_department(actor: User) -> None:
-    if not can_manage_department(actor):
-        # A custom permission can be assigned only to supported administrators,
-        # but retain this service-layer boundary for non-HTTP callers.
-        raise AppError(
-            "DEPARTMENT_MANAGEMENT_FORBIDDEN",
-            "只有系统管理员可以维护部门主数据",
-            status_code=403,
-        )

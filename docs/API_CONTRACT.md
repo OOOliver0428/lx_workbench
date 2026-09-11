@@ -136,8 +136,10 @@ API 地址或直接读取 CSRF。
 
 ## 部门与部门工作
 
+- `GET /api/v1/departments/personnel` 需要 `departments.view`，返回部门成员展示及负责人选择需要的只读人员字段（包括冻结状态），不返回账号管理版本、改密状态或隐藏账号。
+- 权限配置中的“部门”分组包含 `departments.view`（查看部门人员信息）和 `departments.manage`（其余部门管理操作），系统管理员可向团队成员、团队负责人授予两级权限。
 - `GET /api/v1/departments` 需要 `departments.view`，支持 `include_inactive` 与 `q` 名称模糊搜索。
-- 部门创建、修改、停用和删除需要 `departments.manage`，且仅系统管理员及以上可管理。部门名
+- 部门创建、修改、停用和删除需要 `departments.manage`，按显式授权生效，不额外限制账号角色；该权限包含查看权限。部门名
   规范化后全局唯一；创建或更换负责人时，负责人必须是有效且可用的用户（同一用户可担任多个
   部门的 `leader_id`，不必先把主部门改到目标部门）。创建部门时若该用户尚无主部门，可顺带
   写入；已有主部门时不会仅为任命而改写。`departments.leader_id` 不加 unique(user)。仍有
@@ -260,3 +262,7 @@ API 地址或直接读取 CSRF。
 - `TeamWeeklySummaryOut.expected_count_known=false` 表示历史应提交人数未知；生成请求需显式 force=true，默认返回 409 `HISTORICAL_ROSTER_UNKNOWN`。
 - 旧版汇总的 `scope_type/scope_key=legacy`，仅作为历史记录展示；dashboard 的 latest_team_summary 不跨范围回退。
 - 历史部门和每周名单规则见 [周报历史归属规则](WEEKLY_HISTORY.md)。
+
+### 冻结账号登录
+
+`POST /api/v1/auth/login` 对冻结账号验证密码；密码正确返回 HTTP 401、错误码 `ACCOUNT_FROZEN`，提示“该账号已冻结，请联系系统管理员”，不创建会话。密码错误或账号不存在仍返回 `INVALID_CREDENTIALS`；限流及失败审计继续生效。

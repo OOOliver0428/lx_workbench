@@ -48,7 +48,7 @@ def login(
             )
             can_authenticate = bool(user and user.is_active)
             password_matches = verify_password_for_login(
-                user.password_hash if can_authenticate and user else None,
+                user.password_hash if user else None,
                 payload.password,
             )
     except LoginCapacityExceeded as error:
@@ -82,6 +82,12 @@ def login(
                     settings.login_failure_audit_retention_days
                 ),
                 login_failure_max_rows=settings.login_failure_audit_max_rows,
+            )
+        if user and not user.is_active and password_matches:
+            raise AppError(
+                "ACCOUNT_FROZEN",
+                "该账号已冻结，请联系系统管理员",
+                status_code=401,
             )
         raise AppError(
             "INVALID_CREDENTIALS",

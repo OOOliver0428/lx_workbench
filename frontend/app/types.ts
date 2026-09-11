@@ -45,6 +45,8 @@ export interface User {
   revision: number;
 }
 
+export type DepartmentPerson = Omit<User, "must_change_password" | "revision">;
+
 export interface Department {
   id: string;
   name: string;

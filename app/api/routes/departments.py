@@ -1,9 +1,16 @@
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
-from app.models import PermissionKey, User
-from app.schemas import DepartmentCreate, DepartmentOut, DepartmentUpdate, RevisionAction
+from app.models import PermissionKey, User, UserRole
+from app.schemas import (
+    DepartmentCreate,
+    DepartmentOut,
+    DepartmentPersonOut,
+    DepartmentUpdate,
+    RevisionAction,
+)
 from app.services import departments as department_service
 from app.services import permissions as permission_service
 
@@ -35,8 +42,19 @@ def create_department(
     db: Session = Depends(get_db, scope="function"),
 ) -> DepartmentOut:
     permission_service.assert_permission(db, actor, PermissionKey.DEPARTMENTS_MANAGE)
-    department_service.require_manage_department(actor)
     return DepartmentOut.model_validate(department_service.create_department(db, payload, actor))
+
+
+@router.get("/personnel", response_model=list[DepartmentPersonOut])
+def list_department_personnel(
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+) -> list[DepartmentPersonOut]:
+    permission_service.assert_permission(db, actor, PermissionKey.DEPARTMENTS_VIEW)
+    users = db.scalars(
+        select(User).where(User.role != UserRole.SUPER_ADMIN.value).order_by(User.display_name)
+    ).all()
+    return [DepartmentPersonOut.model_validate(user) for user in users]
 
 
 @router.get("/{department_id}", response_model=DepartmentOut)
@@ -57,7 +75,6 @@ def update_department(
     db: Session = Depends(get_db, scope="function"),
 ) -> DepartmentOut:
     permission_service.assert_permission(db, actor, PermissionKey.DEPARTMENTS_MANAGE)
-    department_service.require_manage_department(actor)
     department = department_service.get_department(db, department_id)
     return DepartmentOut.model_validate(
         department_service.update_department(db, department, payload, actor)
@@ -72,7 +89,6 @@ def delete_department(
     db: Session = Depends(get_db, scope="function"),
 ) -> None:
     permission_service.assert_permission(db, actor, PermissionKey.DEPARTMENTS_MANAGE)
-    department_service.require_manage_department(actor)
     department_service.delete_department(
         db,
         department_service.get_department(db, department_id),

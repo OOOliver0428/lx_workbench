@@ -83,6 +83,19 @@ class UserCandidateOut(ORMModel):
     primary_department_id: str | None
 
 
+class DepartmentPersonOut(UserCandidateOut):
+    """Read-only organization information, without account-management metadata."""
+
+    login_name: str
+    role: str
+    leader_id: str | None
+    is_active: bool
+
+    @field_serializer("display_name")
+    def display_name_for_output(self, value: str) -> str:
+        return public_admin_copy(value)
+
+
 class AuthContextOut(BaseModel):
     user: UserOut
     permissions: list[str]

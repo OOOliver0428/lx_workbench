@@ -9,6 +9,7 @@ import type {
   AuthContext,
   AvatarOption,
   Department,
+  DepartmentPerson,
   DepartmentWork,
   DepartmentWorkStatus,
   DepartmentWorkVisibility,
@@ -215,6 +216,7 @@ export const api = {
       }),
   },
   departments: {
+    personnel: () => request<DepartmentPerson[]>("/api/v1/departments/personnel"),
     list: (includeInactive = false, query?: string) => {
       const params = new URLSearchParams();
       if (includeInactive) params.set("include_inactive", "true");
