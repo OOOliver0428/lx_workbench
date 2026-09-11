@@ -970,7 +970,7 @@ def build_dashboard(
     )
     scope_users = _scope_users(db, actor) if resolved.is_org_wide else list(resolved.members)
     member_ids = {user.id for user in scope_users}
-    # 工作贡献统计：管理范围内成员；超管全量；普通成员仅自己。
+    # 工作贡献统计：管理范围内成员；维护账号全量；普通成员仅自己。
     if is_super_admin(actor):
         visible_author_ids = {user.id for user in _business_users(db)} | {actor.id}
     elif not resolved.is_org_wide and actor.role in {

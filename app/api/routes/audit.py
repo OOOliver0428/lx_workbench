@@ -24,7 +24,7 @@ def list_audit_events(
     query = select(AuditEvent)
     if not is_super_admin(actor):
         if entity_type == "work_record":
-            raise PermissionDeniedError("仅超级管理员可以查看工作记录审计详情")
+            raise PermissionDeniedError("当前账号无权查看工作记录审计详情")
         super_admin_ids = select(User.id).where(
             User.role == UserRole.SUPER_ADMIN.value
         )

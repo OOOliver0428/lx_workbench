@@ -285,11 +285,11 @@ def create_user(
 ) -> UserOut:
     permission_service.assert_permission(db, actor, PermissionKey.USERS_MANAGE)
     if payload.role == UserRole.SUPER_ADMIN:
-        raise AppError("SUPER_ADMIN_API_FORBIDDEN", "超级管理员只能通过服务器命令创建")
+        raise AppError("SUPER_ADMIN_API_FORBIDDEN", "该账号类型不支持通过此入口创建")
     if payload.role == UserRole.SYSTEM_ADMIN and not is_super_admin(actor):
         raise AppError(
             "SYSTEM_ADMIN_ROLE_FORBIDDEN",
-            "只有超级管理员可以创建系统管理员",
+            "当前账号无权创建系统管理员",
             status_code=403,
         )
     _assert_display_name_available(db, payload.display_name)
@@ -407,7 +407,7 @@ def update_user(
             if user.role == UserRole.SYSTEM_ADMIN.value and not is_super_admin(actor):
                 raise AppError(
                     "SYSTEM_ADMIN_FREEZE_FORBIDDEN",
-                    "只有超级管理员可以冻结系统管理员账号",
+                    "当前账号无权冻结该账号",
                     status_code=403,
                 )
             if not payload.is_active and db.scalar(
@@ -422,14 +422,14 @@ def update_user(
         if payload.role == UserRole.SUPER_ADMIN:
             raise AppError(
                 "SUPER_ADMIN_API_FORBIDDEN",
-                "超级管理员角色只能通过服务器命令管理",
+                "该账号类型不支持通过此入口管理",
             )
         if (
             payload.role == UserRole.SYSTEM_ADMIN or user.role == UserRole.SYSTEM_ADMIN.value
         ) and not is_super_admin(actor):
             raise AppError(
                 "SYSTEM_ADMIN_ROLE_FORBIDDEN",
-                "只有超级管理员可以调整系统管理员角色",
+                "当前账号无权调整系统管理员角色",
                 status_code=403,
             )
         if actor.id == user.id and payload.role.value != user.role:

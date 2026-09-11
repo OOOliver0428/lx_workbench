@@ -448,7 +448,7 @@ export function AIConfigPanel() {
         <div className="config-security-note">
           <strong>安全边界</strong>
           <p>
-            仅系统管理员和超级管理员可读取配置摘要、执行测试或保存。API Key
+            拥有配置权限的账号可读取配置摘要、执行测试或保存。API Key
             不会返回前端，也不会写入审计详情。
           </p>
         </div>

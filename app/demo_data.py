@@ -130,7 +130,7 @@ def _seed_users(
     definitions = {
         "root": (
             "demo_root",
-            "演示·超级管理员",
+            "演示·系统维护",
             UserRole.SUPER_ADMIN.value,
             None,
             "paper-01",

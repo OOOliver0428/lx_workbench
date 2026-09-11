@@ -44,19 +44,19 @@ API 地址或直接读取 CSRF。
 
 - 权限按用户显式保存。新账号默认拥有 `projects.view`、`tasks.view`、工作记录查看/维护、
   个人周报查看/维护和 `ai.use`；个人设置无需额外权限。其他业务及系统权限需另行授权。
-- 超级管理员的有效权限始终是权限目录全集，不依赖数据库授权记录。
-- 超级管理员对其他所有用户永久不可见：不出现在 `GET /api/v1/users`、直属负责人候选、
-  项目成员、任务协作者、周报收件范围和权限配置目标中。即使调用者也是超级管理员，
-  用户目录仍不返回超级管理员账号。
-- 超级管理员可读取 `GET /api/v1/users/permissions/catalog`，并通过
-  `GET/PUT /api/v1/users/{user_id}/permissions` 配置任一非超级管理员账号。
+- 系统维护账号的有效权限始终是权限目录全集，不依赖数据库授权记录。
+- 系统维护账号对其他所有用户永久不可见：不出现在 `GET /api/v1/users`、直属负责人候选、
+  项目成员、任务协作者、周报收件范围和权限配置目标中。即使调用者也是系统维护账号，
+  用户目录仍不返回系统维护账号账号。
+- 系统维护账号可读取 `GET /api/v1/users/permissions/catalog`，并通过
+  `GET/PUT /api/v1/users/{user_id}/permissions` 配置任一非系统维护账号账号。
 - `GET /api/v1/users` 仅供具备用户管理权限的账号读取完整账号信息；项目和任务负责人选择器
   使用 `GET /api/v1/users/candidates`，该接口只返回有效普通账号的 ID、显示名称与头像，
   不返回登录名、角色、直属 Leader、启停状态、首次改密状态或 revision。
 - 系统管理员具备下级权限配置入口，但只能读取和修改 `member`、`team_leader` 的业务权限；
   `settings.users.manage`、`settings.tags.manage`、`settings.ai.manage`、
-  `settings.audit.view` 等系统级权限只能由超级管理员授予。系统管理员不能把角色提升为
-  系统管理员，也不能配置系统管理员或超级管理员。
+  `settings.audit.view` 等系统级权限只能由系统维护账号授予。系统管理员不能把角色提升为
+  系统管理员，也不能配置系统管理员或系统维护账号。
 - 权限更新是全量替换，并携带目标用户当前 `revision` 做乐观锁校验；变更写入审计日志。
 - 权限按层级展开：商机为 `dashboard.opportunity.view` →
   `dashboard.opportunity.progress` → `dashboard.opportunity.create`，项目和任务分别为
@@ -68,13 +68,13 @@ API 地址或直接读取 CSRF。
 
 ## 账号与个人设置
 
-- `POST /api/v1/users`、用户资料和直属负责人写接口要求 `settings.users.manage`。超级管理员
-  始终具备该权限；系统管理员只有在超级管理员显式授予后才能使用，且只能管理团队负责人和
+- `POST /api/v1/users`、用户资料和直属负责人写接口要求 `settings.users.manage`。系统维护账号
+  始终具备该权限；系统管理员只有在系统维护账号显式授予后才能使用，且只能管理团队负责人和
   团队成员。请求只接受 `display_name`、`role` 和 `password`，登录名由后端生成，直属
   Leader 在创建后另行配置。
 - 显示名称在全系统内唯一（去除首尾空格并忽略大小写），且不能与其他账号的登录名冲突。
   创建或编辑用户发生冲突时返回 `409 DISPLAY_NAME_ALREADY_EXISTS`。唯一性检查包含对普通
-  用户不可见的超级管理员账号，但错误响应不会暴露冲突账号的信息。
+  用户不可见的系统维护账号账号，但错误响应不会暴露冲突账号的信息。
 - 所有已完成首次密码修改的用户都可读取 `GET /api/v1/profile/avatars` 并调用
   `PATCH /api/v1/profile/avatar` 修改自己的头像。
 - 头像接口只接受服务端白名单中的固定 `avatar_key` 或 `null`，不接受上传、文件路径或外部 URL；
@@ -109,12 +109,12 @@ API 地址或直接读取 CSRF。
 - 调用工作记录接口首先需要 `work_records.view` 或 `work_records.manage`；拥有菜单可见性
   并不会绕过后端权限校验。
 - 团队成员、团队负责人和系统管理员仍只能查看、修改或删除自己的原始工作记录。
-- 只有永久隐藏的超级管理员可以跨用户查看工作记录；代编辑和代删除仍必须填写原因并进入审计日志。
-- 非超级管理员不可通过工作记录审计事件读取他人的正文快照。
-- 作战台中的工作条目、工时与由工作记录产生的交付物遵循同一边界：非超级管理员只聚合
-  本人的记录，超级管理员可聚合全部记录。项目公开进展事实不受此限制。
+- 只有永久隐藏的系统维护账号可以跨用户查看工作记录；代编辑和代删除仍必须填写原因并进入审计日志。
+- 非系统维护账号不可通过工作记录审计事件读取他人的正文快照。
+- 作战台中的工作条目、工时与由工作记录产生的交付物遵循同一边界：非系统维护账号只聚合
+  本人的记录，系统维护账号可聚合全部记录。项目公开进展事实不受此限制。
 - 工作记录响应同时返回 `author_id`、`author_display_name`、`author_avatar_key`、
-  `last_edited_by`、`last_editor_display_name` 和 `last_editor_avatar_key`。超级管理员查看
+  `last_edited_by`、`last_editor_display_name` 和 `last_editor_avatar_key`。系统维护账号查看
   多人记录时，前端必须显示记录人与其头像；发生代编辑时还必须显示最后代编辑人。
 - `GET /api/v1/work-records?current_week_only=true` 只返回当前上海自然周（周一至周日）的记录，
   可与项目和待归集筛选组合使用。
@@ -149,7 +149,7 @@ API 地址或直接读取 CSRF。
   主部门与所负责部门事项，管理员可见全部；支持 `department_id`/`owner_id`/`status`/
   `visibility`/`q`/`include_archived` 过滤。
 - 创建部门工作需要 `department_works.create`；编辑、流转和删除需要 `department_works.edit`
-  且仅本人主部门成员、所负责部门的负责人或超级管理员可执行。部门工作/任务的 owner 也须落在
+  且仅本人主部门成员、所负责部门的负责人或系统维护账号可执行。部门工作/任务的 owner 也须落在
   该范围内。状态机为 `in_progress ↔ completed → archived`；仍有未完成任务时归档返回
   `DEPARTMENT_WORK_ACTIVE_TASKS`；归档后为只读。
 
@@ -179,7 +179,7 @@ API 地址或直接读取 CSRF。
 - `dashboard.opportunity.view`、`dashboard.work.view` 和 `dashboard.overview.view` 分别控制
   “商机追踪”“工作管理”“周期总览”；商机录入和新建使用各自的递增权限。没有任何作战台
   视图权限时，聚合接口返回 403。
-- 原始工作记录始终只对本人和超级管理员可见。个人周报是否提交、直属负责人关系和作战台
+- 原始工作记录始终只对本人和系统维护账号可见。个人周报是否提交、直属负责人关系和作战台
   视图权限都不会扩大原始记录、正文或工时的可见范围。
 - `POST /api/v1/opportunities` 要求 `dashboard.opportunity.create`；`POST /api/v1/opportunities/{opportunity_id}/progress` 要求 `dashboard.opportunity.progress`，追加指定周的商业阶段、关注状态、进度和摘要事实，不覆盖历史，并要求提交商机最新 `revision`。
 - 商机达到 `solution_exchange`（方案交流）或后续阶段后，`POST /api/v1/opportunities/{opportunity_id}/convert-to-project` 在同一事务中创建项目、复制商机成员并建立一对一关联；重复转换、陈旧版本或项目创建失败均不会留下半成品关联。
@@ -192,8 +192,8 @@ API 地址或直接读取 CSRF。
 ## AI 边界
 
 - 浏览器通过 `/api/v1/ai/providers` 和 `/api/v1/ai/configuration` 读取服务商预设与脱敏配置摘要。
-- `/api/v1/ai/configuration/test` 和配置写接口要求 `settings.ai.manage`；超级管理员始终具备，
-  其他账号必须由超级管理员显式授权。
+- `/api/v1/ai/configuration/test` 和配置写接口要求 `settings.ai.manage`；系统维护账号始终具备，
+  其他账号必须由系统维护账号显式授权。
 - 只有携带有效验证令牌的 `PUT /api/v1/ai/configuration` 才能保存配置；更换服务商、接入方式、模型或 API Key 后必须重新测试。
 - MiniMax `token_plan` 使用 Anthropic 兼容协议和 `sk-cp-` Key；`pay_as_you_go` 使用 OpenAI 兼容协议和普通 API Key，两类密钥在发起外部请求前强制校验、不可混用。
 - API Key 由后端加密后存入数据库，响应只返回末尾提示，不会进入前端持久化存储、日志或审计详情。
@@ -212,13 +212,13 @@ API 地址或直接读取 CSRF。
 ## 直属 Leader
 
 - `users.leader_id` 是独立的组织属性，不等同于项目负责人或系统角色。
-- 直属 Leader 候选人必须是有效的 `team_leader` 或 `system_admin` 账号，禁止自指派和形成管理环；隐藏超级管理员不作为候选人。
+- 直属 Leader 候选人必须是有效的 `team_leader` 或 `system_admin` 账号，禁止自指派和形成管理环；隐藏系统维护账号不作为候选人。
 - 具备 `settings.users.manage` 的账号可调用 `PATCH /api/v1/users/{user_id}/leader` 修改权限
   范围内用户的直属 Leader；修改必须携带用户当前 `revision` 并写入审计日志。
 - 具备 `settings.users.manage` 的账号可通过 `PATCH /api/v1/users/{user_id}` 修改权限范围内用户
-  的显示名称、角色和直属 Leader。只有超级管理员能创建系统管理员或将角色提升、降级为
+  的显示名称、角色和直属 Leader。只有系统维护账号能创建系统管理员或将角色提升、降级为
   系统管理员；仍有直属成员的团队负责人必须先转移成员，之后才能降级。
-- 隐藏超级管理员不出现在用户目录中，也不能通过该接口成为操作目标。
+- 隐藏系统维护账号不出现在用户目录中，也不能通过该接口成为操作目标。
 - 冻结/解冻通过用户更新接口提交 `is_active`、`revision` 和 `current_password`；密码必须属于
   当前登录操作者。缺失或错误返回 `400 INVALID_CURRENT_PASSWORD`，验证限流返回
   `429 PASSWORD_VERIFICATION_LIMITED`。验证失败不修改用户状态或资料；密码不进入响应和审计。
@@ -229,7 +229,7 @@ API 地址或直接读取 CSRF。
   服务端统一为 `v0.3.1`；`body` 可省略，版本条目正文固定为空。
 - 创建时 `occurred_at` 可省略，默认当前时间；编辑版本号不改变原发生时间。
 - 普通类型仍要求非空标题和正文；版本条目改为普通类型时必须补全正文。
-- 创建、编辑、删除仍仅限超级管理员，保留 revision 冲突校验和时间倒序排列。
+- 创建、编辑、删除仍仅限系统维护账号，保留 revision 冲突校验和时间倒序排列。
 
 ## AI 上下文与周报
 
@@ -243,14 +243,14 @@ API 地址或直接读取 CSRF。
 - 每位生成负责人每个自然周只有一条团队周报，以 `(generated_by, week_start)` 唯一约束保证；
   同一负责人再次生成时更新原记录并增加 revision，不创建重复历史行。
 - `GET /api/v1/weekly-reports` 只返回当前用户自己的周报，并按周目倒序排列；不存在负责人
-  收件箱或超级管理员跨用户读取个人周报的接口。
+  收件箱或系统维护账号跨用户读取个人周报的接口。
 - 草稿内容与已提交内容分开保存。保存或重新生成草稿不会改变团队周报生成时可汇总的正式版本。
 - `POST /api/v1/weekly-reports/{id}/submit` 将正式版本标记到用户当前有效的直属团队范围，
   供具有团队周报生成权限的用户在后端汇总，但不提供个人周报收件箱。若本周已有已提交
   版本，必须显式传入 `overwrite_confirmed=true`，否则返回
   `WEEKLY_REPORT_OVERWRITE_CONFIRMATION_REQUIRED`。
 - 提交状态仅用于后端生成团队周报时判断可汇总版本，不赋予直属负责人、系统管理员或
-  超级管理员直接查看该个人周报的能力。所有角色都只能通过个人周报接口读取自己的内容。
+  系统维护账号直接查看该个人周报的能力。所有角色都只能通过个人周报接口读取自己的内容。
 
 ## 0.4.0 周报历史口径修复
 

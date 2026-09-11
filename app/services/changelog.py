@@ -36,7 +36,7 @@ def normalize_content(category: str, title: str, body: str) -> tuple[str, str]:
 
 def require_super_admin(actor: User) -> None:
     if not is_super_admin(actor):
-        raise PermissionDeniedError("仅超级管理员可维护更新日志")
+        raise PermissionDeniedError("当前账号无权维护更新日志")
 
 
 def get_changelog_entry(db: Session, entry_id: str) -> ChangelogEntry:

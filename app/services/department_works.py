@@ -92,7 +92,7 @@ def can_manage_department_work(db: Session, user: User, work: DepartmentWork) ->
 
 def require_manage_department_work(db: Session, user: User, work: DepartmentWork) -> None:
     if not can_manage_department_work(db, user, work):
-        raise PermissionDeniedError("只有负责部门成员或超级管理员可以修改部门工作")
+        raise PermissionDeniedError("当前账号无权修改该部门工作")
 
 
 def is_department_work_writable(work: DepartmentWork) -> bool:

@@ -345,7 +345,7 @@ function roleLabel(role: string) {
       member: "团队成员",
       team_leader: "团队负责人",
       system_admin: "系统管理员",
-      super_admin: "超级管理员",
+      super_admin: "系统维护",
     }[role] ?? role
   );
 }

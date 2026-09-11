@@ -11,6 +11,7 @@ from pydantic import (
     Field,
     HttpUrl,
     SecretStr,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -28,6 +29,7 @@ from app.models import (
     UserRole,
     utc_now,
 )
+from app.presentation import public_admin_copy
 
 
 def _strip_required_text(value: str) -> str:
@@ -66,6 +68,10 @@ class UserOut(ORMModel):
     is_active: bool
     must_change_password: bool
     revision: int
+
+    @field_serializer("display_name")
+    def display_name_for_output(self, value: str) -> str:
+        return public_admin_copy(value)
 
 
 class UserCandidateOut(ORMModel):
@@ -817,6 +823,10 @@ class WorkRecordOut(ORMModel):
     deliverables: list[DeliverableOut] = []
     time_blocks: list[TimeBlockOut] = Field(default_factory=list)
 
+    @field_serializer("author_display_name", "last_editor_display_name")
+    def names_for_output(self, value: str | None) -> str | None:
+        return public_admin_copy(value) if value is not None else None
+
 
 class QuickTaskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -968,6 +978,10 @@ class DashboardWorkItemOut(BaseModel):
     risk: str | None
     next_action: str | None
 
+    @field_serializer("author_display_name")
+    def names_for_output(self, value: str | None) -> str | None:
+        return public_admin_copy(value) if value is not None else None
+
 
 class DashboardTaskOut(BaseModel):
     id: str
@@ -1051,6 +1065,10 @@ class DashboardDeliverableOut(BaseModel):
     project_name: str
     author_id: str | None
     author_display_name: str | None
+
+    @field_serializer("author_display_name")
+    def names_for_output(self, value: str | None) -> str | None:
+        return public_admin_copy(value) if value is not None else None
 
 
 class DashboardTaskLinkOut(BaseModel):

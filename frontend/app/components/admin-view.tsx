@@ -714,7 +714,7 @@ function UserCreateModal({
           </label>
         ) : null}
         <InlineNotice>
-          登录名由系统自动生成。直属 Leader 可在账号创建后通过“编辑资料”配置；超级管理员账号仍只能通过服务器命令创建。
+          登录名由系统自动生成。直属 Leader 可在账号创建后通过“编辑资料”配置。
         </InlineNotice>
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
         <footer className="modal-actions">
@@ -979,7 +979,7 @@ function UserEditModal({
             <small className="field-hint">
               {user.id === currentUserId
                 ? "不能冻结自己的账号"
-                : "仅超级管理员可冻结系统管理员"}
+                : "当前账号无权冻结该账号"}
             </small>
           )}
         </div>
@@ -1159,7 +1159,7 @@ function PermissionModal({
         </InlineNotice>
         {actorRole === "system_admin" ? (
           <InlineNotice tone="warning">
-            系统管理员只能调整业务权限和作战台视图；灰色的系统级权限只能由超级管理员配置。
+            仅可调整当前账号有权配置的项目；灰色权限项不可修改。
           </InlineNotice>
         ) : null}
         {loading ? (
@@ -1212,7 +1212,7 @@ function PermissionModal({
                           <small>{permission.description}</small>
                         </span>
                         {!roleAssignable ? (
-                          <em>仅超级管理员</em>
+                          <em>当前账号不可配置</em>
                         ) : !teamScopeEligible ? (
                           <em>需团队负责人及直属成员</em>
                         ) : null}
@@ -1653,7 +1653,7 @@ function roleLabel(role: string) {
       member: "团队成员",
       team_leader: "团队负责人",
       system_admin: "系统管理员",
-      super_admin: "超级管理员",
+      super_admin: "系统维护",
     }[role] ?? role
   );
 }

@@ -157,7 +157,7 @@ PERMISSION_CATALOG = (
         "work_records",
         "工作记录",
         "维护工作记录",
-        "创建、编辑和删除自己的工作记录；仅超级管理员可操作他人记录。",
+        "创建、编辑和删除自己的工作记录；跨用户操作受权限控制。",
     ),
     PermissionDefinition(
         PermissionKey.WEEKLY_REPORTS_VIEW,
@@ -209,7 +209,7 @@ PERMISSION_CATALOG = (
         "settings",
         "系统设置",
         "查看审计记录",
-        "读取系统审计记录；他人工作记录审计仍仅超级管理员可见。",
+        "读取授权范围内的系统审计记录。",
         system_admin_assignable=False,
     ),
 )

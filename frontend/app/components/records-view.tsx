@@ -842,7 +842,7 @@ function QuickCreateModal({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const hasSource = sourceType !== "none";
-  // 隐藏超管不能担任负责人（后端 ensure_user 会拒绝）；无主部门用户必须显式选部门
+  // 隐藏维护账号不能担任负责人（后端 ensure_user 会拒绝）；无主部门用户必须显式选部门
   const isSuperAdmin = currentUserRole === "super_admin";
   const ownerRequired = isSuperAdmin;
   const ownerDefault = isSuperAdmin ? "" : currentUserId;
@@ -940,7 +940,7 @@ function QuickCreateModal({
       }
       const ownerId = String(form.get("new_project_owner_id") ?? "");
       if (ownerRequired && !ownerId) {
-        setError("超级管理员创建项目时必须指定项目负责人。");
+        setError("请指定项目负责人。");
         return;
       }
       payload.new_project = {
@@ -957,7 +957,7 @@ function QuickCreateModal({
       }
       const ownerId = String(form.get("new_department_work_owner_id") ?? "");
       if (ownerRequired && !ownerId) {
-        setError("超级管理员创建部门工作时必须指定负责人。");
+        setError("请指定部门工作负责人。");
         return;
       }
       const departmentId = String(
@@ -980,7 +980,7 @@ function QuickCreateModal({
     if (hasSource && taskTitle) {
       const ownerId = String(form.get("new_task_owner_id") ?? "");
       if (ownerRequired && !ownerId) {
-        setError("超级管理员新建任务时必须指定任务负责人。");
+        setError("请指定任务负责人。");
         return;
       }
       payload.new_task = {

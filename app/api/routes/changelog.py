@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
 from app.models import User
+from app.presentation import public_admin_copy
 from app.schemas import (
     ChangelogEntryCreate,
     ChangelogEntryOut,
@@ -22,12 +23,16 @@ def _entry_out(entry, db: Session) -> ChangelogEntryOut:
         id=entry.id,
         occurred_at=entry.occurred_at,
         category=entry.category,
-        title=entry.title,
-        body=entry.body,
+        title=public_admin_copy(entry.title),
+        body=public_admin_copy(entry.body),
         created_by=entry.created_by,
-        created_by_name=created_by.display_name if created_by else entry.created_by,
+        created_by_name=(
+            public_admin_copy(created_by.display_name) if created_by else entry.created_by
+        ),
         updated_by=entry.updated_by,
-        updated_by_name=updated_by.display_name if updated_by else entry.updated_by,
+        updated_by_name=(
+            public_admin_copy(updated_by.display_name) if updated_by else entry.updated_by
+        ),
         revision=entry.revision,
         created_at=entry.created_at,
         updated_at=entry.updated_at,
