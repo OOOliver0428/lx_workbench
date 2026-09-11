@@ -139,6 +139,7 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     leader_id: str | None = None
     primary_department_id: str | None = None
+    is_active: bool | None = None
 
     @field_validator("display_name")
     @classmethod

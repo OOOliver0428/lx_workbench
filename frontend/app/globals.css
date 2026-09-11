@@ -7665,3 +7665,19 @@ a {
     grid-template-columns: auto 1fr;
   }
 }
+
+.user-freeze-row {
+  align-items: center;
+  background: #fff8f0;
+  border: 1px solid #f0d9b8;
+  border-radius: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.user-freeze-row strong.is-frozen {
+  color: #b45309;
+}

@@ -372,8 +372,35 @@ def update_user(
         "role": user.role,
         "leaderId": user.leader_id,
         "primaryDepartmentId": user.primary_department_id,
+        "isActive": user.is_active,
         "revision": user.revision,
     }
+    if "is_active" in fields and payload.is_active is not None:
+        if payload.is_active == user.is_active:
+            pass
+        else:
+            if actor.id == user.id:
+                raise AppError(
+                    "SELF_FREEZE_FORBIDDEN",
+                    "不能冻结或解冻自己的账号",
+                    status_code=403,
+                )
+            if user.role == UserRole.SYSTEM_ADMIN.value and not is_super_admin(actor):
+                raise AppError(
+                    "SYSTEM_ADMIN_FREEZE_FORBIDDEN",
+                    "只有超级管理员可以冻结系统管理员账号",
+                    status_code=403,
+                )
+            if not payload.is_active and db.scalar(
+                select(User.id)
+                .where(User.leader_id == user.id, User.is_active.is_(True))
+                .limit(1)
+            ):
+                raise ConflictError(
+                    "LEADER_HAS_DIRECT_REPORTS",
+                    "该用户仍有在职直属成员，请先调整直属 Leader 后再冻结",
+                )
+            user.is_active = payload.is_active
     if "role" in fields and payload.role:
         if payload.role == UserRole.SUPER_ADMIN:
             raise AppError(
@@ -439,7 +466,19 @@ def update_user(
     record_audit(
         db,
         actor=actor,
-        action="user.update",
+        action=(
+            "user.freeze"
+            if "is_active" in fields
+            and payload.is_active is False
+            and user.is_active is False
+            else (
+                "user.unfreeze"
+                if "is_active" in fields
+                and payload.is_active is True
+                and user.is_active is True
+                else "user.update"
+            )
+        ),
         entity_type="user",
         entity_id=user.id,
         before_data=before_data,
@@ -448,6 +487,7 @@ def update_user(
             "role": user.role,
             "leaderId": user.leader_id,
             "primaryDepartmentId": user.primary_department_id,
+            "isActive": user.is_active,
             "revision": user.revision,
         },
     )

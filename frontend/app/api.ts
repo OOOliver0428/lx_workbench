@@ -201,10 +201,11 @@ export const api = {
       id: string,
       payload: {
         revision: number;
-        display_name: string;
-        role: string;
-        leader_id: string | null;
+        display_name?: string;
+        role?: string;
+        leader_id?: string | null;
         primary_department_id?: string | null;
+        is_active?: boolean;
       },
     ) =>
       request<User>(`/api/v1/users/${id}`, {
