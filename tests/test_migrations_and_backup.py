@@ -26,6 +26,34 @@ def upgrade_temp_database(tmp_path: Path, monkeypatch) -> Path:
     return database_path
 
 
+def test_release_category_migration_preserves_entries(tmp_path: Path, monkeypatch) -> None:
+    database_path = upgrade_temp_database(tmp_path, monkeypatch)
+    with closing(sqlite3.connect(database_path)) as db:
+        db.execute(
+            "INSERT INTO users (id, login_name, display_name, password_hash, role, "
+            "is_active, must_change_password, created_at, updated_at, revision) VALUES "
+            "('test', 'migration-release-test', '迁移测试', 'not-a-login-hash', 'super_admin', "
+            "1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)"
+        )
+        db.execute(
+            "INSERT INTO changelog_entries "
+            "(id, occurred_at, category, title, body, created_by, updated_by, "
+            "created_at, updated_at, revision) VALUES "
+            "('release-test', CURRENT_TIMESTAMP, 'release', 'v0.3.1', '', 'test', 'test', "
+            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)"
+        )
+        db.commit()
+    config = Config("alembic.ini")
+    command.downgrade(config, "c9d0e1f2a3b4")
+    with closing(sqlite3.connect(database_path)) as db:
+        assert db.execute(
+            "SELECT category, title, body FROM changelog_entries WHERE id='release-test'"
+        ).fetchone() == ("improvement", "v0.3.1", "版本更新：v0.3.1")
+    command.upgrade(config, "head")
+    with closing(sqlite3.connect(database_path)) as db:
+        assert db.execute("SELECT count(*) FROM changelog_entries").fetchone() == (1,)
+
+
 def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypatch) -> None:
     database_path = upgrade_temp_database(tmp_path, monkeypatch)
     with closing(sqlite3.connect(database_path)) as db:
@@ -151,7 +179,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "b7e4c1a9d2f3"
+    assert revision == "d2e3f4a5b6c7"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -244,7 +272,7 @@ def test_time_block_migration_can_downgrade_and_upgrade(
         ).fetchone() == ("work_record_time_blocks",)
         assert db.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("b7e4c1a9d2f3",)
+        ).fetchone() == ("d2e3f4a5b6c7",)
     get_settings.cache_clear()
 
 
@@ -346,7 +374,7 @@ def test_team_summary_migration_keeps_latest_duplicate(
     assert summaries == [
         ("33333333-3333-4333-8333-333333333333", "最新版本")
     ]
-    assert ("generated_by", "week_start") in unique_column_sets
+    assert ("generated_by", "week_start", "scope_key") in unique_column_sets
     get_settings.cache_clear()
 
 
@@ -963,7 +991,7 @@ def test_populated_previous_revision_upgrades_without_data_loss(
             """
         ).fetchall()
 
-    assert revision == "b7e4c1a9d2f3"
+    assert revision == "d2e3f4a5b6c7"
     assert user == ("historic-user", "历史升级用户", "历史升级用户")
     assert integrity == "ok"
     assert migrated_opportunity == (
@@ -1014,7 +1042,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "b7e4c1a9d2f3"
+    assert manifest["schemaRevision"] == "d2e3f4a5b6c7"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
 

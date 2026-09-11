@@ -26,6 +26,7 @@ from app.models import (
     TaskPriority,
     TaskStatus,
     UserRole,
+    utc_now,
 )
 
 
@@ -135,10 +136,12 @@ class UserLeaderUpdate(BaseModel):
 
 class UserUpdate(BaseModel):
     revision: int = Field(ge=1)
+    current_password: str | None = Field(default=None, min_length=1, max_length=256)
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     role: UserRole | None = None
     leader_id: str | None = None
     primary_department_id: str | None = None
+    is_active: bool | None = None
 
     @field_validator("display_name")
     @classmethod
@@ -896,6 +899,7 @@ class WeeklyReportOut(ORMModel):
     generation_usage: dict[str, int] | None
     submitted_at: datetime | None
     submission_version: int
+    department_id: str | None = None
     revision: int
     created_at: datetime
     updated_at: datetime
@@ -934,6 +938,22 @@ class DashboardMemberOut(BaseModel):
     submitted_at: datetime | None
     weekly_minutes: int | None
     submitted_weeks: list[date]
+    department_id: str | None = None
+    department_name: str | None = None
+
+
+class ManagementScopeOptionOut(BaseModel):
+    scope_type: str
+    department_id: str | None
+    department_name: str | None
+    member_count: int
+
+
+class ManagementScopeOut(BaseModel):
+    scope_type: str
+    department_id: str | None
+    options: list[ManagementScopeOptionOut]
+    other_direct_count: int = 0
 
 
 class DashboardWorkItemOut(BaseModel):
@@ -1087,12 +1107,17 @@ class TeamWeeklySummaryOut(ORMModel):
     source_reports: list[dict[str, Any]] | None = None
     generation_model: str
     generation_usage: dict[str, int] | None
+    scope_type: str = "all_led"
+    department_id: str | None = None
+    scope_key: str = "all_led"
     created_at: datetime
     revision: int
 
 
 class TeamWeeklySummaryGenerate(BaseModel):
     force: bool = False
+    scope_type: str = Field(default="all_led", min_length=1, max_length=32)
+    department_id: str | None = Field(default=None, max_length=36)
 
 
 class DashboardOut(BaseModel):
@@ -1109,6 +1134,7 @@ class DashboardOut(BaseModel):
     stage_distribution: list[DashboardStageCountOut]
     stage_timeline: list[DashboardTimelineEventOut]
     latest_team_summary: TeamWeeklySummaryOut | None
+    management_scope: ManagementScopeOut | None = None
 
 
 class AuditEventOut(ORMModel):
@@ -1245,12 +1271,12 @@ class ChangelogEntryOut(BaseModel):
 
 
 class ChangelogEntryCreate(BaseModel):
-    occurred_at: datetime
+    occurred_at: datetime = Field(default_factory=utc_now)
     category: ChangelogCategory
     title: str = Field(min_length=1, max_length=200)
-    body: str = Field(min_length=1, max_length=20000)
+    body: str = Field(default="", max_length=20000)
 
-    @field_validator("title", "body")
+    @field_validator("title")
     @classmethod
     def strip_changelog_text(cls, value: str) -> str:
         stripped = value.strip()
@@ -1264,9 +1290,9 @@ class ChangelogEntryUpdate(BaseModel):
     occurred_at: datetime | None = None
     category: ChangelogCategory | None = None
     title: str | None = Field(default=None, min_length=1, max_length=200)
-    body: str | None = Field(default=None, min_length=1, max_length=20000)
+    body: str | None = Field(default=None, max_length=20000)
 
-    @field_validator("title", "body")
+    @field_validator("title")
     @classmethod
     def strip_optional_changelog_text(cls, value: str | None) -> str | None:
         if value is None:

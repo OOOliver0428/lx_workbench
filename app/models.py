@@ -1004,6 +1004,12 @@ class WeeklyReport(Base, TimestampMixin, RevisionMixin):
     generation_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submission_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    department_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("departments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("author_id", "week_start", name="uq_weekly_reports_author_week"),
@@ -1043,12 +1049,20 @@ class TeamWeeklySummary(Base, TimestampMixin, RevisionMixin):
     source_reports: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     generation_model: Mapped[str] = mapped_column(String(120), nullable=False)
     generation_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    scope_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="all_led", server_default="all_led"
+    )
+    department_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    scope_key: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="all_led", server_default="all_led"
+    )
 
     __table_args__ = (
         UniqueConstraint(
             "generated_by",
             "week_start",
-            name="uq_team_weekly_summaries_generator_week",
+            "scope_key",
+            name="uq_team_weekly_summaries_generator_week_scope",
         ),
         CheckConstraint(
             "week_end >= week_start",
@@ -1149,6 +1163,7 @@ class ChangelogCategory(StrEnum):
     IMPROVEMENT = "improvement"
     FIX = "fix"
     REMOVAL = "removal"
+    RELEASE = "release"
 
 
 class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
@@ -1170,7 +1185,7 @@ class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "category IN ('feature', 'improvement', 'fix', 'removal')",
+            "category IN ('feature', 'improvement', 'fix', 'removal', 'release')",
             name="ck_changelog_entries_category",
         ),
         Index("ix_changelog_entries_occurred", "occurred_at", "created_at"),

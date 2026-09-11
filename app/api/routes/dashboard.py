@@ -18,6 +18,8 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("", response_model=DashboardOut)
 def get_dashboard(
     week_start: date | None = None,
+    scope_type: str | None = None,
+    department_id: str | None = None,
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db, scope="function"),
 ) -> DashboardOut:
@@ -25,6 +27,8 @@ def get_dashboard(
         db,
         actor,
         selected_week_start=week_start,
+        scope_type=scope_type,
+        department_id=department_id,
     )
 
 

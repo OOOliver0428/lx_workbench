@@ -2014,6 +2014,24 @@ a {
   padding: 27px 30px 20px;
 }
 
+.project-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.project-rename-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-rename-row input {
+  min-width: 220px;
+}
+
 .detail-status-line {
   align-items: center;
   border-bottom: 1px solid var(--line);
@@ -7499,6 +7517,47 @@ a {
   gap: 8px;
 }
 
+.changelog-release {
+  padding: 18px 0;
+}
+
+.changelog-release-divider {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+}
+
+.changelog-release-divider::before,
+.changelog-release-divider::after {
+  background: var(--accent);
+  content: "";
+  flex: 1;
+  height: 2px;
+  opacity: 0.4;
+}
+
+.changelog-release-divider h3 {
+  background: var(--accent-soft);
+  border: 1px solid #c6ddff;
+  border-radius: 999px;
+  color: var(--accent-strong);
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  margin: 0;
+  max-width: 75%;
+  overflow-wrap: anywhere;
+  padding: 7px 18px;
+  text-align: center;
+}
+
+.changelog-release-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
 .changelog-entry-body {
   border-left: 1px solid var(--line-strong);
   padding-left: 18px;
@@ -7527,4 +7586,184 @@ a {
     border-left: none;
     padding-left: 0;
   }
+}
+
+.war-scope-panel {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.war-scope-label {
+  align-items: center;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.war-scope-label svg {
+  color: var(--accent);
+}
+
+.war-scope-select {
+  background: #f8fbff;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  min-height: 36px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 12px;
+  width: 280px;
+}
+
+.war-scope-select:hover {
+  border-color: var(--accent);
+}
+
+.war-scope-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.war-scope-current-count {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.war-scope-current-count b {
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+  .war-scope-select {
+    flex: 1;
+    width: auto;
+  }
+
+  .war-scope-current-count {
+    display: none;
+  }
+}
+
+.war-dept-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.war-dept-group {
+  border: 1px solid var(--line, #d9e2ec);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.war-dept-group > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.war-dept-group > header span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.department-members-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.department-members-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.department-members-list {
+  display: grid;
+  gap: 10px;
+}
+
+.department-members-list article {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto 1fr auto auto auto;
+  padding: 12px 14px;
+}
+
+.department-members-list h3 {
+  font-size: 14px;
+  margin: 0 0 2px;
+}
+
+.department-members-list p {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.tag-muted {
+  opacity: 0.65;
+}
+
+@media (max-width: 720px) {
+  .department-members-list article {
+    grid-template-columns: auto 1fr;
+  }
+}
+
+.user-freeze-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px 0 0;
+  width: 100%;
+}
+
+.user-freeze-row > .account-danger-button {
+  margin-left: auto;
+}
+
+.user-freeze-row strong.is-frozen {
+  color: #b42318;
+}
+
+.secondary-button.account-danger-button {
+  background: #d92d20;
+  border-color: #d92d20;
+  color: #fff;
+}
+
+.secondary-button.account-danger-button:hover:not(:disabled) {
+  background: #b42318;
+  border-color: #b42318;
+}
+
+.secondary-button.account-danger-button:focus-visible {
+  outline: 2px solid #d92d20;
+  outline-offset: 3px;
+}
+
+.freeze-confirm-description {
+  color: var(--ink-soft);
+  line-height: 1.7;
+  margin: 0;
 }

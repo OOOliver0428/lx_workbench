@@ -11,6 +11,7 @@ const CATEGORY_LABELS: Record<ChangelogCategory, string> = {
   improvement: "优化",
   fix: "修复",
   removal: "下线",
+  release: "版本更新",
 };
 
 const CATEGORY_OPTIONS: ChangelogCategory[] = [
@@ -18,6 +19,7 @@ const CATEGORY_OPTIONS: ChangelogCategory[] = [
   "improvement",
   "fix",
   "removal",
+  "release",
 ];
 
 function shanghaiDayKey(iso: string) {
@@ -148,7 +150,24 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
                 {shanghaiDayLabel(dayKey)}
               </h2>
               <div className="changelog-day-entries">
-                {dayEntries.map((entry) => (
+                {dayEntries.map((entry) => entry.category === "release" ? (
+                  <article className="changelog-release" key={entry.id}>
+                    <div className="changelog-release-divider" role="separator" aria-label={`版本更新 ${entry.title}`}>
+                      <h3>{entry.title}</h3>
+                    </div>
+                    {canManage ? (
+                      <div className="changelog-release-actions">
+                        <button type="button" className="text-button" onClick={() => setEditing(entry)}>
+                          编辑
+                        </button>
+                        <button type="button" className="text-button" disabled={deletingId === entry.id}
+                          style={{ color: "var(--red)" }} onClick={() => removeEntry(entry)}>
+                          {deletingId === entry.id ? "删除中…" : "删除"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </article>
+                ) : (
                   <article className="changelog-entry" key={entry.id}>
                     <div className="changelog-entry-meta">
                       <strong>{shanghaiTimeLabel(entry.occurred_at)}</strong>
@@ -234,6 +253,8 @@ function ChangelogEntryModal({
 }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [category, setCategory] = useState<ChangelogCategory>(entry?.category ?? "improvement");
+  const isRelease = category === "release";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -243,12 +264,12 @@ function ChangelogEntryModal({
     const occurredLocal = String(form.get("occurred_at") || "");
     const occurredAt = occurredLocal
       ? new Date(`${occurredLocal}:00+08:00`).toISOString()
-      : new Date().toISOString();
+      : (entry?.occurred_at ?? new Date().toISOString());
     const payload = {
       occurred_at: occurredAt,
-      category: String(form.get("category") || "improvement"),
-      title: String(form.get("title") || "").trim(),
-      body: String(form.get("body") || "").trim(),
+      category,
+      title: String(form.get(isRelease ? "version" : "title") || "").trim(),
+      body: isRelease ? "" : String(form.get("body") || "").trim(),
     };
     try {
       if (entry) {
@@ -278,6 +299,7 @@ function ChangelogEntryModal({
     >
       <form className="modal-form" onSubmit={submit}>
         <div className="form-grid">
+          {!isRelease ? (
           <label className="field">
             <span>发生时间 *</span>
             <input
@@ -289,12 +311,14 @@ function ChangelogEntryModal({
               }
             />
           </label>
+          ) : null}
           <label className="field">
             <span>类型 *</span>
             <select
               name="category"
               required
-              defaultValue={entry?.category ?? "improvement"}
+              value={category}
+              onChange={(event) => setCategory(event.target.value as ChangelogCategory)}
             >
               {CATEGORY_OPTIONS.map((category) => (
                 <option key={category} value={category}>
@@ -303,13 +327,23 @@ function ChangelogEntryModal({
               ))}
             </select>
           </label>
+          {isRelease ? (
+            <label className="field field-span-two">
+              <span>升级到的版本号 *</span>
+              <input name="version" required maxLength={80}
+                defaultValue={entry?.category === "release" ? entry.title : ""}
+                placeholder="例如 0.3.1" autoFocus />
+              <small className="field-hint">保存后以居中的版本分割线展示。</small>
+            </label>
+          ) : (
+          <>
           <label className="field field-span-two">
             <span>标题 *</span>
             <input
               name="title"
               required
               maxLength={200}
-              defaultValue={entry?.title ?? ""}
+              defaultValue={entry?.category === "release" ? "" : entry?.title ?? ""}
               placeholder="例如 日报、周报和月报，重点更清楚了"
               autoFocus
             />
@@ -325,6 +359,8 @@ function ChangelogEntryModal({
               placeholder="用一两段话说明这次变更对使用者的影响"
             />
           </label>
+          </>
+          )}
         </div>
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
         <footer className="modal-actions">

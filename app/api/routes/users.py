@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -31,9 +31,10 @@ from app.schemas import (
     UserPermissionsUpdate,
     UserUpdate,
 )
-from app.security import hash_password
+from app.security import hash_password, verify_password
 from app.services import permissions as permission_service
 from app.services.departments import led_active_department_ids
+from app.throttle import LoginCapacityExceeded
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -147,9 +148,7 @@ def _ensure_department_change_safe(
         .where(
             Task.owner_id == user.id,
             Task.deleted_at.is_(None),
-            Task.status.not_in(
-                {TaskStatus.DONE.value, TaskStatus.CANCELLED.value}
-            ),
+            Task.status.not_in({TaskStatus.DONE.value, TaskStatus.CANCELLED.value}),
             DepartmentWork.deleted_at.is_(None),
             DepartmentWork.status != DepartmentWorkStatus.ARCHIVED.value,
             DepartmentWork.department_id != target_department_id,
@@ -199,9 +198,7 @@ def list_user_candidates(
         "当前账号无权查看负责人候选目录",
     )
     users = db.scalars(
-        select(User)
-        .where(User.is_active.is_(True))
-        .order_by(User.display_name)
+        select(User).where(User.is_active.is_(True)).order_by(User.display_name)
     ).all()
     return [
         UserCandidateOut.model_validate(user)
@@ -345,6 +342,7 @@ def create_user(
 def update_user(
     user_id: str,
     payload: UserUpdate,
+    request: Request,
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db, scope="function"),
 ) -> UserOut:
@@ -364,7 +362,7 @@ def update_user(
             },
         )
 
-    fields = payload.model_fields_set - {"revision"}
+    fields = payload.model_fields_set - {"revision", "current_password"}
     if not fields:
         raise AppError("USER_UPDATE_EMPTY", "请至少修改一项用户资料")
     before_data = {
@@ -372,8 +370,54 @@ def update_user(
         "role": user.role,
         "leaderId": user.leader_id,
         "primaryDepartmentId": user.primary_department_id,
+        "isActive": user.is_active,
         "revision": user.revision,
     }
+    if "is_active" in fields and payload.is_active is not None:
+        password_matches = False
+        if payload.current_password:
+            try:
+                with request.app.state.login_throttle.verification_slot(
+                    request.client.host if request.client else "unknown"
+                ):
+                    password_matches = verify_password(
+                        actor.password_hash, payload.current_password
+                    )
+            except LoginCapacityExceeded as exc:
+                raise AppError(
+                    "PASSWORD_VERIFICATION_LIMITED",
+                    "密码验证过于频繁，请稍后重试",
+                    status_code=429,
+                ) from exc
+        if not password_matches:
+            raise AppError(
+                "INVALID_CURRENT_PASSWORD",
+                "请输入当前登录账号的正确密码，才能冻结或解冻账号",
+                status_code=400,
+            )
+        if payload.is_active == user.is_active:
+            pass
+        else:
+            if actor.id == user.id:
+                raise AppError(
+                    "SELF_FREEZE_FORBIDDEN",
+                    "不能冻结或解冻自己的账号",
+                    status_code=403,
+                )
+            if user.role == UserRole.SYSTEM_ADMIN.value and not is_super_admin(actor):
+                raise AppError(
+                    "SYSTEM_ADMIN_FREEZE_FORBIDDEN",
+                    "只有超级管理员可以冻结系统管理员账号",
+                    status_code=403,
+                )
+            if not payload.is_active and db.scalar(
+                select(User.id).where(User.leader_id == user.id, User.is_active.is_(True)).limit(1)
+            ):
+                raise ConflictError(
+                    "LEADER_HAS_DIRECT_REPORTS",
+                    "该用户仍有在职直属成员，请先调整直属 Leader 后再冻结",
+                )
+            user.is_active = payload.is_active
     if "role" in fields and payload.role:
         if payload.role == UserRole.SUPER_ADMIN:
             raise AppError(
@@ -381,8 +425,7 @@ def update_user(
                 "超级管理员角色只能通过服务器命令管理",
             )
         if (
-            payload.role == UserRole.SYSTEM_ADMIN
-            or user.role == UserRole.SYSTEM_ADMIN.value
+            payload.role == UserRole.SYSTEM_ADMIN or user.role == UserRole.SYSTEM_ADMIN.value
         ) and not is_super_admin(actor):
             raise AppError(
                 "SYSTEM_ADMIN_ROLE_FORBIDDEN",
@@ -439,7 +482,15 @@ def update_user(
     record_audit(
         db,
         actor=actor,
-        action="user.update",
+        action=(
+            "user.freeze"
+            if "is_active" in fields and payload.is_active is False and user.is_active is False
+            else (
+                "user.unfreeze"
+                if "is_active" in fields and payload.is_active is True and user.is_active is True
+                else "user.update"
+            )
+        ),
         entity_type="user",
         entity_id=user.id,
         before_data=before_data,
@@ -448,6 +499,7 @@ def update_user(
             "role": user.role,
             "leaderId": user.leader_id,
             "primaryDepartmentId": user.primary_department_id,
+            "isActive": user.is_active,
             "revision": user.revision,
         },
     )

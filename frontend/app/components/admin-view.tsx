@@ -65,12 +65,16 @@ export function AdminView({ context }: { context: AuthContext }) {
     null,
   );
   const [permissionUser, setPermissionUser] = useState<User | null>(null);
+  const [departmentMembersView, setDepartmentMembersView] =
+    useState<Department | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
       const [userRows, tagRows, auditRows] = await Promise.all([
-        showUsers ? api.users.list(true) : Promise.resolve([]),
+        showUsers || canViewDepartments
+          ? api.users.list(true)
+          : Promise.resolve([]),
         canManageTags ? api.tags.list(true) : Promise.resolve([]),
         canViewAudit ? api.audit.list() : Promise.resolve([]),
       ]);
@@ -82,7 +86,7 @@ export function AdminView({ context }: { context: AuthContext }) {
         caught instanceof ApiClientError ? caught.message : "基础数据加载失败",
       );
     }
-  }, [canManageTags, canViewAudit, showUsers]);
+  }, [canManageTags, canViewAudit, showUsers, canViewDepartments]);
 
   const loadDepartments = useCallback(async () => {
     if (!canViewDepartments) return;
@@ -242,7 +246,7 @@ export function AdminView({ context }: { context: AuthContext }) {
                 <span className={`role-pill role-${user.role}`}>
                   {roleLabel(user.role)}
                 </span>
-                <small>{user.is_active ? "账号正常" : "账号停用"}</small>
+                <small>{user.is_active ? "账号正常" : "已冻结"}</small>
                 <div className="user-card-management">
                   <span>
                     直属 Leader
@@ -352,6 +356,13 @@ export function AdminView({ context }: { context: AuthContext }) {
                     {department.is_active ? "启用" : "已停用"}
                   </span>
                   <div className="user-card-actions">
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setDepartmentMembersView(department)}
+                    >
+                      查看成员
+                    </button>
                     {canManageDepartments ? (
                       <>
                         <button
@@ -464,6 +475,13 @@ export function AdminView({ context }: { context: AuthContext }) {
           }}
         />
       ) : null}
+      {departmentMembersView ? (
+        <DepartmentMembersModal
+          department={departmentMembersView}
+          users={users}
+          onClose={() => setDepartmentMembersView(null)}
+        />
+      ) : null}
       {createTagOpen && canManageTags ? (
         <TagCreateModal
           onClose={() => setCreateTagOpen(false)}
@@ -500,6 +518,8 @@ export function AdminView({ context }: { context: AuthContext }) {
           users={users}
           departments={canViewDepartments ? departments : null}
           canManageSystemAdmins={context.user.role === "super_admin"}
+          currentUserId={context.user.id}
+          actorRole={context.user.role}
           onClose={() => setEditingUser(null)}
           onUpdated={async () => {
             setEditingUser(null);
@@ -715,6 +735,8 @@ function UserEditModal({
   users,
   departments,
   canManageSystemAdmins,
+  currentUserId,
+  actorRole,
   onClose,
   onUpdated,
 }: {
@@ -722,11 +744,20 @@ function UserEditModal({
   users: User[];
   departments: Department[] | null;
   canManageSystemAdmins: boolean;
+  currentUserId: string;
+  actorRole: UserRole;
   onClose: () => void;
   onUpdated: () => void;
 }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [freezeBusy, setFreezeBusy] = useState(false);
+  const [freezeConfirmOpen, setFreezeConfirmOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [freezeError, setFreezeError] = useState("");
+  const canFreeze =
+    user.id !== currentUserId &&
+    (user.role !== "system_admin" || actorRole === "super_admin");
   const leaderCandidates = users.filter(
     (candidate) =>
       candidate.id !== user.id &&
@@ -771,7 +802,80 @@ function UserEditModal({
     }
   }
 
+  async function toggleFreeze(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (freezeBusy || !currentPassword) return;
+    const nextActive = !user.is_active;
+    setFreezeBusy(true);
+    setFreezeError("");
+    try {
+      await api.users.update(user.id, {
+        revision: user.revision,
+        is_active: nextActive,
+        current_password: currentPassword,
+      });
+      onUpdated();
+    } catch (caught) {
+      setFreezeError(
+        caught instanceof ApiClientError
+          ? caught.message
+          : nextActive
+            ? "解冻账号失败"
+            : "冻结账号失败",
+      );
+    } finally {
+      setCurrentPassword("");
+      setFreezeBusy(false);
+    }
+  }
+
+  let freezeConfirmation = null;
+  if (freezeConfirmOpen) {
+    const action = user.is_active ? "冻结" : "解冻";
+    const closeConfirmation = () => {
+      if (freezeBusy) return;
+      setCurrentPassword("");
+      setFreezeError("");
+      setFreezeConfirmOpen(false);
+    };
+    freezeConfirmation = (
+      <Modal title={`确认${action}账号`} eyebrow="ACCOUNT SECURITY" onClose={closeConfirmation}>
+        <form className="modal-form" onSubmit={toggleFreeze}>
+          <p className="freeze-confirm-description">
+            即将{action} <strong>{user.display_name}</strong>（{user.login_name}）。
+            {user.is_active ? "冻结后该用户将无法访问系统。" : "解冻后该用户可恢复登录。"}
+          </p>
+          <label className="field">
+            <span>当前登录账号的密码 *</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              maxLength={256}
+              required
+              autoFocus
+              disabled={freezeBusy}
+            />
+            <small className="field-hint">请输入你自己的登录密码，以确认本次操作。</small>
+          </label>
+          {freezeError ? <InlineNotice tone="error">{freezeError}</InlineNotice> : null}
+          <footer className="modal-actions">
+            <button type="button" className="secondary-button" disabled={freezeBusy} onClick={closeConfirmation}>
+              返回
+            </button>
+            <button className="secondary-button account-danger-button" disabled={freezeBusy || !currentPassword}>
+              {freezeBusy ? "正在验证…" : `确认${action}`}
+            </button>
+          </footer>
+        </form>
+      </Modal>
+    );
+  }
+
   return (
+    <>
+    <div hidden={freezeConfirmOpen}>
     <Modal title="编辑用户资料" eyebrow="EDIT USER" onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <label className="field">
@@ -851,6 +955,34 @@ function UserEditModal({
         <InlineNotice>
           修改角色和直属 Leader 会进入审计日志。已有直属成员的团队负责人不能直接降级。
         </InlineNotice>
+        <div className="user-freeze-row">
+          <span>
+            账号状态：
+            <strong className={user.is_active ? "" : "is-frozen"}>
+              {user.is_active ? "在用" : "已冻结"}
+            </strong>
+          </span>
+          {canFreeze ? (
+            <button
+              type="button"
+              className="secondary-button account-danger-button"
+              disabled={freezeBusy || submitting}
+              onClick={() => setFreezeConfirmOpen(true)}
+            >
+              {freezeBusy
+                ? "处理中…"
+                : user.is_active
+                  ? "冻结账号"
+                  : "解冻账号"}
+            </button>
+          ) : (
+            <small className="field-hint">
+              {user.id === currentUserId
+                ? "不能冻结自己的账号"
+                : "仅超级管理员可冻结系统管理员"}
+            </small>
+          )}
+        </div>
         {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
         <footer className="modal-actions">
           <button type="button" className="secondary-button" onClick={onClose}>
@@ -862,6 +994,9 @@ function UserEditModal({
         </footer>
       </form>
     </Modal>
+    </div>
+    {freezeConfirmation}
+    </>
   );
 }
 
@@ -1266,6 +1401,74 @@ function TagEditModal({
           </button>
         </footer>
       </form>
+    </Modal>
+  );
+}
+
+function DepartmentMembersModal({
+  department,
+  users,
+  onClose,
+}: {
+  department: Department;
+  users: User[];
+  onClose: () => void;
+}) {
+  const members = users
+    .filter((user) => user.primary_department_id === department.id)
+    .sort((a, b) => a.display_name.localeCompare(b.display_name, "zh-CN"));
+  const activeCount = members.filter((user) => user.is_active).length;
+
+  return (
+    <Modal
+      title={`部门成员 · ${department.name}`}
+      eyebrow="DEPARTMENT MEMBERS"
+      onClose={onClose}
+      wide
+    >
+      <div className="department-members-panel">
+        <p className="department-members-meta">
+          主部门归属成员 <strong>{members.length}</strong> 人，其中在用{" "}
+          <strong>{activeCount}</strong> 人（含已停用账号）。
+        </p>
+        {members.length ? (
+          <div className="department-members-list">
+            {members.map((user) => (
+              <article key={user.id}>
+                <AvatarImage
+                  avatarKey={user.avatar_key}
+                  displayName={user.display_name}
+                  className="avatar-large"
+                  decorative
+                />
+                <div>
+                  <h3>{user.display_name}</h3>
+                  <p>@{user.login_name}</p>
+                </div>
+                <span className={`role-pill role-${user.role}`}>
+                  {roleLabel(user.role)}
+                </span>
+                <small>
+                  {user.leader_id
+                    ? `直属：${
+                        users.find((item) => item.id === user.leader_id)
+                          ?.display_name ?? "未知"
+                      }`
+                    : "直属：未指定"}
+                </small>
+                <span className={`tag${user.is_active ? "" : " tag-muted"}`}>
+                  {user.is_active ? "在用" : "已停用"}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="暂无成员"
+            description="尚未有用户的主部门归属到本部门。"
+          />
+        )}
+      </div>
     </Modal>
   );
 }

@@ -121,6 +121,14 @@ export function DashboardView({
   const [createOpportunityOpen, setCreateOpportunityOpen] = useState(false);
   const [relationOpen, setRelationOpen] = useState(false);
   const [summary, setSummary] = useState<TeamWeeklySummary | null>(null);
+  const [scopeType, setScopeType] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("workMgmt.scopeType") || "";
+  });
+  const [scopeDepartmentId, setScopeDepartmentId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("workMgmt.departmentId") || "";
+  });
   const canEditTasks = permissions.includes("tasks.edit");
   const canRecordOpportunityProgress = permissions.includes(
     "dashboard.opportunity.progress",
@@ -135,7 +143,6 @@ export function DashboardView({
   const applyDashboard = useCallback((result: Dashboard) => {
     setDashboard(result);
     setSelectedWeek(result.selected_week.week_start);
-    setSummary(result.latest_team_summary);
     setActivePage((current) =>
       result.accessible_pages.includes(current)
         ? current
@@ -143,23 +150,30 @@ export function DashboardView({
     );
   }, []);
 
-  const load = useCallback(async (weekStart?: string) => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api.dashboard.get(weekStart);
-      applyDashboard(result);
-    } catch (caught) {
-      setError(errorMessage(caught, "无法读取作战台数据"));
-    } finally {
-      setLoading(false);
-    }
-  }, [applyDashboard]);
+  const load = useCallback(
+    async (weekStart?: string, nextScopeType?: string, nextDeptId?: string) => {
+      setLoading(true);
+      setError("");
+      try {
+        const result = await api.dashboard.get(
+          weekStart,
+          nextScopeType ?? scopeType,
+          nextDeptId ?? scopeDepartmentId,
+        );
+        applyDashboard(result);
+      } catch (caught) {
+        setError(errorMessage(caught, "无法读取作战台数据"));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyDashboard, scopeType, scopeDepartmentId],
+  );
 
   useEffect(() => {
     let cancelled = false;
     api.dashboard
-      .get()
+      .get(undefined, scopeType, scopeDepartmentId)
       .then((result) => {
         if (!cancelled) applyDashboard(result);
       })
@@ -174,11 +188,23 @@ export function DashboardView({
     return () => {
       cancelled = true;
     };
-  }, [applyDashboard]);
+  }, [applyDashboard, scopeType, scopeDepartmentId]);
 
   async function changeWeek(value: string) {
     setSelectedWeek(value);
     await load(value);
+  }
+
+  async function changeScope(nextType: string, nextDeptId: string | null) {
+    setScopeType(nextType);
+    setScopeDepartmentId(nextDeptId || "");
+    try {
+      window.localStorage.setItem("workMgmt.scopeType", nextType);
+      window.localStorage.setItem("workMgmt.departmentId", nextDeptId || "");
+    } catch {
+      // ignore storage failures
+    }
+    await load(selectedWeek, nextType, nextDeptId || "");
   }
 
   if (loading && !dashboard) {
@@ -338,6 +364,7 @@ export function DashboardView({
             onSummary={setSummary}
             onError={setError}
             onReload={() => load(selectedWeek)}
+            onScopeChange={changeScope}
           />
         ) : null}
         {activePage === "overview" ? (
@@ -1528,14 +1555,17 @@ function WorkPage({
   onSummary,
   onError,
   onReload,
+  onScopeChange,
 }: {
   dashboard: Dashboard;
   canGenerateSummary: boolean;
   onSummary: (summary: TeamWeeklySummary) => void;
   onError: (message: string) => void;
   onReload: () => Promise<void>;
+  onScopeChange: (scopeType: string, departmentId: string | null) => Promise<void>;
 }) {
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const managementScope = dashboard.management_scope;
   const allSubmitted =
     dashboard.metrics.member_count > 0 &&
     dashboard.metrics.submitted_count === dashboard.metrics.member_count;
@@ -1547,6 +1577,8 @@ function WorkPage({
       const generated = await api.dashboard.generateTeamSummary(
         dashboard.selected_week.week_start,
         force,
+        managementScope?.scope_type,
+        managementScope?.department_id,
       );
       onSummary(generated);
       await onReload();
@@ -1560,50 +1592,137 @@ function WorkPage({
   return (
     <div className="war-work-grid">
       <div className="war-work-main">
-        <section className="war-panel war-band-panel">
-          <header><h3>团队成员 · 周报提交状态</h3></header>
-          <div className="war-member-band">
-            {dashboard.members.map((member) => (
-              <article key={member.id}>
-                <i className={member.submitted ? "on" : ""} />
-                <AvatarImage
-                  avatarKey={member.avatar_key}
-                  displayName={member.display_name}
-                  decorative
-                />
-                <span>
-                  <b>{member.display_name}</b>
-                  <small>{member.submitted ? "已提交" : "待提交"}</small>
-                  <em>
-                    {member.submitted
-                      ? member.weekly_minutes === null
-                        ? "工时不可见"
-                        : `${formatHours(member.weekly_minutes)}h 本周工时`
-                      : "尚未形成正式版本"}
-                  </em>
-                </span>
-              </article>
-            ))}
-            <div
-              className="war-submit-ring"
-              style={
-                {
-                  "--ring-pct": dashboard.metrics.member_count
-                    ? Math.round(
-                        (dashboard.metrics.submitted_count /
-                          dashboard.metrics.member_count) *
-                          100,
-                      )
-                    : 0,
-                } as CSSProperties
-              }
+        {managementScope && managementScope.options.length > 1 ? (
+          <section className="war-panel war-scope-panel" aria-labelledby="management-scope-title">
+            <label className="war-scope-label" id="management-scope-title" htmlFor="management-scope">
+              <Layers size={16} aria-hidden="true" /> 管理范围
+            </label>
+            <select
+              id="management-scope"
+              className="war-scope-select"
+              value={`${managementScope.scope_type}:${managementScope.department_id ?? ""}`}
+              onChange={(event) => {
+                const option = managementScope.options.find(
+                  (item) => `${item.scope_type}:${item.department_id ?? ""}` === event.target.value,
+                );
+                if (option) onScopeChange(option.scope_type, option.department_id);
+              }}
             >
-              <b>
-                {dashboard.metrics.submitted_count}/
-                {dashboard.metrics.member_count}
-              </b>
-              <span>已提交</span>
+              {managementScope.options.map((option) => {
+                const label =
+                  option.scope_type === "all_led"
+                    ? "全部分管部门"
+                    : option.scope_type === "other_direct"
+                      ? "其他直属成员"
+                      : (option.department_name ?? "分管部门");
+                return (
+                  <option
+                    key={`${option.scope_type}:${option.department_id ?? ""}`}
+                    value={`${option.scope_type}:${option.department_id ?? ""}`}
+                  >
+                    {label} · {option.member_count} 人
+                  </option>
+                );
+              })}
+            </select>
+            <span className="war-scope-current-count">当前范围 <b>{dashboard.metrics.member_count}</b> 人</span>
+          </section>
+        ) : null}
+        <section className="war-panel war-band-panel">
+          <header>
+            <h3>
+              {managementScope?.scope_type === "all_led"
+                ? "分管部门 · 周报提交状态"
+                : managementScope?.scope_type === "other_direct"
+                  ? "其他直属成员 · 周报提交状态"
+                  : "团队成员 · 周报提交状态"}
+            </h3>
+          </header>
+          {managementScope?.scope_type === "all_led" ? (
+            <div className="war-dept-groups">
+              {managementScope.options
+                .filter((option) => option.scope_type === "department")
+                .map((option) => {
+                  const deptMembers = dashboard.members.filter(
+                    (member) => member.department_id === option.department_id,
+                  );
+                  const submitted = deptMembers.filter(
+                    (member) => member.submitted,
+                  ).length;
+                  return (
+                    <article key={option.department_id} className="war-dept-group">
+                      <header>
+                        <strong>{option.department_name ?? "部门"}</strong>
+                        <span>
+                          {submitted}/{deptMembers.length} 已提交
+                        </span>
+                      </header>
+                      <div className="war-member-band">
+                        {deptMembers.map((member) => (
+                          <article key={member.id}>
+                            <i className={member.submitted ? "on" : ""} />
+                            <AvatarImage
+                              avatarKey={member.avatar_key}
+                              displayName={member.display_name}
+                              decorative
+                            />
+                            <span>
+                              <b>{member.display_name}</b>
+                              <small>
+                                {member.submitted ? "已提交" : "待提交"}
+                              </small>
+                            </span>
+                          </article>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
             </div>
+          ) : (
+            <div className="war-member-band">
+              {dashboard.members.map((member) => (
+                <article key={member.id}>
+                  <i className={member.submitted ? "on" : ""} />
+                  <AvatarImage
+                    avatarKey={member.avatar_key}
+                    displayName={member.display_name}
+                    decorative
+                  />
+                  <span>
+                    <b>{member.display_name}</b>
+                    <small>{member.submitted ? "已提交" : "待提交"}</small>
+                    <em>
+                      {member.submitted
+                        ? member.weekly_minutes === null
+                          ? "工时不可见"
+                          : `${formatHours(member.weekly_minutes)}h 本周工时`
+                        : "尚未形成正式版本"}
+                    </em>
+                  </span>
+                </article>
+              ))}
+            </div>
+          )}
+          <div
+            className="war-submit-ring"
+            style={
+              {
+                "--ring-pct": dashboard.metrics.member_count
+                  ? Math.round(
+                      (dashboard.metrics.submitted_count /
+                        dashboard.metrics.member_count) *
+                        100,
+                    )
+                  : 0,
+              } as CSSProperties
+            }
+          >
+            <b>
+              {dashboard.metrics.submitted_count}/
+              {dashboard.metrics.member_count}
+            </b>
+            <span>已提交</span>
           </div>
         </section>
 

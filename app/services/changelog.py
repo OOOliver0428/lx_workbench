@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from sqlalchemy import select
@@ -18,6 +19,19 @@ SNAPSHOT_FIELDS = (
     "title",
     "body",
 )
+
+
+def normalize_content(category: str, title: str, body: str) -> tuple[str, str]:
+    title, body = title.strip(), body.strip()
+    if category == "release":
+        if len(title) > 80 or not re.fullmatch(
+            r"[vV]?\d+(?:\.\d+){1,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", title
+        ):
+            raise AppError("CHANGELOG_VERSION_INVALID", "请填写有效版本号，例如 0.3.1")
+        return "v" + title.lstrip("vV"), ""
+    if not title or not body:
+        raise AppError("CHANGELOG_CONTENT_REQUIRED", "普通更新日志必须填写标题和说明")
+    return title, body
 
 
 def require_super_admin(actor: User) -> None:
@@ -49,11 +63,12 @@ def create_changelog_entry(
 ) -> ChangelogEntry:
     require_super_admin(actor)
     now = utc_now()
+    title, body = normalize_content(payload.category.value, payload.title, payload.body)
     entry = ChangelogEntry(
         occurred_at=payload.occurred_at,
         category=payload.category.value,
-        title=payload.title,
-        body=payload.body,
+        title=title,
+        body=body,
         created_by=actor.id,
         updated_by=actor.id,
         created_at=now,
@@ -84,6 +99,12 @@ def update_changelog_entry(
 ) -> ChangelogEntry:
     require_super_admin(actor)
     assert_revision(entry, payload.revision, entity_name="changelog_entry")
+    category = payload.category.value if payload.category is not None else entry.category
+    title, body = normalize_content(
+        category,
+        payload.title if payload.title is not None else entry.title,
+        payload.body if payload.body is not None else entry.body,
+    )
     before = {
         field: getattr(entry, field).isoformat()
         if isinstance(getattr(entry, field), datetime)
@@ -92,12 +113,9 @@ def update_changelog_entry(
     }
     if payload.occurred_at is not None:
         entry.occurred_at = payload.occurred_at
-    if payload.category is not None:
-        entry.category = payload.category.value
-    if payload.title is not None:
-        entry.title = payload.title
-    if payload.body is not None:
-        entry.body = payload.body
+    entry.category = category
+    entry.title = title
+    entry.body = body
     entry.updated_by = actor.id
     db.flush()
     record_audit(
