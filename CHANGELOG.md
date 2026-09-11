@@ -8,9 +8,20 @@
 
 ## [Unreleased]
 
-本条目对应长期路径 A：将 GitHub `dev`（时间块、AI 多轮历史与上下文化）合入已含方案 B
-（多部门负责人）的 `main`。两边能力同时保留，合入后的 tip 可与现网 `eedd4f28` 再做
-merge-base 对比。
+### Added
+
+### Changed
+
+### Fixed
+
+### Security
+
+### Operations
+
+## [0.3.0] - 2026-09-11
+
+本次版本扩展工作记录、更新日志和 AI 助手能力，并统一纳入多部门负责人权限模型。发布内容兼容
+0.2.1 既有数据和配置，升级时由 Alembic 自动创建新增表。
 
 ### Added
 
@@ -48,26 +59,28 @@ merge-base 对比。
 
 ### Security
 
+- 多部门负责人数据范围继续由服务端按“主部门 ∪ 所负责部门”统一校验，不扩展到无关部门；直属
+  Leader、个人周报和团队周报的数据边界保持不变。
+- AI 对话历史按用户隔离，业务上下文继续按当前登录用户的数据权限过滤。
+
 ### Operations
 
-- 新增 Alembic 迁移 `b7e4c1a9d2f3_add_changelog_entries`（`changelog_entries` 表），随启动前
-  `alembic upgrade head` 执行；回滚到不含该能力的代码时可 `alembic downgrade` 至
-  `a6e1c3f9b204`。
-- 新增 3 个 Alembic 迁移，随服务启动前的 `alembic upgrade head` 执行：
+- 新增 4 个 Alembic 迁移，随服务启动前的 `alembic upgrade head` 自动执行：
   `d1f2a3b4c5e6`（`ai_chat_messages` 对话历史表）、`f1a6b7c8d902`（`work_record_time_blocks`
-  时间块表）、`a6e1c3f9b204`（合并上述两个 head）。新表不影响旧版本代码读取；若回滚到不含
-  这些能力的代码，需先 `alembic downgrade` 到 `c8a4d7e2f906`。
+  时间块表）、`a6e1c3f9b204`（合并上述两个 head）和 `b7e4c1a9d2f3`（`changelog_entries`
+  更新日志表）。从 0.3.0 回滚代码到 0.2.1 前，需先将数据库降级到 `c8a4d7e2f906`。
 - 可选新环境变量（均有默认值，不改 `.env` 亦可运行）：`MVP_LLM_CHAT_HISTORY_MAX_MESSAGES`、
   `MVP_LLM_CHAT_HISTORY_MAX_CHARS`、`MVP_LLM_CHAT_MESSAGE_MAX_CHARS`、
   `MVP_LLM_CHAT_CONTEXT_MAX_CHARS`。无新增端口、systemd 或部署依赖。
-- `dev` 合入时删除了根目录 `生成离线升级包.cmd` 包装脚本（`scripts/New-OfflineUpdateBundle.ps1`
-  仍保留）。README 与 Ubuntu 部署文档仍提及该 cmd，后续需对齐文档或恢复包装脚本。
+- 常规维护窗口升级会先创建数据库回滚快照，再切换代码、执行迁移并重启服务；数据库迁移期间会
+  短暂停服。相对 0.2.1 未新增 Python 或 npm 依赖，离线 bundle 可复用现有依赖缓存。
+- Windows 本地启动脚本在锁文件变化或依赖缺失时自动刷新前端依赖；根目录离线升级包入口继续保留。
 
 ## [0.2.1] - 2026-08-14
 
 首个 0.2 稳定版：将 0.2.0 beta 期间的部门工作模块、任务视图重构和工作记录快速录入合并至发布
 主线 `main`。发布分支由 `mvp` 迁移为 `main`，旧原型主线冻结为只读分支 `prototype`，后续开发在
-`develop` 进行，服务器只部署带版本标签的 `main` 提交。
+`dev` 进行，服务器只部署带版本标签的 `main` 提交。
 
 ### Added
 
@@ -98,7 +111,7 @@ merge-base 对比。
 - 无新增环境变量；`app.env`、数据库与备份格式不变。
 - 常规维护窗口更新（停服 → 备份 → fast-forward → 构建 → 迁移 → 健康检查）；在线升级无需额外
   依赖缓存或制品，离线场景沿用增量 bundle 流程。
-- 分支策略变更：`main` 为发布主线，`develop` 为开发分支，`prototype` 为冻结的旧原型主线。
+- 分支策略变更：`main` 为发布主线，`dev` 为开发分支，`prototype` 为冻结的旧原型主线。
 
 ## [0.1.1] - 2026-08-06
 
