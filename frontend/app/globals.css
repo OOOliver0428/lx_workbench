@@ -7162,6 +7162,22 @@ a {
   top: 4px;
 }
 
+.tbp-occupied {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(120, 132, 148, 0.18),
+    rgba(120, 132, 148, 0.18) 4px,
+    rgba(120, 132, 148, 0.1) 4px,
+    rgba(120, 132, 148, 0.1) 8px
+  );
+  border-radius: 4px;
+  bottom: 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  z-index: 0;
+}
+
 .tbp-block {
   align-items: center;
   background: var(--accent-soft);
@@ -7175,6 +7191,7 @@ a {
   overflow: hidden;
   position: absolute;
   top: 5px;
+  z-index: 1;
 }
 
 .time-block-picker.is-dragging .tbp-block {

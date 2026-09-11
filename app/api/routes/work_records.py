@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
@@ -7,7 +9,9 @@ from app.errors import PermissionDeniedError
 from app.models import PermissionKey, User
 from app.schemas import (
     RevisionAction,
+    TimeBlockOut,
     WorkRecordCreate,
+    WorkRecordOccupancyOut,
     WorkRecordOut,
     WorkRecordQuickCreate,
     WorkRecordQuickCreateOut,
@@ -41,6 +45,31 @@ def list_work_records(
         current_week_only=current_week_only,
     )
     return [work_record_out(db, row) for row in rows]
+
+
+@router.get("/occupancy", response_model=WorkRecordOccupancyOut)
+def get_work_record_occupancy(
+    date: date,
+    exclude_record_id: str | None = None,
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+) -> WorkRecordOccupancyOut:
+    """返回当前登录用户在指定日期的已占时间块（仅提示，不拦截重叠录入）。"""
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_MANAGE)
+    rows = record_service.list_own_day_occupancy(
+        db,
+        actor,
+        work_date=date,
+        exclude_record_id=exclude_record_id,
+    )
+    blocks: list[TimeBlockOut] = []
+    for row in rows:
+        blocks.extend(
+            TimeBlockOut(start=block.start_minute, end=block.end_minute)
+            for block in row.time_blocks
+        )
+    blocks.sort(key=lambda block: (block.start, block.end))
+    return WorkRecordOccupancyOut(date=date, time_blocks=blocks)
 
 
 @router.post("", response_model=WorkRecordOut, status_code=201)

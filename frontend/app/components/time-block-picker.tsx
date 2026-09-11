@@ -78,6 +78,7 @@ function normalize(blocks: TimeBlock[], rangeStart: number, rangeEnd: number) {
 export function TimeBlockPicker({
   name = "time",
   defaultBlocks = [],
+  occupiedBlocks = [],
   rangeStart = 0,
   rangeEnd = DAY_MINUTES,
   onChange,
@@ -85,6 +86,8 @@ export function TimeBlockPicker({
   /** 隐藏字段名前缀：生成 `${name}_hours` / `${name}_blocks` */
   name?: string;
   defaultBlocks?: TimeBlock[];
+  /** 当天已占用区间（仅灰显提示，不拦截拖拽与重叠保存） */
+  occupiedBlocks?: TimeBlock[];
   /** 可选范围（分钟，当天 00:00 起算），默认全天 */
   rangeStart?: number;
   rangeEnd?: number;
@@ -329,6 +332,17 @@ export function TimeBlockPicker({
             key={i}
             className={i % 2 === 0 ? "tbp-slot tbp-slot-hour" : "tbp-slot"}
             style={{ left: toPercent(rangeStart + i * SLOT_MINUTES) }}
+            aria-hidden="true"
+          />
+        ))}
+        {occupiedBlocks.map((block, index) => (
+          <div
+            key={`occupied-${block.start}-${block.end}-${index}`}
+            className="tbp-occupied"
+            style={{
+              left: toPercent(Math.max(block.start, rangeStart)),
+              width: `calc(${toPercent(Math.min(block.end, rangeEnd))} - ${toPercent(Math.max(block.start, rangeStart))})`,
+            }}
             aria-hidden="true"
           />
         ))}
