@@ -7548,180 +7548,70 @@ a {
 }
 
 .war-scope-panel {
-  padding: 20px;
-  background: linear-gradient(135deg, #fff 50%, #f5f9ff);
-}
-
-.war-scope-heading {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  justify-content: space-between;
-  margin-bottom: 18px;
+  gap: 12px;
+  padding: 12px 16px;
 }
 
-.war-scope-title {
+.war-scope-label {
   align-items: center;
-  display: flex;
-  gap: 11px;
+  color: var(--ink-soft);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  white-space: nowrap;
 }
 
-.war-scope-heading-icon {
-  align-items: center;
-  background: var(--accent-soft);
-  border: 1px solid #dceafe;
-  border-radius: 11px;
+.war-scope-label svg {
   color: var(--accent);
-  display: flex;
-  flex-shrink: 0;
-  height: 38px;
-  justify-content: center;
-  width: 38px;
 }
 
-.war-scope-title h3 {
-  margin: 0;
+.war-scope-select {
+  background: #f8fbff;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  min-height: 36px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 12px;
+  width: 280px;
 }
 
-.war-scope-title p {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
-  margin: 4px 0 0;
+.war-scope-select:hover {
+  border-color: var(--accent);
+}
+
+.war-scope-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .war-scope-current-count {
-  align-items: baseline;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
   color: var(--muted);
-  display: inline-flex;
   font-size: 11px;
-  gap: 6px;
-  padding: 6px 10px;
+  margin-left: auto;
   white-space: nowrap;
 }
 
 .war-scope-current-count b {
   color: var(--accent-strong);
-  font-size: 16px;
   font-variant-numeric: tabular-nums;
-}
-
-.war-scope-options {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(min(165px, 100%), 1fr));
-}
-
-.war-scope-option {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  color: var(--ink);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  padding: 13px 14px;
-  text-align: left;
-  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
-}
-
-.war-scope-option:hover {
-  background: #f8fbff;
-  border-color: #a6c9f7;
-  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.06);
-}
-
-.war-scope-option.active {
-  background: linear-gradient(135deg, #eff6ff, #f8fbff);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.12);
-}
-
-.war-scope-option:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
-.war-scope-option-top,
-.war-scope-option-footer {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.war-scope-kind {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.war-scope-check {
-  align-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-  display: flex;
-  height: 16px;
-  justify-content: center;
-  width: 16px;
-}
-
-.war-scope-option.active .war-scope-check {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.war-scope-option-name {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.war-scope-option-footer {
-  margin-top: auto;
-}
-
-.war-scope-option-footer b {
-  font-size: 19px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 650;
-}
-
-.war-scope-option-footer small,
-.war-scope-selection {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 400;
-}
-
-.war-scope-option.active .war-scope-option-name,
-.war-scope-option.active .war-scope-selection {
-  color: var(--accent-strong);
 }
 
 @media (max-width: 600px) {
-  .war-scope-panel {
-    padding: 16px;
+  .war-scope-select {
+    flex: 1;
+    width: auto;
   }
 
-  .war-scope-options {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .war-scope-option {
-    padding: 12px;
-  }
-
-  .war-scope-selection {
+  .war-scope-current-count {
     display: none;
   }
 }

@@ -1594,22 +1594,21 @@ function WorkPage({
       <div className="war-work-main">
         {managementScope && managementScope.options.length > 1 ? (
           <section className="war-panel war-scope-panel" aria-labelledby="management-scope-title">
-            <header className="war-scope-heading">
-              <div className="war-scope-title">
-                <span className="war-scope-heading-icon" aria-hidden="true"><Layers size={17} /></span>
-                <div>
-                  <h3 id="management-scope-title">管理范围</h3>
-                  <p>按部门聚焦，查看成员进展与团队周报</p>
-                </div>
-              </div>
-              <span className="war-scope-current-count">当前范围 <b>{dashboard.metrics.member_count}</b> 人</span>
-            </header>
-            <div className="war-scope-options" role="group" aria-label="选择管理范围">
+            <label className="war-scope-label" id="management-scope-title" htmlFor="management-scope">
+              <Layers size={16} aria-hidden="true" /> 管理范围
+            </label>
+            <select
+              id="management-scope"
+              className="war-scope-select"
+              value={`${managementScope.scope_type}:${managementScope.department_id ?? ""}`}
+              onChange={(event) => {
+                const option = managementScope.options.find(
+                  (item) => `${item.scope_type}:${item.department_id ?? ""}` === event.target.value,
+                );
+                if (option) onScopeChange(option.scope_type, option.department_id);
+              }}
+            >
               {managementScope.options.map((option) => {
-                const active =
-                  managementScope.scope_type === option.scope_type &&
-                  (option.scope_type !== "department" ||
-                    managementScope.department_id === option.department_id);
                 const label =
                   option.scope_type === "all_led"
                     ? "全部分管部门"
@@ -1617,30 +1616,16 @@ function WorkPage({
                       ? "其他直属成员"
                       : (option.department_name ?? "分管部门");
                 return (
-                  <button
+                  <option
                     key={`${option.scope_type}:${option.department_id ?? ""}`}
-                    type="button"
-                    className={`war-scope-option${active ? " active" : ""}`}
-                    aria-pressed={active}
-                    onClick={() =>
-                      onScopeChange(option.scope_type, option.department_id)
-                    }
+                    value={`${option.scope_type}:${option.department_id ?? ""}`}
                   >
-                    <span className="war-scope-option-top">
-                      <span className="war-scope-kind">
-                        {option.scope_type === "all_led" ? "部门总览" : option.scope_type === "other_direct" ? "直属范围" : "分管部门"}
-                      </span>
-                      <span className="war-scope-check" aria-hidden="true">{active ? <Check size={11} /> : null}</span>
-                    </span>
-                    <strong className="war-scope-option-name">{label}</strong>
-                    <span className="war-scope-option-footer">
-                      <span><b>{option.member_count}</b> <small>位成员</small></span>
-                      <span className="war-scope-selection">{active ? "当前查看" : "查看范围"}</span>
-                    </span>
-                  </button>
+                    {label} · {option.member_count} 人
+                  </option>
                 );
               })}
-            </div>
+            </select>
+            <span className="war-scope-current-count">当前范围 <b>{dashboard.metrics.member_count}</b> 人</span>
           </section>
         ) : null}
         <section className="war-panel war-band-panel">
