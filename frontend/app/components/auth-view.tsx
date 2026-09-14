@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError, setCsrfToken } from "../api";
 import type { AuthContext } from "../types";
@@ -17,6 +17,59 @@ export function LoginView({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const artworkRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const artwork = artworkRef.current;
+    if (!artwork) return;
+    const motion = window.matchMedia("(hover: hover) and (pointer: fine) and (min-width: 861px) and (prefers-reduced-motion: no-preference)");
+    const planes = Array.from(artwork.querySelectorAll<HTMLElement>(".login-screen-plane"));
+    let frame = 0;
+    let pointer: { x: number; y: number } | null = null;
+    const reset = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      pointer = null;
+      for (const plane of planes) {
+        plane.style.removeProperty("--hover-x");
+        plane.style.removeProperty("--hover-y");
+        plane.style.removeProperty("--hover-depth");
+      }
+    };
+    const update = () => {
+      frame = 0;
+      if (!pointer || !motion.matches) return;
+      const bounds = artwork.getBoundingClientRect();
+      const x = Math.max(-1, Math.min(1, (pointer.x - bounds.left) / bounds.width * 2 - 1));
+      const y = Math.max(-1, Math.min(1, (pointer.y - bounds.top) / bounds.height * 2 - 1));
+      const active = document.elementFromPoint(pointer.x, pointer.y)?.closest(".login-screen-plane");
+      planes.forEach((plane, index) => {
+        const weight = plane === active ? 1 : 0.25;
+        const amplitude = (6 - index * 0.6) * weight;
+        plane.style.setProperty("--hover-x", `${x * amplitude}px`);
+        plane.style.setProperty("--hover-y", `${y * amplitude - weight * 4}px`);
+        plane.style.setProperty("--hover-depth", String(weight));
+      });
+    };
+    const move = (event: PointerEvent) => {
+      if (!motion.matches || event.pointerType !== "mouse") return;
+      pointer = { x: event.clientX, y: event.clientY };
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    artwork.addEventListener("pointermove", move, { passive: true });
+    artwork.addEventListener("pointerleave", reset);
+    artwork.addEventListener("pointercancel", reset);
+    motion.addEventListener("change", reset);
+    window.addEventListener("blur", reset);
+    return () => {
+      reset();
+      artwork.removeEventListener("pointermove", move);
+      artwork.removeEventListener("pointerleave", reset);
+      artwork.removeEventListener("pointercancel", reset);
+      motion.removeEventListener("change", reset);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -37,51 +90,37 @@ export function LoginView({
 
   return (
     <main className="login-page">
-      <section className="login-story">
-        <div className="brand-lockup brand-lockup-light">
-          <span className="brand-symbol">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>
-            <strong>协作工作台</strong>
-            <small>赋能售前和解决方案</small>
-          </span>
-        </div>
-        <div className="story-copy">
-          <h1>
-            跨部门级协作作战台，
-            <br />
-            把握商机，掌控节奏
-          </h1>
-          <p>
-            当前为MVP版本，仅保留最小化功能，试运行期间收集问题，后续功能会持续迭代。
-          </p>
-        </div>
-        <div className="story-footnote">
-          <span>内网试运行版</span>
-          <i />
-          <span>数据仅保存在本地服务</span>
+      <section className="login-story" ref={artworkRef} aria-hidden="true">
+        <div className="login-artwork">
+          <div className="login-plane-stack">
+            {["opportunities", "tasks", "work", "reports"].map((screen) => (
+              <div className="login-screen-plane" key={screen}>
+                {/* The frame and uncropped screenshot share the stack transform. */}
+                <div className="login-screen-surface" style={{ backgroundImage: `url(/images/login/${screen}.png)` }} />
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
       <section className="login-panel">
         <form className="login-card" onSubmit={submit}>
           <header>
-            <span className="mobile-brand">协作工作台</span>
-            <p className="eyebrow">WELCOME BACK</p>
-            <h2>登录团队空间</h2>
-            <p>使用登录名或显示名称进入。</p>
+            <div className="login-brand">
+              <span className="brand-symbol" aria-hidden="true"><i /><i /><i /></span>
+              <span>协作工作台</span>
+            </div>
+            <h2>登录工作台</h2>
+            <p>把握商机，让协作有序向前。</p>
           </header>
           {notice ? <InlineNotice tone="warning">{notice}</InlineNotice> : null}
           {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
           <label className="field">
-            <span>登录名或显示名称</span>
+            <span>账号</span>
             <input
               value={loginIdentifier}
               onChange={(event) => setLoginIdentifier(event.target.value)}
-              placeholder="例如 zhangsan 或 张三"
+              placeholder="输入登录名或显示名称"
               autoComplete="username"
               required
               autoFocus
@@ -99,7 +138,7 @@ export function LoginView({
             />
           </label>
           <button className="primary-button login-submit" disabled={submitting}>
-            {submitting ? "正在验证…" : "进入工作台"}
+            {submitting ? "正在验证…" : "登录"}
           </button>
           <p className="login-hint">首次登录后，系统会要求修改初始密码。</p>
         </form>

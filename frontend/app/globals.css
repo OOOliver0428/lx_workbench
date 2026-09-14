@@ -238,37 +238,86 @@ a {
 
 /* Authentication */
 .login-page {
-  background: var(--canvas);
+  background: #fff;
   display: grid;
   grid-template-areas: "login story";
-  grid-template-columns: minmax(420px, 0.92fr) minmax(420px, 1.08fr);
+  grid-template-columns: minmax(380px, 0.94fr) minmax(0, 1.06fr);
   min-height: 100vh;
 }
 
 .login-story {
-  background:
-    radial-gradient(circle at 18% 82%, rgba(50, 213, 228, 0.2), transparent 32%),
-    linear-gradient(158deg, #0a2342 6%, #12579e 56%, #1677ff);
-  color: #fff;
-  display: flex;
-  flex-direction: column;
+  background: #fff;
+  container-type: inline-size;
   grid-area: story;
   min-height: 100vh;
   overflow: hidden;
-  padding: 48px 58px;
   position: relative;
 }
 
 .login-story::after {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 50%;
+  background: linear-gradient(90deg, #fff, rgba(255, 255, 255, 0));
   content: "";
-  height: 580px;
+  inset: 0 auto 0 0;
+  pointer-events: none;
   position: absolute;
-  right: -310px;
+  width: 12%;
+}
+
+.login-artwork {
+  position: absolute;
+  width: 100%;
+  height: 125cqw;
   top: 50%;
   transform: translateY(-50%);
-  width: 580px;
+  background: url("/images/login/blue-ribbon-v3.png") -17cqw center / 100% 100% no-repeat;
+}
+
+/* Only uniform scaling and in-plane rotation: screen content keeps its visual
+   proportions, without the foreshortening introduced by rotateX/rotateY. */
+.login-plane-stack {
+  position: absolute;
+  inset: 0;
+  transform: translateX(4%) scale(0.88) rotate(-10deg);
+  transform-origin: 50% 50%;
+}
+
+.login-screen-plane {
+  transform: translate(var(--hover-x, 0px), var(--hover-y, 0px));
+  transition: transform 900ms cubic-bezier(0.22, 0.68, 0.2, 1), box-shadow 1000ms ease;
+  position: absolute;
+  left: 20%;
+  width: 104%;
+  padding: 3px;
+  border: 1px solid #d5e5f3;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #fff 10%, #eef7ff 55%, #94bee4);
+  box-shadow:
+    0 1px 0 #fff inset,
+    0 2px 0 #c8e2f7,
+    0 4px 0 #adcee8,
+    0 6px 0 #779bbb,
+    0 12px 14px rgba(29, 57, 90, 0.18),
+    0 calc(30px + var(--hover-depth, 0) * 7px) calc(38px + var(--hover-depth, 0) * 5px) rgba(27, 54, 84, calc(0.23 + var(--hover-depth, 0) * 0.05));
+}
+
+@media (prefers-reduced-motion: reduce), (hover: none), (pointer: coarse), (max-width: 860px) {
+  .login-screen-plane {
+    transform: none;
+    transition: none;
+  }
+}
+
+.login-screen-plane:nth-child(1) { top: -9%; z-index: 4; }
+.login-screen-plane:nth-child(2) { top: 18%; left: 12%; z-index: 3; }
+.login-screen-plane:nth-child(3) { top: 45%; left: 4%; z-index: 2; }
+.login-screen-plane:nth-child(4) { top: 72%; left: -4%; z-index: 1; }
+
+.login-screen-surface {
+  aspect-ratio: 1600 / 1050;
+  border-radius: 9px;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
 }
 
 .brand-lockup {
@@ -356,8 +405,32 @@ a {
 }
 
 .login-card {
-  max-width: 390px;
+  max-width: 370px;
   width: 100%;
+}
+
+.login-brand {
+  align-items: center;
+  color: var(--ink);
+  display: flex;
+  font-size: 17px;
+  font-weight: 750;
+  gap: 12px;
+  margin-bottom: 42px;
+}
+
+.login-card .field {
+  margin-bottom: 22px;
+}
+
+.login-card .field input {
+  background: #fff;
+  min-height: 48px;
+}
+
+.login-card .login-submit {
+  min-height: 48px;
+  box-shadow: 0 5px 14px rgba(22, 119, 255, 0.16);
 }
 
 .login-card header {

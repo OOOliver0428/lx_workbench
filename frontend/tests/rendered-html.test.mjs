@@ -133,7 +133,7 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(appShell, /aria-pressed=\{sidebarCollapsed\}/);
   assert.match(appShell, /<strong>AI 助手<\/strong>/);
   assert.match(appShell, /赋能售前和解决方案/);
-  assert.match(authView, /赋能售前和解决方案/);
+  assert.match(authView, /把握商机，让协作有序向前。/);
   assert.doesNotMatch(appShell + authView, /Solution Workspace/);
   assert.doesNotMatch(appShell, /MiniMax 助手|MINIMAX COPILOT/);
   assert.match(appShell, /messages\.map\(\(message\)/);
