@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { api, ApiClientError, setCsrfToken } from "../api";
 import type { AuthContext } from "../types";
 import { InlineNotice } from "./ui";
+import loginArtwork from "../login-artwork.json";
 
 export function LoginView({
   notice,
@@ -91,12 +92,12 @@ export function LoginView({
   return (
     <main className="login-page">
       <section className="login-story" ref={artworkRef} aria-hidden="true">
-        <div className="login-artwork">
+        <div className="login-artwork" style={{ backgroundImage: `url(${loginArtwork["blue-ribbon-v3"]})` }}>
           <div className="login-plane-stack">
-            {["opportunities", "tasks", "work", "reports"].map((screen) => (
+            {(["opportunities", "tasks", "work", "reports"] as const).map((screen) => (
               <div className="login-screen-plane" key={screen}>
                 {/* The frame and uncropped screenshot share the stack transform. */}
-                <div className="login-screen-surface" style={{ backgroundImage: `url(/images/login/${screen}.png)` }} />
+                <div className="login-screen-surface" style={{ backgroundImage: `url(${loginArtwork[screen]})` }} />
               </div>
             ))}
           </div>

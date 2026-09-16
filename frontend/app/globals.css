@@ -269,7 +269,9 @@ a {
   height: 125cqw;
   top: 50%;
   transform: translateY(-50%);
-  background: url("/images/login/blue-ribbon-v3.png") -17cqw center / 100% 100% no-repeat;
+  background-position: -17cqw center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
 }
 
 /* Only uniform scaling and in-plane rotation: screen content keeps its visual
