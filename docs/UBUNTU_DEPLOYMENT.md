@@ -1,6 +1,6 @@
 # Ubuntu 部署与运维手册
 
-> 适用版本：**0.4.1** · 最后复核：2026-09-11 · 正式发布分支：`main`
+> 适用版本：**0.4.1 及当前待发布运维改进** · 最后复核：2026-09-17 · 正式发布分支：`main`
 
 正式部署前须确认 `main` 的 CI 通过并完成版本标签发布。
 从 0.4.0 升级无新增迁移；从 0.3.0 升级包含管理范围、版本日志和周成员名单迁移，目标为 `e3f4a5b6c7d8`。维护窗口先备份再升级；回滚限制见
@@ -11,8 +11,8 @@
 
 ## 1. 部署边界
 
-- 推荐 Ubuntu 22.04/24.04 LTS，服务器需要能访问 Ubuntu、NodeSource、Astral 和 npm 软件源。
-- Node.js 最低版本为 22.13，Python 由 `uv` 固定为 3.12。
+- 安装器支持 Ubuntu + systemd；现有部署目标为 Ubuntu 22.04/24.04 LTS。服务器需要能访问 Ubuntu、Node.js 官方下载站、Astral 和 npm/Python 软件源。
+- 安装器要求 Node.js 至少为其固定的 22.23.1，Python 由 `uv` 固定为 3.12。
 - 前端默认监听 `0.0.0.0:5174`，只应向批准的公司内网或 VPN 网段开放。
 - 后端默认只监听 `127.0.0.1:8787`，浏览器不能直接访问后端端口。
 - SQLite 主库必须放在 `/var/lib/solution-workspace/` 的本机固定磁盘，不得放在 NFS、SMB、
@@ -34,10 +34,12 @@
 | `/etc/solution-workspace/app.env` | 运行配置和加密主密钥 | `0640 root:solution-workspace`，前端账号不可读 |
 | `/etc/solution-workspace/deploy.conf` | 运维脚本使用的部署元数据 | `0640 root:solution-workspace` |
 | `/var/lib/solution-workspace/` | SQLite 数据库和服务账号 HOME | 不由 Web 服务暴露 |
-| `/var/lib/solution-workspace/releases/` | 人工转入的 bundle/离线发布文件 | `0700 root:root`，发布后清理 |
+| `/var/lib/solution-workspace-releases/` | 离线入口自动复制并校验的 bundle 临时副本 | `0700 root:root`，退出时清理，与应用可写数据目录分离 |
+| `/var/log/solution-workspace/` | 安装、更新、迁移、切库及手工备份日志 | `0700 root:root`，日志 `0600` |
 | `/var/backups/solution-workspace/scheduled/` | 本机一致性定时备份和校验清单 | 仍需复制到异机 |
 | `/var/cache/solution-workspace/npm/` | 无特权前端构建账号的 npm 内容缓存 | 不包含 `.npmrc` 或部署凭据 |
 | `/usr/local/sbin/solution-workspace` | 统一运维命令 | root 执行 |
+| `/usr/local/lib/solution-workspace/diagnostics.sh` | 运维错误提示与日志组件 | 随主脚本一同安装 |
 
 systemd 服务：
 
@@ -62,8 +64,7 @@ git status --short --branch
 git rev-parse HEAD
 ```
 
-如果 `main` 已前进到更新的发布提交，而需要部署历史标签，请改用 8.1 节的离线 bundle 流程，
-或先把本地 `main` 定位到该标签后再执行安装。
+安装器复制源码当前的确切提交；检出历史版本标签时，不会改为部署更新的 `main`。
 
 不要把本地 `.env`、测试数据库、备份或日志上传到仓库后再部署。
 
@@ -240,6 +241,10 @@ sudo solution-workspace switch-db /var/lib/solution-workspace/trial.db
 
 ## 6. 日常运维命令
 
+迁机前后的只读检查：`sudo solution-workspace doctor`。它检查提交、工作区、数据库 revision、
+服务响应、自动备份与磁盘空间；发现问题以非零状态退出，不打印配置密钥。完整迁机顺序见
+[生产服务器迁移手册](SERVER_MIGRATION.md)。
+
 ```bash
 # 状态和健康
 sudo solution-workspace status
@@ -367,6 +372,22 @@ sudo systemctl is-active solution-workspace-backup.timer
 
 ### 8.1 GitHub 不可达时使用增量 bundle
 
+新版更新器的日常操作只需上传 `.bundle` 与同名 `.bundle.sha256`，然后执行：
+
+```bash
+sudo solution-workspace update --offline /tmp/solution-workspace-update.bundle
+# 多分支包才需要明确选择；不指定时只接受包内恰好一个分支
+sudo solution-workspace update --offline /tmp/solution-workspace-update.bundle --branch main
+```
+
+更新器在持有运维锁期间复制文件到 root 专属目录，再校验配套 SHA-256、bundle 历史基线、
+目标分支与快进条件。相同提交直接提示“无需更新”，不会停服或重新构建。校验文件必须只包含
+一条与 bundle 原文件名对应的 SHA-256 记录；不要只重命名其中一个文件。哈希验证检测传输损坏，
+不证明发布者身份，更新包仍需来自受信任渠道。旧版命令仍兼容下面的路径调用方式。
+
+`--offline` 仅替代 GitHub 代码传输；缓存缺失时仍需访问 npm/Python 软件源。它不是完整断网安装器。
+若 `solution-workspace help` 尚未显示 `--offline`，先按本节末尾的引导步骤更新运维组件。
+
 `update` 的第一个参数既可以是远程名称，也可以是本地 Git bundle。先在服务器记录当前提交：
 
 ```bash
@@ -395,16 +416,14 @@ sha256sum solution-workspace-update.bundle
 带入发布包。要在脚本或终端中使用时，执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass \
-  -File scripts/New-OfflineUpdateBundle.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/New-OfflineUpdateBundle.ps1
 ```
 
 如果异常老的服务器不包含 `v0.1.0`，服务器端 `bundle verify` 会在更新前安全拒绝。此时可一次性
 生成不要求历史基线、但体积更大的完整包：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass \
-  -File scripts/New-OfflineUpdateBundle.ps1 -FullHistory
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/New-OfflineUpdateBundle.ps1 -FullHistory
 ```
 
 将 bundle 通过 SCP、堡垒机或批准的介质先传到服务器临时目录，通过独立可信通道核对 SHA-256
@@ -429,8 +448,8 @@ bundle 只替代 GitHub 代码传输，不自动携带 npm/Python 依赖。更�
 保留当前版本；不要反复执行更新。
 
 如果服务器当前版本不晚于 `4fe59b1`，旧更新器既可能漏装 `devDependencies`，也会用仅 root 可读
-的 umask 构建前端。不能直接调用旧版 `update`。先从已经校验的 bundle 中只取出新版运维脚本，
-校验 Bash 语法并备份旧脚本：
+的 umask 构建前端。不能直接调用旧版 `update`。首次启用 `--offline` 也需更新运维组件：
+确认没有其他运维任务，从已校验、可信的新版 bundle 中取出主脚本和诊断组件，校验语法并备份旧脚本：
 
 ```bash
 sudo bash -c '
@@ -439,14 +458,24 @@ sudo bash -c '
   bundle=/var/lib/solution-workspace/releases/solution-workspace-update.bundle
   project=/opt/solution-workspace
   candidate=/usr/local/sbin/solution-workspace.next
+  helper=/usr/local/lib/solution-workspace/diagnostics.sh
   git -C "$project" bundle verify "$bundle"
   git -C "$project" fetch "$bundle" main
   git -C "$project" show FETCH_HEAD:deploy/ubuntu/ops.sh >"$candidate"
+  install -d -m 0755 -o root -g root /usr/local/lib/solution-workspace
+  git -C "$project" show FETCH_HEAD:deploy/lib/diagnostics.sh >"$helper.next"
   test -s "$candidate"
   bash -n "$candidate"
+  test -s "$helper.next"
+  bash -n "$helper.next"
   cp -a /usr/local/sbin/solution-workspace \
     /usr/local/sbin/solution-workspace.before-staged-update
-  install -m 0755 -o root -g root "$candidate" /usr/local/sbin/solution-workspace
+  if test -f "$helper"; then cp -a "$helper" "$helper.before-update"; fi
+  chown root:root "$candidate" "$helper.next"
+  chmod 0755 "$candidate"
+  chmod 0644 "$helper.next"
+  mv -f "$helper.next" "$helper"
+  mv -f "$candidate" /usr/local/sbin/solution-workspace
   /usr/local/sbin/solution-workspace update "$bundle" main
   /usr/local/sbin/solution-workspace health
 '
@@ -458,7 +487,7 @@ sudo bash -c '
 
 ### 8.2 更新失败与版本感知回滚
 
-如果更新在构建或迁移阶段失败，脚本会保持应用和备份定时器停止，输出旧/新提交以及准确的离线
+如果更新在应用代码、安装 Python 依赖或迁移阶段失败，脚本会尝试保持应用和备份定时器停止，输出旧/新提交以及准确的离线
 回滚快照。不要在新代码下对该快照执行 `switch-db`，否则它会再次迁移到新 schema。版本感知回滚：
 
 1. 保持服务停止，保存失败日志和 `/var/backups/solution-workspace/updates/.../update.env`；
@@ -505,6 +534,27 @@ sudo bash -c '
    对应旧版本制品，不允许盲目降级 schema。
 
 私有仓库执行 `update` 前，应为 root 配置只读 deploy key 或公司批准的凭据；不要把访问令牌写入远端 URL。
+
+### 8.3 错误提示与操作日志
+
+运维错误统一输出错误编号、阶段、原因、当前状态、下一步和日志位置。进入维护前失败不应用更新；
+停服后但尚未变更代码/数据库时，尝试恢复原服务且只有健康检查通过才报告恢复成功；可能已应用更新时
+保留回滚现场，不自动降级数据库。Ctrl+C/TERM 同样执行状态处理；断电或 SIGKILL 无法被脚本捕获，
+再次操作前需检查状态与回滚记录。
+
+| 常见编号 | 处理方式 |
+|---|---|
+| `E_ARGUMENT` / `E_CONFIG` | 核对参数、配置位置及权限；迁机不要重新生成原加密密钥 |
+| `E_CHECKSUM_FILE` / `E_CHECKSUM_FORMAT` / `E_CHECKSUM_MISMATCH` | 重新上传同一批生成的两个文件，保持原文件名 |
+| `E_BUNDLE_VERIFY` | 核对包完整性；缺少历史基线时重新生成 `-FullHistory` 包 |
+| `E_BUNDLE_BRANCH` / `E_NOT_FORWARD` | 核对分支与版本，不能用升级入口倒退版本 |
+| `E_LOCK` / `E_DISK` | 等待现有任务结束，或扩容/清理无关文件；不要删除锁或回滚快照 |
+| `E_FRONTEND_BUILD` | 查看 npm/构建报错；当前服务尚未因更新停机 |
+| `E_BACKUP` | 检查数据库、备份目录权限、空间和长事务；不要使用失败产物 |
+| `E_MIGRATION` / `E_BACKEND_INSTALL` / `E_HEALTH` | 先确认服务状态，保留快照，按第 8.2 节恢复，勿连续重试 |
+
+详细日志仅 root 可读，不采集环境变量或启用 shell trace，并遮蔽常见令牌及 URL 凭据格式；
+第三方工具可能输出其他敏感内容，分享日志前仍需检查。日志与失败后的恢复目录需在回滚窗口结束后按运维规则归档清理。
 
 ## 9. 网络与 HTTPS
 

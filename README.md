@@ -189,7 +189,7 @@ sudo solution-workspace backup
 
 安装脚本负责依赖、前端构建、数据库迁移、systemd 服务和每日备份定时任务。默认入口为 `http://服务器IP:5174/`。
 
-**升级、回滚、备份恢复、试用库转正式库、HTTPS 和故障排查，请使用 [Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。** Windows 还可通过根目录 `生成离线升级包.cmd` 制作代码升级 bundle；它不包含完整的离线依赖。
+**升级、回滚、备份恢复、试用库转正式库、HTTPS 和故障排查，请使用 [Ubuntu 部署与运维手册](docs/UBUNTU_DEPLOYMENT.md)。** Windows 可通过根目录 `生成离线升级包.cmd` 制作代码 bundle，上传包与配套校验文件后使用 `sudo solution-workspace update --offline /路径/更新包.bundle` 升级；旧更新器需先按手册更新运维组件，bundle 不包含完整离线依赖。换服务器请参考 [生产服务器迁移手册](docs/SERVER_MIGRATION.md)。
 
 ## 自行部署，清楚掌握数据流向
 

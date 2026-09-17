@@ -3,8 +3,12 @@ set -Eeuo pipefail
 umask 0022
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly DEFAULT_SOURCE_DIR="$(realpath -- "${SCRIPT_DIR}/../..")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+# shellcheck source=../lib/diagnostics.sh
+source "${SCRIPT_DIR}/../lib/diagnostics.sh"
+DEFAULT_SOURCE_DIR="$(realpath -- "${SCRIPT_DIR}/../..")"
+readonly DEFAULT_SOURCE_DIR
 readonly CONFIG_DIR="/etc/solution-workspace"
 readonly ENV_FILE="${CONFIG_DIR}/app.env"
 readonly DATA_DIR="/var/lib/solution-workspace"
@@ -50,15 +54,6 @@ Options:
 Example:
   sudo bash deploy/ubuntu/install.sh --public-host 10.20.30.40
 EOF
-}
-
-fail() {
-  printf 'error: %s\n' "$*" >&2
-  exit 1
-}
-
-log() {
-  printf '\n==> %s\n' "$*"
 }
 
 valid_port() {
@@ -152,44 +147,58 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-[[ "${EUID}" -eq 0 ]] || fail "run this installer with sudo"
-[[ -r /etc/os-release ]] || fail "cannot identify the operating system"
+[[ "${EUID}" -eq 0 ]] || fail "权限不足，请使用 sudo 执行安装脚本。"
+[[ -r /etc/os-release ]] || fail "无法读取 /etc/os-release，不能确认操作系统。"
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ "${ID:-}" == "ubuntu" ]] || fail "this installer supports Ubuntu only"
+[[ "${ID:-}" == "ubuntu" ]] || fail "此安装器仅支持 Ubuntu；其他系统需要适配部署流程。"
+[[ -d /run/systemd/system ]] || fail "未检测到正在运行的 systemd；请在 Ubuntu 主机中安装，容器或未启用 systemd 的 WSL 不适用。" E_PLATFORM
 for bootstrap_command in realpath git systemctl; do
   command -v "${bootstrap_command}" >/dev/null 2>&1 || {
-    fail "${bootstrap_command} is required before installation can start"
+    fail "安装前缺少 ${bootstrap_command} 命令，请先补齐系统工具。"
   }
 done
+workspace_init_log install
+workspace_stage "检查安装参数、源码和现有部署" "新服务器使用 --public-host 指定 IP 或域名；已有部署应使用 update，修复安装必须先停服。" E_INSTALL_CHECK
 
 SOURCE_DIR="$(realpath -- "${SOURCE_DIR}")"
 PROJECT_DIR="$(realpath --canonicalize-missing -- "${PROJECT_DIR}")"
-[[ -d "${SOURCE_DIR}/.git" ]] || fail "source directory is not a Git checkout"
-[[ -f "${SOURCE_DIR}/uv.lock" ]] || fail "uv.lock was not found in ${SOURCE_DIR}"
-[[ -f "${SOURCE_DIR}/frontend/package-lock.json" ]] || fail "frontend lockfile was not found"
-[[ "${SOURCE_DIR}" != *[[:space:]]* ]] || fail "source path must not contain whitespace"
+[[ -d "${SOURCE_DIR}/.git" ]] || fail "源码目录不是 Git 仓库，请先克隆完整的发布代码。"
+[[ -f "${SOURCE_DIR}/uv.lock" ]] || fail "源码目录 ${SOURCE_DIR} 缺少 uv.lock，不能安装未锁定的依赖。"
+[[ -f "${SOURCE_DIR}/frontend/package-lock.json" ]] || fail "源码缺少 frontend/package-lock.json，请核对发布内容。"
+[[ "${SOURCE_DIR}" != *[[:space:]]* ]] || fail "源码路径不能包含空格或换行。"
 [[ "${PROJECT_DIR}" == /opt/* \
   && "${PROJECT_DIR}" != *[[:space:]]* \
   && "${PROJECT_DIR}" != *"'"* ]] || {
-  fail "install directory must be a whitespace-free path below /opt"
+  fail "安装目录必须位于 /opt 下，且不能包含空白或单引号。"
 }
-[[ -n "${PUBLIC_HOST}" ]] || fail "--public-host is required"
-[[ "${PUBLIC_HOST}" =~ ^[A-Za-z0-9._:-]+$ ]] || fail "invalid public host: ${PUBLIC_HOST}"
-valid_port "${FRONTEND_PORT}" || fail "invalid frontend port: ${FRONTEND_PORT}"
-valid_port "${BACKEND_PORT}" || fail "invalid backend port: ${BACKEND_PORT}"
-[[ "${FRONTEND_PORT}" != "${BACKEND_PORT}" ]] || fail "frontend and backend ports must differ"
+[[ -n "${PUBLIC_HOST}" ]] || fail "缺少 --public-host；请填写用户访问的服务器 IP 或域名。"
+[[ "${PUBLIC_HOST}" =~ ^[A-Za-z0-9._:-]+$ ]] || fail "无效访问主机：${PUBLIC_HOST}；只填写 IP 或域名，不要包含协议或路径。"
+valid_port "${FRONTEND_PORT}" || fail "前端端口必须为 1–65535：${FRONTEND_PORT}"
+valid_port "${BACKEND_PORT}" || fail "后端端口必须为 1–65535：${BACKEND_PORT}"
+FRONTEND_PORT="$((10#${FRONTEND_PORT}))"
+BACKEND_PORT="$((10#${BACKEND_PORT}))"
+[[ "${FRONTEND_PORT}" != "${BACKEND_PORT}" ]] || fail "前后端端口不能相同，请分别指定。"
 
 source_branch="$(git -C "${SOURCE_DIR}" branch --show-current)"
 source_tag="$(git -C "${SOURCE_DIR}" describe --tags --exact-match HEAD 2>/dev/null || true)"
 [[ "${source_branch}" == "main" || -n "${source_tag}" ]] || {
-  fail "source checkout must be on the main branch or a version tag"
+  fail "源码需要检出 main 或发布标签；请先定位到已评审的发布提交。"
 }
 source_changes="$(git -C "${SOURCE_DIR}" status --porcelain)"
-[[ -z "${source_changes}" ]] || fail "source checkout has uncommitted changes"
+[[ -z "${source_changes}" ]] || fail "源码目录有未提交改动，请妥善保存后使用干净的发布仓库。"
+[[ ! -L "${CONFIG_DIR}" ]] || fail "配置目录不能是符号链接：${CONFIG_DIR}" E_CONFIG
+if [[ ! -d "${CONFIG_DIR}" ]]; then
+  install -d -m 0750 -o root -g root "${CONFIG_DIR}"
+fi
+[[ "$(stat -c '%u' "${CONFIG_DIR}")" -eq 0 \
+  && -z "$(find "${CONFIG_DIR}" -maxdepth 0 -perm /022 -print)" ]] || fail "配置目录须由 root 持有且不可被其他账号写入。" E_CONFIG
+command -v flock >/dev/null || fail "缺少 flock，请安装 util-linux 后重试。" E_DEPENDENCY
+exec 9>>"${CONFIG_DIR}/ops.lock"
+flock --wait 300 9 || fail "等待部署锁超时；请等待已有安装、升级或备份结束，不要删除锁文件。" E_LOCK
 if [[ -d "${PROJECT_DIR}/.git" ]]; then
   [[ "${REPAIR_STOPPED_INSTALL}" == "true" ]] || {
-    fail "an install checkout already exists; use 'sudo solution-workspace update'"
+    fail "安装目录已有部署；日常升级请使用 sudo solution-workspace update。"
   }
   for existing_unit in \
     solution-workspace-backend.service \
@@ -197,15 +206,33 @@ if [[ -d "${PROJECT_DIR}/.git" ]]; then
     solution-workspace-backup.service \
     solution-workspace-backup.timer; do
     systemctl is-active --quiet "${existing_unit}" && {
-      fail "repair requires all application and backup units to be stopped: ${existing_unit}"
+      fail "修复安装前必须停止所有应用和备份任务；仍在运行：${existing_unit}"
     }
   done
-  if [[ -f "${CONFIG_DIR}/ops.lock" ]]; then
-    command -v flock >/dev/null 2>&1 || fail "flock is required to repair an installation"
-    exec 9>>"${CONFIG_DIR}/ops.lock"
-    flock --wait 300 9 || fail "another deployment or backup operation is still running"
-  fi
 fi
+
+INSTALL_MUTATED=false
+INSTALL_SERVICES_STARTED=false
+workspace_on_failure() {
+  if [[ "${INSTALL_SERVICES_STARTED}" == true ]]; then
+    systemctl stop solution-workspace.target solution-workspace-backup.timer \
+      solution-workspace-backup.service solution-workspace-backend.service \
+      solution-workspace-frontend.service || true
+    WORKSPACE_STATE="安装未完成，已尝试停止应用与备份服务；请检查 systemctl status。配置与数据库保留。"
+  elif [[ "${INSTALL_MUTATED}" == true ]]; then
+    WORKSPACE_STATE="安装未完成；已创建的运行时、代码、配置或数据被保留，尚未启动应用。"
+  fi
+}
+workspace_cleanup() {
+  local candidate
+  for candidate in "${temporary_node_dir:-}" "${temporary_uv_dir:-}"; do
+    [[ -z "${candidate}" ]] || rm -rf -- "${candidate}"
+  done
+  [[ -z "${temporary_env:-}" ]] || rm -f -- "${temporary_env}"
+}
+workspace_require_space /opt 2147483648
+INSTALL_MUTATED=true
+WORKSPACE_STATE="正在准备新服务器安装，已创建的文件会在失败时保留。"
 
 if [[ -z "${DATABASE_URL}" ]]; then
   DATABASE_URL="sqlite:////var/lib/solution-workspace/trial.db"
@@ -213,21 +240,22 @@ fi
 [[ "${DATABASE_URL}" == sqlite:////* \
   && "${DATABASE_URL}" != *[[:space:]]* \
   && "${DATABASE_URL}" != *"'"* ]] || {
-  fail "database URL must be an absolute SQLite URL without whitespace"
+  fail "数据库配置须为 sqlite://// 开头的绝对路径，不能包含空白或单引号。"
 }
 database_path="${DATABASE_URL#sqlite:///}"
 database_path="$(realpath --canonicalize-missing -- "${database_path}")"
 data_root="$(realpath --canonicalize-missing -- "${DATA_DIR}")"
 [[ "${database_path}" == "${data_root}/"* && "${database_path}" == *.db ]] || {
-  fail "database must be a .db file inside ${DATA_DIR}"
+  fail "数据库必须是 ${DATA_DIR} 内的 .db 文件。"
 }
 DATABASE_URL="sqlite:///${database_path}"
 
 if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
+  workspace_stage "安装系统软件与运行时" "检查 Ubuntu 软件源、Node.js/uv 下载连接、DNS 与磁盘空间；离线代码包不包含这些安装依赖。" E_RUNTIME
   log "Installing Ubuntu prerequisites"
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends \
+  workspace_run apt-get update
+  workspace_run apt-get install -y --no-install-recommends \
     ca-certificates curl git openssl build-essential util-linux xz-utils
 
   node_version=""
@@ -240,11 +268,10 @@ if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
     case "${machine_arch}" in
       x86_64) node_arch="x64" ;;
       aarch64|arm64) node_arch="arm64" ;;
-      *) fail "unsupported CPU architecture for Node.js: ${machine_arch}" ;;
+      *) fail "暂不支持该 CPU 架构的 Node.js 自动安装：${machine_arch}" ;;
     esac
     node_archive="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"
     temporary_node_dir="$(mktemp -d)"
-    trap 'rm -rf -- "${temporary_node_dir:-}" "${temporary_uv_dir:-}"' EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
       "https://nodejs.org/dist/v${NODE_VERSION}/${node_archive}" \
       --output "${temporary_node_dir}/${node_archive}"
@@ -278,11 +305,10 @@ if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
         uv_target="aarch64-unknown-linux-gnu"
         uv_sha256="4d4fa08d95b06642e5800df6a22bd71455f23f988269e18da2847971d8c0bf31"
         ;;
-      *) fail "unsupported CPU architecture for uv: ${machine_arch}" ;;
+      *) fail "暂不支持该 CPU 架构的 uv 自动安装：${machine_arch}" ;;
     esac
     uv_archive="uv-${uv_target}.tar.gz"
     temporary_uv_dir="$(mktemp -d)"
-    trap 'rm -rf -- "${temporary_node_dir:-}" "${temporary_uv_dir:-}"' EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
       "https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}/${uv_archive}" \
       --output "${temporary_uv_dir}/${uv_archive}"
@@ -297,15 +323,16 @@ if [[ "${INSTALL_PACKAGES}" == "true" ]]; then
 fi
 
 for required_command in git uv node npm curl flock openssl runuser systemctl; do
-  command -v "${required_command}" >/dev/null 2>&1 || fail "${required_command} is required"
+  command -v "${required_command}" >/dev/null 2>&1 || fail "缺少必需命令 ${required_command}，请补齐依赖后重试。"
 done
 node_version="$(node --version | sed 's/^v//')"
 version_at_least "${node_version}" "${NODE_VERSION}" || {
-  fail "Node.js >= ${NODE_VERSION} is required"
+  fail "Node.js 版本过低，至少需要 ${NODE_VERSION}。"
 }
 uv_version="$(uv --version | awk '{print $2}')"
-version_at_least "${uv_version}" "0.11.0" || fail "uv >= 0.11.0 is required"
+version_at_least "${uv_version}" "0.11.0" || fail "uv 版本过低，至少需要 0.11.0。"
 
+workspace_stage "创建服务账号与部署配置" "已有账号需满足专用系统账号要求；迁机必须保留原 app.env 中的加密密钥。" E_CONFIG
 log "Creating dedicated service accounts"
 ensure_service_account "${BACKEND_USER}" "/var/lib/solution-workspace-home"
 ensure_service_account "${FRONTEND_USER}" "${FRONTEND_HOME}"
@@ -373,49 +400,50 @@ else
   log "Keeping existing ${ENV_FILE}"
 fi
 
+workspace_stage "安装指定提交的代码" "检查源码仓库、目标路径与提交；不要用不对应的 main 替代发布标签。" E_RELEASE
 log "Materializing a root-owned release checkout"
 source_commit="$(git -C "${SOURCE_DIR}" rev-parse HEAD)"
 origin_url="$(git -C "${SOURCE_DIR}" remote get-url origin 2>/dev/null || true)"
 if [[ "${SOURCE_DIR}" != "${PROJECT_DIR}" ]]; then
   if [[ ! -d "${PROJECT_DIR}/.git" ]]; then
-    [[ ! -e "${PROJECT_DIR}" ]] || fail "install directory exists but is not a Git checkout"
-    git clone --no-local --branch main "${SOURCE_DIR}" "${PROJECT_DIR}"
+    [[ ! -e "${PROJECT_DIR}" ]] || fail "安装目录已存在但不是 Git 仓库；请核对路径，安装器不会覆盖该目录。"
+    workspace_run git clone --no-local --no-checkout "${SOURCE_DIR}" "${PROJECT_DIR}"
   else
     deployed_changes="$(git -C "${PROJECT_DIR}" status --porcelain --untracked-files=no)"
-    [[ -z "${deployed_changes}" ]] || fail "managed install checkout has tracked changes"
-    git -C "${PROJECT_DIR}" fetch --force "${SOURCE_DIR}" refs/heads/main:refs/remotes/source/main
-    git -C "${PROJECT_DIR}" checkout --force -B main refs/remotes/source/main
+    [[ -z "${deployed_changes}" ]] || fail "部署目录有已跟踪文件被修改；请先保存并处理改动。"
   fi
+  workspace_run git -C "${PROJECT_DIR}" fetch --no-tags -- "${SOURCE_DIR}" "${source_commit}"
+  workspace_run git -C "${PROJECT_DIR}" checkout -B main "${source_commit}"
   if [[ -n "${origin_url}" ]]; then
     git -C "${PROJECT_DIR}" remote set-url origin "${origin_url}"
   fi
 else
-  [[ "${PROJECT_DIR}" == /opt/* ]] || fail "an in-place deployment must already be below /opt"
+  [[ "${PROJECT_DIR}" == /opt/* ]] || fail "原地安装的源码目录必须位于 /opt 下。"
 fi
 [[ "$(git -C "${PROJECT_DIR}" rev-parse HEAD)" == "${source_commit}" ]] || {
-  fail "deployed checkout does not match source commit"
+  fail "安装后的提交与选定的源码提交不一致，已停止安装。"
 }
 chown -R root:root "${PROJECT_DIR}"
 chmod -R u=rwX,go=rX "${PROJECT_DIR}"
 
-log "Installing the locked Python runtime and dependencies"
+workspace_stage "安装 Python 及锁定依赖" "检查 Python 下载、uv 软件源、缓存与磁盘空间；错误日志会保留。" E_PYTHON
 export UV_PYTHON_INSTALL_DIR="${PYTHON_RUNTIME_DIR}"
 export UV_CACHE_DIR
-uv python install 3.12
+workspace_run uv python install 3.12
 (
   cd "${PROJECT_DIR}"
-  uv sync --frozen --no-dev --python 3.12
+  workspace_run uv sync --frozen --no-dev --python 3.12
 )
 
-log "Installing and building the locked frontend"
+workspace_stage "安装前端依赖并构建" "检查 npm 软件源、构建报错与磁盘空间；修复原因后使用 --repair-stopped-install 恢复未完成的安装。" E_FRONTEND_BUILD
 [[ "$(git -C "${PROJECT_DIR}" cat-file -t "${source_commit}:frontend")" == "tree" ]] || {
-  fail "source commit does not contain a frontend tree"
+  fail "源码提交缺少 frontend 目录，请核对发布包。"
 }
 frontend_symlinks="$(
   git -C "${PROJECT_DIR}" ls-tree -r "${source_commit}" frontend \
     | awk '$1 == "120000" { print }'
 )"
-[[ -z "${frontend_symlinks}" ]] || fail "frontend must not contain tracked symbolic links"
+[[ -z "${frontend_symlinks}" ]] || fail "前端源码包含符号链接，已停止构建；请检查发布内容。"
 frontend_stage_dir="$(mktemp -d "${PROJECT_DIR}.frontend-install.XXXXXXXX")"
 frontend_archive="${frontend_stage_dir}/frontend.tar"
 if ! (
@@ -427,12 +455,12 @@ if ! (
   test -d "${frontend_stage_dir}/frontend" &&
   test ! -L "${frontend_stage_dir}/frontend" &&
   chown -R "${FRONTEND_USER}:${FRONTEND_GROUP}" "${frontend_stage_dir}" &&
-  runuser -u "${FRONTEND_USER}" -- env -i \
+  workspace_run runuser -u "${FRONTEND_USER}" -- env -i \
     HOME="${FRONTEND_HOME}" LANG=C.UTF-8 PATH="${PATH}" \
     npm_config_cache="${NPM_CACHE_DIR}" npm_config_update_notifier=false \
     npm --prefix "${frontend_stage_dir}/frontend" \
       ci --include=dev --prefer-offline --no-audit --no-fund &&
-  runuser -u "${FRONTEND_USER}" -- env -i \
+  workspace_run runuser -u "${FRONTEND_USER}" -- env -i \
     HOME="${FRONTEND_HOME}" LANG=C.UTF-8 PATH="${PATH}" \
     npm_config_cache="${NPM_CACHE_DIR}" npm_config_update_notifier=false \
     npm --prefix "${frontend_stage_dir}/frontend" run build &&
@@ -457,7 +485,7 @@ if ! (
   chmod 0700 "${frontend_stage_dir}"
 ); then
   rm -rf -- "${frontend_stage_dir}"
-  fail "frontend dependency installation or build failed"
+  fail "前端依赖安装或构建失败，请查看 npm/构建日志。"
 fi
 rm -rf -- "${PROJECT_DIR}/frontend/node_modules" "${PROJECT_DIR}/frontend/dist"
 mv -- "${frontend_stage_dir}/frontend/node_modules" "${PROJECT_DIR}/frontend/node_modules"
@@ -467,28 +495,29 @@ chown -R root:root "${PROJECT_DIR}"
 chmod -R u=rwX,go=rX "${PROJECT_DIR}"
 
 runuser -u "${BACKEND_USER}" -- test -r "${PROJECT_DIR}/server.py" || {
-  fail "backend service account cannot read the installed release"
+  fail "后端账号无法读取发布文件，请检查目录和文件权限。"
 }
 unreadable_backend_file="$(
   runuser -u "${BACKEND_USER}" -- \
     find "${PROJECT_DIR}/app" -type f ! -readable -print -quit
 )"
 [[ -z "${unreadable_backend_file}" ]] || {
-  fail "backend service account cannot read ${unreadable_backend_file}"
+  fail "后端账号无法读取 ${unreadable_backend_file}，请检查发布文件权限。"
 }
 runuser -u "${FRONTEND_USER}" -- test -r "${PROJECT_DIR}/frontend/package.json" || {
-  fail "frontend service account cannot read the installed release"
+  fail "前端账号无法读取发布文件，请检查目录和文件权限。"
 }
 runuser -u "${FRONTEND_USER}" -- \
   test -r "${PROJECT_DIR}/frontend/node_modules/vinext/dist/cli.js" || {
-  fail "frontend service account cannot read the Vinext runtime"
+  fail "前端账号无法读取 Vinext 运行时，请检查依赖安装和文件权限。"
 }
 runuser -u "${FRONTEND_USER}" -- \
   test -r "${PROJECT_DIR}/frontend/dist/server/index.js" || {
-  fail "frontend service account cannot read the production build"
+  fail "前端账号无法读取生产构建，请检查构建结果和文件权限。"
 }
 
-log "Installing systemd services and the operations command"
+workspace_stage "安装 systemd 服务" "检查服务日志和配置，勿重新生成或覆盖迁入的加密密钥。" E_SERVICE
+INSTALL_SERVICES_STARTED=true
 if ! bash "${PROJECT_DIR}/deploy/systemd/install.sh" \
   "${PROJECT_DIR}" \
   "${BACKEND_USER}" \
@@ -502,16 +531,18 @@ if ! bash "${PROJECT_DIR}/deploy/systemd/install.sh" \
   systemctl stop solution-workspace.target || true
   systemctl stop solution-workspace-backend.service solution-workspace-frontend.service || true
   systemctl stop solution-workspace-backup.timer solution-workspace-backup.service || true
-  fail "systemd installation or startup failed; all application units were stopped"
+  fail "systemd 安装或启动失败，已尝试停止所有应用服务；请核对当前状态。"
 fi
 
-log "Running post-deployment health checks"
+workspace_stage "检查安装后的服务状态" "执行 sudo solution-workspace status 和 logs，确认前后端与自动备份均正常。" E_HEALTH
 if ! /usr/local/sbin/solution-workspace health; then
   systemctl stop solution-workspace.target || true
   systemctl stop solution-workspace-backup.timer || true
   systemctl stop solution-workspace-backup.service || true
-  fail "post-deployment health checks failed; services were stopped"
+  fail "安装后健康检查失败，已尝试停服；请检查服务日志。"
 fi
+systemctl is-active --quiet solution-workspace-backup.timer
+systemctl is-enabled --quiet solution-workspace-backup.timer
 
 cat <<EOF
 

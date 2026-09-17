@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Position = 0)]
     [ValidateSet("start", "stop", "restart", "status")]
@@ -15,6 +15,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+trap {
+    Write-Host "本地测试服务操作失败 [E_LOCAL_SERVICE]：$($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "请检查 .run\windows-test 下对应服务的 out.log / err.log；用 status 确认当前运行状态。"
+    exit 1
+}
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $FrontendRoot = Join-Path $ProjectRoot "frontend"
@@ -252,7 +257,7 @@ function Test-Endpoint {
 
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 3
-        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 500
+        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
     }
     catch {
         return $false
@@ -272,7 +277,7 @@ function Wait-Endpoint {
     while ((Get-Date) -lt $deadline) {
         $Process.Refresh()
         if ($Process.HasExited) {
-            throw "$Name exited before becoming ready."
+            throw "$Name 在就绪前退出（退出码 $($Process.ExitCode)），请查看 $RunRoot\$Name.err.log。"
         }
         $listeners = @(Get-ListenerInfo -Port $Port)
         if ($listeners.Count -gt 0 -and (Test-Endpoint -Url $Url)) {
@@ -280,7 +285,7 @@ function Wait-Endpoint {
         }
         Start-Sleep -Milliseconds 500
     }
-    throw "$Name did not become ready within $TimeoutSeconds seconds."
+    throw "$Name 在 $TimeoutSeconds 秒内未就绪（$Url），请检查对应日志和端口 $Port。"
 }
 
 function Reset-LogFiles {
@@ -420,7 +425,7 @@ function Ensure-FrontendDependencies {
         --no-audit `
         --no-fund
     if ($LASTEXITCODE -ne 0) {
-        throw "Frontend dependency installation failed with exit code $LASTEXITCODE."
+        throw "前端依赖安装失败（退出码 $LASTEXITCODE）。检查上方 npm 报错、软件源连接和 .run\npm-cache 所在磁盘空间。"
     }
 
     $installedLockHash = (Get-FileHash -LiteralPath $lockFile -Algorithm SHA256).Hash
@@ -525,8 +530,11 @@ function Stop-ManagedService {
 
 function Start-All {
     Ensure-RunDirectory
+    $startedHere = @()
     try {
+        if ($null -eq (Get-ManagedProcess -Name "backend")) { $startedHere += "backend" }
         Start-Backend
+        if ($null -eq (Get-ManagedProcess -Name "frontend")) { $startedHere += "frontend" }
         Start-Frontend
     }
     catch {
@@ -534,6 +542,7 @@ function Start-All {
         Write-Host ""
         Write-Host "Start failed: $($startFailure.Exception.Message)" -ForegroundColor Red
         foreach ($serviceName in @("frontend", "backend")) {
+            if ($serviceName -notin $startedHere) { continue }
             try {
                 Stop-ManagedService -Name $serviceName
             }
