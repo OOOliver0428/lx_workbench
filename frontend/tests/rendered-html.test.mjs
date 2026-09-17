@@ -35,6 +35,30 @@ test("server-renders the collaboration workspace shell", async () => {
   assert.match(html, /boot-screen/);
   assert.match(html, /正在进入团队空间/);
   assert.doesNotMatch(html, /react-loading-skeleton|_sites-preview/);
+  const artwork = JSON.parse(await readFile(new URL("../app/login-artwork.json", import.meta.url), "utf8"));
+  for (const key of ["blue-ribbon-v3", "opportunities"]) {
+    const preload = html.match(new RegExp(`<link[^>]+href="${artwork[key].replaceAll(".", "\\.")}"[^>]*>`))?.[0];
+    assert.ok(preload, `missing initial HTML preload for ${key}`);
+    assert.match(preload, /media="\(min-width: 861px\)"/);
+  }
+});
+
+test("login artwork saves transfer bytes without changing screenshot pixels", async () => {
+  const artwork = JSON.parse(await readFile(new URL("../app/login-artwork.json", import.meta.url), "utf8"));
+  let sourceBytes = 0;
+  let deliveredBytes = 0;
+  for (const [name, asset] of Object.entries(artwork)) {
+    const source = await readFile(new URL(`../public/images/login/${name}.png`, import.meta.url));
+    const delivered = await readFile(new URL(`../public${asset}`, import.meta.url));
+    sourceBytes += source.length;
+    deliveredBytes += delivered.length;
+    if (name !== "blue-ribbon-v3") {
+      const originalPixels = await sharp(source).ensureAlpha().raw().toBuffer();
+      const deliveredPixels = await sharp(delivered).ensureAlpha().raw().toBuffer();
+      assert.ok(originalPixels.equals(deliveredPixels), `${name} must remain lossless`);
+    }
+  }
+  assert.ok(deliveredBytes < sourceBytes * 0.5, "artwork should save at least half its transfer size");
 });
 
 test("keeps the API contract and AI secret boundary explicit", async () => {

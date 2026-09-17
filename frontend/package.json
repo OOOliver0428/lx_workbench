@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vinext dev --hostname 127.0.0.1 --port 5174",
     "avatars:build": "node scripts/process-avatars.mjs",
+    "login-artwork:build": "node scripts/process-login-artwork.mjs",
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/dashboard-loading.test.mjs",

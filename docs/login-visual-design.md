@@ -2,7 +2,13 @@
 
 最终实现使用真实业务截图与 CSS 卡片，只有蓝色色带背景由 imagegen 内置工具生成；模型由工具管理，未指定模型版本。
 
-当前素材：`frontend/public/images/login/blue-ribbon-v3.png` 为独立背景，`opportunities.png`、`tasks.png`、`work.png`、`reports.png` 为真实采样原图。仅这五张最终素材随代码发布；下文历史图片、测试数据库与预览留在本地，不是运行依赖。
+原始素材：`frontend/public/images/login/blue-ribbon-v3.png` 为独立背景，`opportunities.png`、`tasks.png`、`work.png`、`reports.png` 为真实采样原图。保留原图供 README 展示与重新编码；登录页实际加载 `optimized/` 下带内容指纹的 WebP。下文历史图片、测试数据库与预览留在本地，不是运行依赖。
+
+## 加载优化
+
+运行前端 `npm run login-artwork:build` 可从五张原图重新生成素材及 `app/login-artwork.json`。卡片使用无损 WebP，解码后的 RGBA 像素与原图一致；丝带使用质量 90 的 WebP，保留原始尺寸。总体积由 2,383,348 字节降至 862,840 字节，减少约 64%。更换素材后需要重新运行脚本并提交新素材与清单。
+
+页面 HTML 预加载丝带和首张卡片，仅在视口宽度至少 861px 时启用；其余卡片随登录界面加载。生产环境为 `optimized/` 配置一年 immutable 缓存，内容变化会生成新 URL。开发服务器仍使用开发缓存策略。布局、卡片比例、阴影与鼠标微动参数保持不变。
 
 ## 最终位置与交互
 
