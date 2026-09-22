@@ -19,7 +19,11 @@ import { LoginView, PasswordChangeGate } from "./components/auth-view";
 import { DashboardView } from "./components/dashboard-view";
 import { DepartmentWorksView } from "./components/department-works-view";
 import { ProjectsView } from "./components/projects-view";
-import { ProfileSettingsView } from "./components/profile-settings-view";
+import {
+  ProfileSettingsView,
+  applyTheme,
+  readStoredTheme,
+} from "./components/profile-settings-view";
 import { RecordsView } from "./components/records-view";
 import { TasksView } from "./components/tasks-view";
 import { WeeklyReportsView } from "./components/weekly-reports-view";
@@ -58,6 +62,17 @@ export function WorkspaceApp() {
       })
       .catch(() => setAuth(null))
       .finally(() => setCheckingSession(false));
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    function followSystemTheme() {
+      if (readStoredTheme() === "system") {
+        applyTheme("system");
+      }
+    }
+    media.addEventListener("change", followSystemTheme);
+    return () => media.removeEventListener("change", followSystemTheme);
   }, []);
 
   useEffect(() => {
@@ -189,7 +204,10 @@ export function WorkspaceApp() {
         />
       ) : null}
       {activeView === "changelog" ? (
-        <ChangelogView canManage={auth.user.role === "super_admin"} />
+        <ChangelogView
+          canManage={auth.user.role === "super_admin"}
+          currentUserId={auth.user.id}
+        />
       ) : null}
       {activeView === "profile" ? (
         <ProfileSettingsView

@@ -7,10 +7,16 @@ import type {
   AIChatResult,
   AIStatus,
   AuthContext,
+  ChangelogLatest,
   PermissionKey,
   WeeklyReport,
 } from "../types";
 import { createClientMessageId } from "../client-id";
+import {
+  CHANGELOG_SEEN_EVENT,
+  isChangelogUnread,
+  readLastSeen,
+} from "../changelog-unread";
 import { createWeeklyPreviewState, weeklyPreviewReducer } from "../weekly-preview";
 import { InlineNotice } from "./ui";
 import { AvatarImage } from "./avatar";
@@ -132,6 +138,8 @@ export function AppShell({
 }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [changelogUnread, setChangelogUnread] = useState(false);
+  const changelogLatestRef = useRef<ChangelogLatest | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
   const [navGlider, setNavGlider] = useState<{
     top: number;
@@ -145,6 +153,35 @@ export function AppShell({
   const visibleNavigation = navigation.filter((item) =>
     canAccessWorkspaceView(context, item.id),
   );
+
+  useEffect(() => {
+    const userId = context.user.id;
+    let cancelled = false;
+    const recompute = () => {
+      setChangelogUnread(
+        isChangelogUnread(changelogLatestRef.current, readLastSeen(userId)),
+      );
+    };
+    const refresh = () => {
+      api.changelog
+        .latest()
+        .then((latest) => {
+          if (cancelled) return;
+          changelogLatestRef.current = latest;
+          recompute();
+        })
+        .catch(() => {});
+    };
+    changelogLatestRef.current = null;
+    refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener(CHANGELOG_SEEN_EVENT, recompute);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener(CHANGELOG_SEEN_EVENT, recompute);
+    };
+  }, [context.user.id]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -201,7 +238,7 @@ export function AppShell({
             </span>
             <span>
               <strong>协作工作台</strong>
-              <small>赋能售前和解决方案</small>
+              <small>赋能协作·工作留痕</small>
             </span>
           </div>
           <button
@@ -240,7 +277,11 @@ export function AppShell({
               className={activeView === item.id ? "active" : ""}
               onClick={() => onViewChange(item.id)}
               aria-current={activeView === item.id ? "page" : undefined}
-              aria-label={item.label}
+              aria-label={
+                item.id === "changelog" && changelogUnread
+                  ? `${item.label}，有新更新`
+                  : item.label
+              }
               title={`${item.label} · ${item.description}${item.id === "records" ? " · 快捷键 Alt+W" : ""}`}
             >
               <span className="nav-index">{item.index}</span>
@@ -256,6 +297,9 @@ export function AppShell({
               <i className="nav-arrow">
                 <ChevronRight size={15} />
               </i>
+              {item.id === "changelog" && changelogUnread ? (
+                <i className="nav-dot" aria-hidden="true" />
+              ) : null}
             </button>
           ))}
         </nav>

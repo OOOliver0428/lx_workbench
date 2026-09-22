@@ -1199,6 +1199,7 @@ class AuditEventOut(ORMModel):
     id: str
     request_id: str | None
     actor_id: str | None
+    actor_name: str | None = None
     action: str
     entity_type: str
     entity_id: str | None
@@ -1325,6 +1326,12 @@ class ChangelogEntryOut(BaseModel):
     updated_by: str
     updated_by_name: str
     revision: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChangelogLatestOut(BaseModel):
+    id: str
     created_at: datetime
     updated_at: datetime
 

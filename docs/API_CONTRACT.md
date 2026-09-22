@@ -66,6 +66,14 @@ API 地址或直接读取 CSRF。
 - `dashboard.work.view` 与 `dashboard.team_summary.generate` 仅在目标账号至少为
   `team_leader` 且存在有效直属成员时可授予并生效；直属关系或角色不再满足条件时立即失效。
 
+## 审计记录
+
+- `GET /api/v1/audit-events` 要求 `settings.audit.view`，按创建时间倒序返回审计事件；
+  `limit` 取 1–1000（默认 100），可用 `entity_type`、`entity_id` 缩小范围。
+- 响应在事件字段之外补充 `actor_name`（操作者显示名称，按 `actor_id` 关联用户表）；
+  `actor_id` 为空的系统事件 `actor_name` 为 `null`，前端显示为“系统”。
+- 非系统维护账号不可见 `work_record` 审计事件及系统维护账号作为操作者的事件（规则不变）。
+
 ## 账号与个人设置
 
 - `POST /api/v1/users`、用户资料和直属负责人写接口要求 `settings.users.manage`。系统维护账号
@@ -289,3 +297,6 @@ API 地址或直接读取 CSRF。
 - `POST /api/v1/changelog/reorder` 仅系统维护账号可调用，`entry_ids` 按期望显示顺序排列。
   条目须属于同一个上海自然日且不可重复。列表在截取数量前按上海日期、手动顺序、创建时间
   降序排列；新建及移动日期后的条目排在目标日期前面。
+- `GET /api/v1/changelog/latest` 供所有登录用户读取当前最新条目（排序口径与列表一致，
+  排除已软删条目），仅返回 `{"id", "created_at", "updated_at"}`，用于前端未读提示等
+  轻量轮询。更新日志为空时返回 HTTP 200 且响应体为 JSON `null`。

@@ -97,6 +97,7 @@ export interface AuditEvent {
   id: string;
   request_id: string | null;
   actor_id: string | null;
+  actor_name: string | null;
   action: string;
   entity_type: string;
   entity_id: string | null;
@@ -423,6 +424,12 @@ export interface ChangelogEntry {
   updated_by: string;
   updated_by_name: string;
   revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChangelogLatest {
+  id: string;
   created_at: string;
   updated_at: string;
 }

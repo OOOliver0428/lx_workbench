@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
 import type { ChangelogCategory, ChangelogEntry } from "../types";
+import { CHANGELOG_SEEN_EVENT, writeLastSeen } from "../changelog-unread";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
 const CATEGORY_LABELS: Record<ChangelogCategory, string> = {
@@ -68,7 +69,13 @@ function groupByDay(entries: ChangelogEntry[]) {
   return [...groups.entries()];
 }
 
-export function ChangelogView({ canManage }: { canManage: boolean }) {
+export function ChangelogView({
+  canManage,
+  currentUserId,
+}: {
+  canManage: boolean;
+  currentUserId: string;
+}) {
   const [entries, setEntries] = useState<ChangelogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -87,6 +94,10 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
     try {
       const rows = await api.changelog.list();
       setEntries(rows);
+      if (rows.length && currentUserId) {
+        writeLastSeen(currentUserId, rows[0]);
+        window.dispatchEvent(new Event(CHANGELOG_SEEN_EVENT));
+      }
     } catch (caught) {
       setError(
         caught instanceof ApiClientError ? caught.message : "更新日志加载失败",
@@ -94,7 +105,7 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUserId]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);

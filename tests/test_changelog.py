@@ -159,3 +159,81 @@ def test_system_admin_cannot_write_changelog(api: dict) -> None:
         },
     )
     assert created.status_code == 403, created.text
+
+
+def test_changelog_latest_returns_null_when_empty(api: dict) -> None:
+    client: TestClient = api["client"]
+    login(client, "member")
+    response = client.get("/api/v1/changelog/latest")
+    assert response.status_code == 200, response.text
+    assert response.json() is None
+
+
+def test_changelog_latest_follows_list_ordering(api: dict) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "super_admin")
+    headers = {"X-CSRF-Token": csrf}
+
+    def create(occurred_at: str, title: str) -> dict:
+        created = client.post(
+            "/api/v1/changelog",
+            headers=headers,
+            json={
+                "occurred_at": occurred_at,
+                "category": "improvement",
+                "title": title,
+                "body": "排序校验",
+            },
+        )
+        assert created.status_code == 201, created.text
+        return created.json()
+
+    older_day = create("2026-09-10T10:00:00+08:00", "较早一天")
+    create("2026-09-11T10:00:00+08:00", "同日先创建")
+    same_day_later = create("2026-09-11T09:00:00+08:00", "同日后创建")
+
+    listed = client.get("/api/v1/changelog")
+    assert [entry["id"] for entry in listed.json()] == [
+        same_day_later["id"],
+        listed.json()[1]["id"],
+        older_day["id"],
+    ]
+
+    latest = client.get("/api/v1/changelog/latest")
+    assert latest.status_code == 200, latest.text
+    payload = latest.json()
+    assert payload["id"] == listed.json()[0]["id"] == same_day_later["id"]
+    assert payload["created_at"] == same_day_later["created_at"]
+    assert payload["updated_at"] == same_day_later["updated_at"]
+    assert set(payload) == {"id", "created_at", "updated_at"}
+
+    deleted = client.delete(
+        f"/api/v1/changelog/{same_day_later['id']}",
+        headers=headers,
+        params={"revision": same_day_later["revision"]},
+    )
+    assert deleted.status_code == 204, deleted.text
+    after = client.get("/api/v1/changelog/latest")
+    assert after.status_code == 200
+    assert after.json()["id"] == listed.json()[1]["id"]
+
+
+def test_changelog_latest_is_readable_by_member(api: dict) -> None:
+    client: TestClient = api["client"]
+    csrf = login(client, "super_admin")
+    created = client.post(
+        "/api/v1/changelog",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "occurred_at": "2026-09-11T04:12:00+08:00",
+            "category": "feature",
+            "title": "普通成员可见最新条目",
+            "body": "权限校验",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    login(client, "member")
+    latest = client.get("/api/v1/changelog/latest")
+    assert latest.status_code == 200, latest.text
+    assert latest.json()["id"] == created.json()["id"]

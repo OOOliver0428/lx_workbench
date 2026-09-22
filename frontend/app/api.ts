@@ -36,6 +36,7 @@ import type {
   UserPermissions,
   TimeBlock,
   ChangelogEntry,
+  ChangelogLatest,
 } from "./types";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
@@ -294,7 +295,7 @@ export const api = {
       }),
   },
   audit: {
-    list: () => request<AuditEvent[]>("/api/v1/audit-events?limit=100"),
+    list: () => request<AuditEvent[]>("/api/v1/audit-events?limit=1000"),
   },
   profile: {
     avatars: () => request<AvatarOption[]>("/api/v1/profile/avatars"),
@@ -615,6 +616,7 @@ export const api = {
   },
   changelog: {
     list: () => request<ChangelogEntry[]>("/api/v1/changelog"),
+    latest: () => request<ChangelogLatest | null>("/api/v1/changelog/latest"),
     create: (payload: Record<string, unknown>) =>
       request<ChangelogEntry>("/api/v1/changelog", {
         method: "POST",

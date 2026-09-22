@@ -54,22 +54,42 @@ const STAGES: Array<{
   label: string;
   color: string;
 }> = [
-  { id: "lead", label: "线索", color: "#93a8bd" },
-  { id: "requirement", label: "需求确认", color: "#16a5d9" },
-  { id: "solution_exchange", label: "方案交流", color: "#1677ff" },
-  { id: "solution_confirm", label: "方案确认", color: "#6b5cff" },
-  { id: "poc", label: "POC验证", color: "#16c6d5" },
-  { id: "tender", label: "商务招投标", color: "#e98a32" },
-  { id: "won", label: "赢单签约", color: "#16b987" },
+  { id: "lead", label: "线索", color: "var(--stage-lead)" },
+  { id: "requirement", label: "需求确认", color: "var(--stage-requirement)" },
+  {
+    id: "solution_exchange",
+    label: "方案交流",
+    color: "var(--stage-solution-exchange)",
+  },
+  {
+    id: "solution_confirm",
+    label: "方案确认",
+    color: "var(--stage-solution-confirm)",
+  },
+  { id: "poc", label: "POC验证", color: "var(--stage-poc)" },
+  { id: "tender", label: "商务招投标", color: "var(--stage-tender)" },
+  { id: "won", label: "赢单签约", color: "var(--stage-won)" },
 ];
 
 const ATTENTION: Record<
   AttentionStatus,
   { label: string; color: string; background: string }
 > = {
-  focus: { label: "重点推进", color: "#1677ff", background: "#eaf4ff" },
-  steady: { label: "稳步推进", color: "#25846c", background: "#eaf9f4" },
-  coordinate: { label: "待协调", color: "#c34e78", background: "#fff0f5" },
+  focus: {
+    label: "重点推进",
+    color: "var(--attention-focus)",
+    background: "var(--attention-focus-bg)",
+  },
+  steady: {
+    label: "稳步推进",
+    color: "var(--attention-steady)",
+    background: "var(--attention-steady-bg)",
+  },
+  coordinate: {
+    label: "待协调",
+    color: "var(--attention-coordinate)",
+    background: "var(--attention-coordinate-bg)",
+  },
 };
 
 const PAGE_COPY: Record<
@@ -744,7 +764,7 @@ function OpportunityPage({
                 .slice(0, 3)
                 .map((opportunity) => (
                   <article key={`risk-${opportunity.id}`}>
-                    <i style={{ background: "#e94f9b" }} />
+                    <i style={{ background: "var(--pink-bright)" }} />
                     <div>
                       <b>{opportunity.name}</b>
                       <p>{opportunity.work_summary}</p>
@@ -1056,7 +1076,7 @@ const ProjectGraphNode = memo(function ProjectGraphNode({
         height="84"
         rx="18"
         ry="18"
-        fill="#fff"
+        fill="var(--surface)"
         stroke={projectColor(node.project.id)}
         filter="url(#war-node-shadow)"
       />
@@ -2871,7 +2891,7 @@ function StageStepper({ current }: { current: BusinessStage }) {
                 : ""
           }
           style={{
-            "--stage-color": STAGES[currentIndex]?.color ?? "#1677ff",
+            "--stage-color": STAGES[currentIndex]?.color ?? "var(--accent)",
           } as CSSProperties}
         >
           <i />
@@ -3031,13 +3051,13 @@ function dashboardWeekLabel(dashboard: Dashboard, weekStart: string) {
 
 function projectColor(value: string) {
   const colors = [
-    "#1677ff",
-    "#6b5cff",
-    "#16b987",
-    "#e98a32",
-    "#e94f9b",
-    "#16a5d9",
-    "#13a8a8",
+    "var(--project-1)",
+    "var(--project-2)",
+    "var(--project-3)",
+    "var(--project-4)",
+    "var(--project-5)",
+    "var(--project-6)",
+    "var(--project-7)",
   ];
   const hash = [...value].reduce(
     (sum, character) => sum + character.charCodeAt(0),
