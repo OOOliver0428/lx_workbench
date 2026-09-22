@@ -5,9 +5,12 @@ from app.dependencies import get_current_user, get_db, require_csrf
 from app.models import PermissionKey, User
 from app.schemas import (
     TeamWeeklySummaryOut,
+    WeeklyReportCurrentDraftCreate,
     WeeklyReportCurrentOut,
     WeeklyReportDraftUpdate,
+    WeeklyReportGenerateRequest,
     WeeklyReportOut,
+    WeeklyReportPreviewOut,
     WeeklyReportSubmit,
 )
 from app.services import permissions as permission_service
@@ -60,9 +63,63 @@ def list_team_weekly_summaries(
     ]
 
 
+@router.post("/current/generate-preview", response_model=WeeklyReportPreviewOut)
+def generate_weekly_report_preview(
+    request: Request,
+    payload: WeeklyReportGenerateRequest | None = None,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db, scope="function"),
+) -> WeeklyReportPreviewOut:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.WEEKLY_REPORTS_MANAGE,
+    )
+    week_start, _week_end = report_service.current_week_bounds()
+    guidance = payload.guidance if payload else None
+    with request.app.state.llm_guard.generation(
+        user_id=actor.id,
+        purpose="weekly_report_preview",
+        max_tokens=4096,
+        idempotency_key=(
+            f"weekly-report-preview:{actor.id}:{week_start.isoformat()}:"
+            f"{hash(guidance or '')}"
+        ),
+    ) as lease:
+        result = report_service.generate_preview(
+            db,
+            request.app.state.settings,
+            actor,
+            guidance=guidance,
+        )
+        lease.record_usage(result.usage)
+    return WeeklyReportPreviewOut(
+        content=result.answer,
+        model=result.model,
+        usage=result.usage,
+    )
+
+
+@router.post("/current/draft", response_model=WeeklyReportOut)
+def create_current_weekly_report_draft(
+    payload: WeeklyReportCurrentDraftCreate,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db, scope="function"),
+) -> WeeklyReportOut:
+    permission_service.assert_permission(
+        db,
+        actor,
+        PermissionKey.WEEKLY_REPORTS_MANAGE,
+    )
+    return report_service.report_out(
+        report_service.create_current_draft(db, actor, content=payload.content)
+    )
+
+
 @router.post("/current/generate", response_model=WeeklyReportOut)
 def generate_current_weekly_report(
     request: Request,
+    payload: WeeklyReportGenerateRequest | None = None,
     actor: User = Depends(require_csrf),
     db: Session = Depends(get_db, scope="function"),
 ) -> WeeklyReportOut:
@@ -72,6 +129,7 @@ def generate_current_weekly_report(
         PermissionKey.WEEKLY_REPORTS_MANAGE,
     )
     week_start, _week_end = report_service.current_week_bounds()
+    guidance = payload.guidance if payload else None
     with request.app.state.llm_guard.generation(
         user_id=actor.id,
         purpose="weekly_report",
@@ -82,6 +140,7 @@ def generate_current_weekly_report(
             db,
             request.app.state.settings,
             actor,
+            guidance=guidance,
         )
         lease.record_usage(report.generation_usage)
     return report_service.report_out(report)

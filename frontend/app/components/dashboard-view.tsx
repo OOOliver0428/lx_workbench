@@ -376,6 +376,31 @@ export function DashboardView({
             );
             setSelectedOpportunity(null);
           }}
+          onDelete={() => {
+            const opportunity = selectedOpportunity;
+            setSelectedOpportunity(null);
+            void (async () => {
+              if (
+                !window.confirm(
+                  `确认删除商机「${opportunity.name}」？删除为软删除，可在审计中追溯。`,
+                )
+              ) {
+                return;
+              }
+              const reason = window.prompt("请输入删除原因（可选）：");
+              if (reason === null) return;
+              try {
+                await api.opportunities.remove(
+                  opportunity.id,
+                  opportunity.revision,
+                  reason.trim() || null,
+                );
+                await load();
+              } catch (caught) {
+                setError(errorMessage(caught, "商机删除失败"));
+              }
+            })();
+          }}
         />
       ) : null}
       {selectedProject ? (
@@ -422,7 +447,21 @@ export function DashboardView({
           onClose={() => setSummary(null)}
         />
       ) : null}
-      {loading ? <div className="war-refreshing">正在刷新…</div> : null}
+      {loading && dashboard ? (
+        <div className="war-week-loading" role="status" aria-live="polite">
+          <div className="war-week-loading-card">
+            <div className="war-loading-mark">
+              <i />
+              <i />
+              <i />
+            </div>
+            <p>正在切换周次…</p>
+            <small>正在汇总项目、任务与周报事实</small>
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="war-refreshing">正在刷新…</div>
+      ) : null}
     </main>
   );
 }
@@ -2153,11 +2192,13 @@ function OpportunityDetailModal({
   onClose,
   onRecord,
   onCreateProject,
+  onDelete,
 }: {
   opportunity: DashboardOpportunity;
   onClose: () => void;
   onRecord: () => void;
   onCreateProject: () => void;
+  onDelete: () => void;
 }) {
   return (
     <Modal
@@ -2219,6 +2260,14 @@ function OpportunityDetailModal({
           {opportunity.can_manage ? (
             <button className="secondary-button" onClick={onRecord}>
               录入本周进展
+            </button>
+          ) : null}
+          {opportunity.can_delete ? (
+            <button
+              className="secondary-button account-danger-button"
+              onClick={onDelete}
+            >
+              删除商机
             </button>
           ) : null}
           {opportunity.can_convert ? (

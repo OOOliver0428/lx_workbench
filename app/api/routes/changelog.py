@@ -10,6 +10,7 @@ from app.schemas import (
     ChangelogEntryCreate,
     ChangelogEntryOut,
     ChangelogEntryUpdate,
+    ChangelogReorderRequest,
 )
 from app.services import changelog as changelog_service
 
@@ -25,6 +26,7 @@ def _entry_out(entry, db: Session) -> ChangelogEntryOut:
         category=entry.category,
         title=public_admin_copy(entry.title),
         body=public_admin_copy(entry.body),
+        sort_order=entry.sort_order,
         created_by=entry.created_by,
         created_by_name=(
             public_admin_copy(created_by.display_name) if created_by else entry.created_by
@@ -72,6 +74,20 @@ def update_changelog_entry(
     entry = changelog_service.get_changelog_entry(db, entry_id)
     entry = changelog_service.update_changelog_entry(db, entry, payload, actor)
     return _entry_out(entry, db)
+
+
+@router.post("/reorder", response_model=list[ChangelogEntryOut])
+def reorder_changelog_entries(
+    payload: ChangelogReorderRequest,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db, scope="function"),
+) -> list[ChangelogEntryOut]:
+    return [
+        _entry_out(entry, db)
+        for entry in changelog_service.reorder_changelog_entries(
+            db, payload.entry_ids, actor
+        )
+    ]
 
 
 @router.delete("/{entry_id}", status_code=204)

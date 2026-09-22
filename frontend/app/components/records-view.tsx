@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
 import { createClientMessageId } from "../client-id";
@@ -44,6 +44,8 @@ export function RecordsView({
   const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [currentWeekOnly, setCurrentWeekOnly] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -55,6 +57,9 @@ export function RecordsView({
     string | null
   >(null);
   const [permissions, setPermissions] = useState<PermissionKey[]>([]);
+  const [extraRecords, setExtraRecords] = useState<WorkRecord[]>([]);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const PAGE_SIZE = 50;
 
   useEffect(() => {
     let cancelled = false;
@@ -91,12 +96,15 @@ export function RecordsView({
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setExtraRecords([]);
+    setHasMore(false);
     try {
       const params = new URLSearchParams();
       if (projectId) params.set("project_id", projectId);
       if (departmentWorkId) params.set("department_work_id", departmentWorkId);
       if (unassignedOnly) params.set("unassigned_only", "true");
       if (currentWeekOnly) params.set("current_week_only", "true");
+      params.set("limit", String(PAGE_SIZE));
       const [recordRows, projectRows, departmentWorkRows, taskRows] =
         await Promise.all([
           api.records.list(params),
@@ -111,6 +119,7 @@ export function RecordsView({
             : Promise.resolve([]),
         ]);
       setRecords(recordRows);
+      setHasMore(recordRows.length >= PAGE_SIZE);
       setProjects(projectRows);
       setDepartmentWorks(departmentWorkRows);
       setTasks(taskRows);
@@ -143,10 +152,61 @@ export function RecordsView({
     unassignedOnly,
   ]);
 
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore) return;
+    const merged = [...records, ...extraRecords];
+    const last = merged.at(-1);
+    if (!last) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (projectId) params.set("project_id", projectId);
+      if (departmentWorkId) params.set("department_work_id", departmentWorkId);
+      if (unassignedOnly) params.set("unassigned_only", "true");
+      params.set("limit", String(PAGE_SIZE));
+      params.set("before_date", last.work_date);
+      params.set("before_id", last.id);
+      const rows = await api.records.list(params);
+      setExtraRecords((current) => [...current, ...rows]);
+      setHasMore(rows.length >= PAGE_SIZE);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "历史记录加载失败",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [
+    extraRecords,
+    hasMore,
+    loading,
+    loadingMore,
+    departmentWorkId,
+    projectId,
+    records,
+    unassignedOnly,
+  ]);
+
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
     return () => window.clearTimeout(timeout);
   }, [load]);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || currentWeekOnly) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMore();
+        }
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [currentWeekOnly, loadMore]);
 
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
@@ -160,13 +220,26 @@ export function RecordsView({
     () => new Map(tasks.map((task) => [task.id, task.title])),
     [tasks],
   );
-  const totalMinutes = records.reduce((sum, record) => sum + record.minutes, 0);
+  const totalMinutes = useMemo(() => {
+    const merged = [...records, ...extraRecords];
+    return merged.reduce((sum, record) => sum + record.minutes, 0);
+  }, [records, extraRecords]);
   const weekMinutes = useMemo(() => {
     const { start, end } = currentWeekRange();
-    return records
+    return [...records, ...extraRecords]
       .filter((record) => record.work_date >= start && record.work_date <= end)
       .reduce((sum, record) => sum + record.minutes, 0);
-  }, [records]);
+  }, [records, extraRecords]);
+  const visibleRecords = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: WorkRecord[] = [];
+    for (const record of [...records, ...extraRecords]) {
+      if (seen.has(record.id)) continue;
+      seen.add(record.id);
+      merged.push(record);
+    }
+    return merged;
+  }, [records, extraRecords]);
 
   async function deleteRecord(record: WorkRecord) {
     if (!window.confirm(`确认删除 ${record.work_date} 的这条工作记录？`)) {
@@ -263,6 +336,12 @@ export function RecordsView({
           <span />
           仅显示本周记录
         </label>
+        {!currentWeekOnly ? (
+          <div className="toolbar-meta">
+            <strong>滚动加载</strong>
+            <span>下滑查看更早记录</span>
+          </div>
+        ) : null}
         <div className="toolbar-meta">
           <strong>{formatHours(totalMinutes)}</strong>
           <span>累计工时</span>
@@ -281,8 +360,9 @@ export function RecordsView({
             <i />
             <span>正在载入记录…</span>
           </div>
-        ) : records.length ? (
-          groupByDate(records).map(([date, dateRecords]) => (
+        ) : visibleRecords.length ? (
+          <>
+            {groupByDate(visibleRecords).map(([date, dateRecords]) => (
             <div className="record-day" key={date}>
               <header>
                 <strong>{humanDate(date)}</strong>
@@ -405,7 +485,24 @@ export function RecordsView({
                 ))}
               </div>
             </div>
-          ))
+          ))}
+            {!currentWeekOnly ? (
+              <div className="record-load-more" ref={loadMoreRef}>
+                {hasMore ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={loadingMore}
+                    onClick={() => void loadMore()}
+                  >
+                    {loadingMore ? "正在加载更早记录…" : "加载更早工作记录"}
+                  </button>
+                ) : (
+                  <p>已显示全部工作记录</p>
+                )}
+              </div>
+            ) : null}
+          </>
         ) : (
           <EmptyState
             title="还没有工作记录"

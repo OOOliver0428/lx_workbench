@@ -416,6 +416,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    remove: (id: string, revision: number, reason?: string | null) =>
+      request<void>(`/api/v1/opportunities/${id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ revision, reason: reason || null }),
+      }),
     recordProgress: (
       id: string,
       payload: {
@@ -617,6 +622,11 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
+    reorder: (entryIds: string[]) =>
+      request<ChangelogEntry[]>("/api/v1/changelog/reorder", {
+        method: "POST",
+        body: JSON.stringify({ entry_ids: entryIds }),
+      }),
     remove: (id: string, revision: number) =>
       request<void>(`/api/v1/changelog/${id}?revision=${revision}`, {
         method: "DELETE",
@@ -628,14 +638,29 @@ export const api = {
     list: () => request<WeeklyReport[]>("/api/v1/weekly-reports"),
     teamSummaries: () =>
       request<TeamWeeklySummary[]>("/api/v1/weekly-reports/team-summaries"),
-    generateCurrent: () =>
+    generateCurrent: (options?: { guidance?: string; preview?: boolean }) =>
       request<WeeklyReport>("/api/v1/weekly-reports/current/generate", {
         method: "POST",
+        body: JSON.stringify(options ?? {}),
+      }),
+    generatePreview: (guidance?: string) =>
+      request<{
+        content: string;
+        model: string | null;
+        usage: Record<string, number> | null;
+      }>("/api/v1/weekly-reports/current/generate-preview", {
+        method: "POST",
+        body: JSON.stringify({ guidance: guidance || null }),
       }),
     saveDraft: (id: string, revision: number, content: string) =>
       request<WeeklyReport>(`/api/v1/weekly-reports/${id}/draft`, {
         method: "PATCH",
         body: JSON.stringify({ revision, content }),
+      }),
+    createCurrentDraft: (content: string) =>
+      request<WeeklyReport>("/api/v1/weekly-reports/current/draft", {
+        method: "POST",
+        body: JSON.stringify({ content }),
       }),
     submit: (
       id: string,

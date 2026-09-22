@@ -1190,6 +1190,7 @@ class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
@@ -1203,6 +1204,7 @@ class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
             name="ck_changelog_entries_category",
         ),
         Index("ix_changelog_entries_occurred", "occurred_at", "created_at"),
+        Index("ix_changelog_entries_day_sort", "occurred_at", "sort_order"),
     )
 
 

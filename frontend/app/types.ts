@@ -4,6 +4,8 @@ export type UserRole =
   | "system_admin"
   | "super_admin";
 
+export type ThemeMode = "light" | "dark" | "system";
+
 export type PermissionKey =
   | "dashboard.opportunity.view"
   | "dashboard.opportunity.progress"
@@ -409,6 +411,7 @@ export interface ChangelogEntry {
   category: ChangelogCategory;
   title: string;
   body: string;
+  sort_order: number;
   created_by: string;
   created_by_name: string;
   updated_by: string;
@@ -588,6 +591,7 @@ export interface DashboardOpportunity {
   owner_avatar_key: string | null;
   can_manage: boolean;
   can_convert: boolean;
+  can_delete?: boolean;
   status: OpportunityStatus;
   business_stage: BusinessStage;
   attention_status: AttentionStatus;

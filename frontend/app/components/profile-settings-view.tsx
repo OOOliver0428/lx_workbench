@@ -3,10 +3,33 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError, setCsrfToken } from "../api";
-import type { AuthContext, AvatarOption } from "../types";
+import type { AuthContext, AvatarOption, ThemeMode } from "../types";
 import { AvatarImage, AvatarOptionPreview } from "./avatar";
 import { Shield } from "./icons";
 import { InlineNotice, Modal } from "./ui";
+
+const THEME_STORAGE_KEY = "workbench-theme";
+
+export function readStoredTheme(): ThemeMode {
+  if (typeof window === "undefined") return "system";
+  const value = window.localStorage.getItem(THEME_STORAGE_KEY);
+  return value === "light" || value === "dark" || value === "system"
+    ? value
+    : "system";
+}
+
+export function applyTheme(mode: ThemeMode) {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  root.dataset.theme = mode;
+  const prefersDark =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const resolved =
+    mode === "dark" || (mode === "system" && prefersDark) ? "dark" : "light";
+  root.dataset.themeResolved = resolved;
+  root.style.colorScheme = resolved;
+}
 
 export function ProfileSettingsView({
   context,
@@ -24,6 +47,7 @@ export function ProfileSettingsView({
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [activeStyle, setActiveStyle] = useState("");
+  const [theme, setTheme] = useState<ThemeMode>("system");
 
   useEffect(() => {
     api.profile
@@ -45,6 +69,16 @@ export function ProfileSettingsView({
         ),
       );
   }, [context.user.avatar_key]);
+
+  useEffect(() => {
+    setTheme(readStoredTheme());
+  }, []);
+
+  function changeTheme(next: ThemeMode) {
+    setTheme(next);
+    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    applyTheme(next);
+  }
 
   async function saveAvatar() {
     setAvatarBusy(true);
@@ -149,6 +183,37 @@ export function ProfileSettingsView({
         </section>
 
         <PasswordSettingsCard onContextChange={onContextChange} />
+
+        <section className="settings-card theme-settings-card">
+          <header>
+            <div>
+              <p className="eyebrow">APPEARANCE</p>
+              <h2>界面主题</h2>
+              <p>选择亮色、暗色或跟随系统；偏好保存在本机，仅影响当前浏览器。</p>
+            </div>
+          </header>
+          <div className="theme-options" role="radiogroup" aria-label="界面主题">
+            {(
+              [
+                ["light", "亮色", "适合白天与明亮环境"],
+                ["dark", "暗色", "降低屏幕亮度与眩光"],
+                ["system", "跟随系统", "随操作系统深浅色自动切换"],
+              ] as Array<[ThemeMode, string, string]>
+            ).map(([value, label, hint]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={theme === value}
+                className={theme === value ? "active" : ""}
+                onClick={() => changeTheme(value)}
+              >
+                <strong>{label}</strong>
+                <small>{hint}</small>
+              </button>
+            ))}
+          </div>
+        </section>
       </div>
 
       {avatarModalOpen ? (

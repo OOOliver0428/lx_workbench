@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
@@ -244,6 +244,9 @@ def list_work_records(
     department_work_id: str | None = None,
     unassigned_only: bool = False,
     current_week_only: bool = False,
+    limit: int = 50,
+    before_date: date | None = None,
+    before_id: str | None = None,
 ) -> list[WorkRecord]:
     query = select(WorkRecord).where(WorkRecord.deleted_at.is_(None))
     if not is_super_admin(actor):
@@ -266,9 +269,26 @@ def list_work_records(
             WorkRecord.work_date >= week_start,
             WorkRecord.work_date <= week_start + timedelta(days=6),
         )
+    if before_date is not None:
+        # Cursor pagination: older than (work_date, created_at/id).
+        if before_id:
+            query = query.where(
+                or_(
+                    WorkRecord.work_date < before_date,
+                    and_(
+                        WorkRecord.work_date == before_date,
+                        WorkRecord.id < before_id,
+                    ),
+                )
+            )
+        else:
+            query = query.where(WorkRecord.work_date < before_date)
     return list(
         db.scalars(
-            query.order_by(WorkRecord.work_date.desc(), WorkRecord.created_at.desc()).limit(1000)
+            query.order_by(
+                WorkRecord.work_date.desc(),
+                WorkRecord.id.desc(),
+            ).limit(max(1, min(limit, 200)))
         ).all()
     )
 

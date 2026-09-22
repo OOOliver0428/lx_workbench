@@ -46,6 +46,7 @@ export function AdminView({ context }: { context: AuthContext }) {
   const [departmentsLoading, setDepartmentsLoading] = useState(false);
   const [departmentSearch, setDepartmentSearch] = useState("");
   const [showInactiveDepartments, setShowInactiveDepartments] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [tab, setTab] = useState<AdminTab>(
     showUsers
@@ -129,6 +130,19 @@ export function AdminView({ context }: { context: AuthContext }) {
   }
   const visibleDepartments = departments.filter((department) =>
     pinyinMatchAny([department.name], departmentSearch),
+  );
+  const visibleUsers = users.filter((user) =>
+    pinyinMatchAny(
+      [
+        user.display_name,
+        user.login_name,
+        departments.find(
+          (department) => department.id === user.primary_department_id,
+        )?.name,
+        users.find((candidate) => candidate.id === user.leader_id)?.display_name,
+      ],
+      userSearch,
+    ),
   );
 
   async function removeDepartment(department: Department) {
@@ -232,9 +246,27 @@ export function AdminView({ context }: { context: AuthContext }) {
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
 
       {tab === "users" ? (
-        <section className="admin-grid">
-          {users.length ? (
-            users.map((user) => (
+        <>
+          <section className="toolbar">
+            <label className="search-box">
+              <span aria-hidden="true">
+                <Search size={16} />
+              </span>
+              <input
+                value={userSearch}
+                onChange={(event) => setUserSearch(event.target.value)}
+                placeholder="搜索姓名 / 登录名 / 部门 / Leader"
+                aria-label="搜索用户"
+              />
+            </label>
+            <div className="toolbar-meta">
+              <strong>{visibleUsers.length}</strong>
+              <span>个用户</span>
+            </div>
+          </section>
+          <section className="admin-grid">
+          {visibleUsers.length ? (
+            visibleUsers.map((user) => (
               <article className="user-card" key={user.id}>
                 <AvatarImage
                   avatarKey={user.avatar_key}
@@ -302,9 +334,17 @@ export function AdminView({ context }: { context: AuthContext }) {
               </article>
             ))
           ) : (
-            <EmptyState title="暂无用户" description="创建团队的第一个业务账号。" />
+            <EmptyState
+              title={userSearch ? "没有匹配的用户" : "暂无用户"}
+              description={
+                userSearch
+                  ? "换个姓名、登录名或部门关键字试试。"
+                  : "创建团队的第一个业务账号。"
+              }
+            />
           )}
-        </section>
+          </section>
+        </>
       ) : tab === "departments" ? (
         <>
           <section className="toolbar">

@@ -43,6 +43,16 @@ WEEKLY_REPORT_USER_PROMPT = """请生成本周周报，使用以下结构：
 文字应简明、面向直属 Leader 审阅，并保留关键事实。"""
 
 
+def _compose_user_prompt(guidance: str | None) -> str:
+    cleaned = (guidance or "").strip()
+    if not cleaned:
+        return WEEKLY_REPORT_USER_PROMPT
+    return (
+        f"{WEEKLY_REPORT_USER_PROMPT}\n\n"
+        f"用户生成引导（在事实范围内优先呼应，但不得编造不存在的成果）：\n{cleaned}"
+    )
+
+
 def current_week_bounds(today: date | None = None) -> tuple[date, date]:
     local_today = today or datetime.now(SHANGHAI).date()
     week_start = local_today - timedelta(days=local_today.weekday())
@@ -98,10 +108,76 @@ def list_own_team_summaries(
     )
 
 
+def generate_preview(
+    db: Session,
+    settings: Settings,
+    actor: User,
+    *,
+    guidance: str | None = None,
+):
+    """AI-assistant only: produce draft text without writing the weekly report."""
+    week_start, week_end = current_week_bounds()
+    context = build_weekly_report_context(db, actor, week_start, week_end)
+    return ai_service.complete(
+        db,
+        settings,
+        messages=[
+            {"role": "system", "content": WEEKLY_REPORT_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": f"以下是系统生成的本周业务事实：\n{context}",
+            },
+            {"role": "user", "content": _compose_user_prompt(guidance)},
+        ],
+        max_tokens=4096,
+    )
+
+
+def create_current_draft(
+    db: Session,
+    actor: User,
+    *,
+    content: str,
+) -> WeeklyReport:
+    week_start, week_end = current_week_bounds()
+    cleaned = content.strip()
+    if not cleaned:
+        raise AppError("WEEKLY_REPORT_CONTENT_REQUIRED", "周报内容不能为空")
+    report = get_current_report(db, actor)
+    if report:
+        report.content = cleaned
+        report.revision += 1
+        report.updated_at = utc_now()
+    else:
+        report = WeeklyReport(
+            author_id=actor.id,
+            week_start=week_start,
+            week_end=week_end,
+            content=cleaned,
+        )
+        db.add(report)
+    db.flush()
+    record_audit(
+        db,
+        actor=actor,
+        action="weekly_report.draft.save",
+        entity_type="weekly_report",
+        entity_id=report.id,
+        detail={
+            "weekStart": week_start.isoformat(),
+            "source": "ai_assistant_preview",
+            "hadSubmittedVersion": report.submitted_content is not None,
+        },
+    )
+    return report
+
+
 def generate_current_report(
     db: Session,
     settings: Settings,
     actor: User,
+    *,
+    guidance: str | None = None,
 ) -> WeeklyReport:
     week_start, week_end = current_week_bounds()
     context = build_weekly_report_context(db, actor, week_start, week_end)
@@ -114,7 +190,7 @@ def generate_current_report(
                 "role": "system",
                 "content": f"以下是系统生成的本周业务事实：\n{context}",
             },
-            {"role": "user", "content": WEEKLY_REPORT_USER_PROMPT},
+            {"role": "user", "content": _compose_user_prompt(guidance)},
         ],
         max_tokens=4096,
     )

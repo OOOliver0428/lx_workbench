@@ -31,6 +31,9 @@ def list_work_records(
     department_work_id: str | None = None,
     unassigned_only: bool = False,
     current_week_only: bool = False,
+    limit: int = 50,
+    before_date: date | None = None,
+    before_id: str | None = None,
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db, scope="function"),
 ) -> list[WorkRecordOut]:
@@ -43,6 +46,9 @@ def list_work_records(
         department_work_id=department_work_id,
         unassigned_only=unassigned_only,
         current_week_only=current_week_only,
+        limit=limit,
+        before_date=before_date,
+        before_id=before_id,
     )
     return [work_record_out(db, row) for row in rows]
 

@@ -18,6 +18,7 @@ SNAPSHOT_FIELDS = (
     "category",
     "title",
     "body",
+    "sort_order",
 )
 
 
@@ -50,10 +51,30 @@ def list_changelog_entries(db: Session, *, limit: int = 200) -> list[ChangelogEn
     query = (
         select(ChangelogEntry)
         .where(ChangelogEntry.deleted_at.is_(None))
-        .order_by(ChangelogEntry.occurred_at.desc(), ChangelogEntry.created_at.desc())
+        .order_by(
+            ChangelogEntry.occurred_at.desc(),
+            ChangelogEntry.sort_order.desc(),
+            ChangelogEntry.created_at.desc(),
+        )
         .limit(max(1, min(limit, 500)))
     )
     return list(db.scalars(query).all())
+
+
+def _next_day_sort_order(db: Session, occurred_at: datetime) -> int:
+    day_start = occurred_at.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start.replace(hour=23, minute=59, second=59, microsecond=999999)
+    current = db.scalar(
+        select(ChangelogEntry.sort_order)
+        .where(
+            ChangelogEntry.deleted_at.is_(None),
+            ChangelogEntry.occurred_at >= day_start,
+            ChangelogEntry.occurred_at <= day_end,
+        )
+        .order_by(ChangelogEntry.sort_order.desc())
+        .limit(1)
+    )
+    return (current or 0) + 1
 
 
 def create_changelog_entry(
@@ -69,6 +90,7 @@ def create_changelog_entry(
         category=payload.category.value,
         title=title,
         body=body,
+        sort_order=_next_day_sort_order(db, payload.occurred_at),
         created_by=actor.id,
         updated_by=actor.id,
         created_at=now,
@@ -157,3 +179,50 @@ def delete_changelog_entry(
         entity_id=entry.id,
         before_data={"title": entry.title, "category": entry.category},
     )
+
+
+def reorder_changelog_entries(
+    db: Session,
+    entry_ids: list[str],
+    actor: User,
+) -> list[ChangelogEntry]:
+    """Rewrite display order for one calendar day. IDs must share the same day."""
+    require_super_admin(actor)
+    if not entry_ids:
+        return list_changelog_entries(db)
+    entries = list(
+        db.scalars(
+            select(ChangelogEntry).where(
+                ChangelogEntry.id.in_(entry_ids),
+                ChangelogEntry.deleted_at.is_(None),
+            )
+        ).all()
+    )
+    if len(entries) != len(set(entry_ids)):
+        raise NotFoundError("CHANGELOG_ENTRY_NOT_FOUND", "更新日志条目不存在")
+    days = {
+        (entry.occurred_at.date().isoformat())
+        for entry in entries
+    }
+    if len(days) != 1:
+        raise AppError(
+            "CHANGELOG_REORDER_SAME_DAY_ONLY",
+            "仅支持在同一天内拖动排序",
+            status_code=422,
+        )
+    by_id = {entry.id: entry for entry in entries}
+    # Higher sort_order appears first within the day.
+    for index, entry_id in enumerate(entry_ids):
+        entry = by_id[entry_id]
+        entry.sort_order = len(entry_ids) - index
+        entry.updated_by = actor.id
+    db.flush()
+    record_audit(
+        db,
+        actor=actor,
+        action="changelog.reorder",
+        entity_type="changelog_entry",
+        entity_id=entry_ids[0],
+        after_data={"entryIds": list(entry_ids)},
+    )
+    return list_changelog_entries(db)

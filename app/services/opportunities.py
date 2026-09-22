@@ -76,6 +76,53 @@ def require_manage_opportunity(actor: User, opportunity: Opportunity) -> None:
         raise PermissionDeniedError("只有商机负责人、团队负责人或管理员可以修改商机")
 
 
+def can_delete_opportunity(actor: User, opportunity: Opportunity) -> bool:
+    return is_privileged(actor) or opportunity.owner_id == actor.id
+
+
+def delete_opportunity(
+    db: Session,
+    opportunity: Opportunity,
+    *,
+    revision: int,
+    actor: User,
+    reason: str | None = None,
+) -> None:
+    if not can_delete_opportunity(actor, opportunity):
+        raise PermissionDeniedError("只有商机负责人或管理员可以删除商机")
+    project_service.assert_revision(
+        opportunity,
+        revision,
+        entity_name="opportunity",
+    )
+    if opportunity.deleted_at:
+        raise ConflictError("OPPORTUNITY_ALREADY_DELETED", "商机已删除")
+    if opportunity.linked_project_id:
+        linked_project = db.get(Project, opportunity.linked_project_id)
+        if linked_project and not linked_project.deleted_at:
+            raise ConflictError(
+                "OPPORTUNITY_LINKED_PROJECT",
+                "已关联项目的商机不可删除，请先处理关联项目",
+                {"project_id": linked_project.id},
+            )
+    before = jsonable_snapshot(opportunity, OPPORTUNITY_SNAPSHOT_FIELDS)
+    now = utc_now()
+    opportunity.deleted_at = now
+    opportunity.deleted_by = actor.id
+    opportunity.updated_at = now
+    opportunity.revision += 1
+    db.flush()
+    record_audit(
+        db,
+        actor=actor,
+        action="opportunity.delete",
+        entity_type="opportunity",
+        entity_id=opportunity.id,
+        before_data=before,
+        detail={"reason": (reason or "").strip() or None},
+    )
+
+
 def can_convert_opportunity(actor: User, opportunity: Opportunity) -> bool:
     return (
         can_manage_opportunity(actor, opportunity)
@@ -150,6 +197,14 @@ def opportunity_out(
             PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS,
         )
         and can_manage_opportunity(actor, opportunity)
+    )
+    linked_active = bool(
+        linked_project and not linked_project.deleted_at
+    )
+    payload.can_delete = (
+        can_delete_opportunity(actor, opportunity)
+        and not linked_active
+        and opportunity.deleted_at is None
     )
     payload.can_convert = (
         payload.can_manage

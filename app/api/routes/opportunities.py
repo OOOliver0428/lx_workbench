@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_csrf
@@ -16,6 +17,11 @@ from app.services import opportunities as opportunity_service
 from app.services import permissions as permission_service
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
+
+
+class OpportunityDeleteRequest(BaseModel):
+    revision: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=500)
 
 
 @router.get("", response_model=list[OpportunityOut])
@@ -66,6 +72,22 @@ def get_opportunity(
         db,
         opportunity_service.get_opportunity(db, opportunity_id),
         actor,
+    )
+
+
+@router.delete("/{opportunity_id}", status_code=204)
+def delete_opportunity(
+    opportunity_id: str,
+    payload: OpportunityDeleteRequest,
+    actor: User = Depends(require_csrf),
+    db: Session = Depends(get_db, scope="function"),
+) -> None:
+    opportunity_service.delete_opportunity(
+        db,
+        opportunity_service.get_opportunity(db, opportunity_id),
+        revision=payload.revision,
+        actor=actor,
+        reason=payload.reason,
     )
 
 

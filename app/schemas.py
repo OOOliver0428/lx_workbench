@@ -439,6 +439,7 @@ class OpportunityOut(ORMModel):
     members: list[OpportunityMemberOut] = []
     can_manage: bool = False
     can_convert: bool = False
+    can_delete: bool = False
     revision: int
     created_at: datetime
     updated_at: datetime
@@ -941,6 +942,20 @@ class WeeklyReportDraftUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=50000)
 
 
+class WeeklyReportGenerateRequest(BaseModel):
+    guidance: str | None = Field(default=None, max_length=4000)
+
+
+class WeeklyReportPreviewOut(BaseModel):
+    content: str
+    model: str | None = None
+    usage: dict[str, int] | None = None
+
+
+class WeeklyReportCurrentDraftCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=50000)
+
+
 class WeeklyReportSubmit(BaseModel):
     revision: int = Field(ge=1)
     overwrite_confirmed: bool = False
@@ -1297,6 +1312,7 @@ class ChangelogEntryOut(BaseModel):
     category: ChangelogCategory
     title: str
     body: str
+    sort_order: int = 0
     created_by: str
     created_by_name: str
     updated_by: str
@@ -1337,3 +1353,9 @@ class ChangelogEntryUpdate(BaseModel):
         if not stripped:
             raise ValueError("不能为空")
         return stripped
+
+
+class ChangelogReorderRequest(BaseModel):
+    """Same-day display order. IDs listed in the desired visual order."""
+
+    entry_ids: list[str] = Field(min_length=0, max_length=200)

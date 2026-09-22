@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
 import type { ChangelogCategory, ChangelogEntry } from "../types";
@@ -68,6 +68,17 @@ function groupByDay(entries: ChangelogEntry[]) {
   return [...groups.entries()];
 }
 
+function sortByDayOrder(entries: ChangelogEntry[]) {
+  return [...entries].sort((a, b) => {
+    const dayDelta = b.occurred_at.localeCompare(a.occurred_at);
+    if (dayDelta !== 0 && shanghaiDayKey(a.occurred_at) !== shanghaiDayKey(b.occurred_at)) {
+      return dayDelta;
+    }
+    if (a.sort_order !== b.sort_order) return b.sort_order - a.sort_order;
+    return b.created_at.localeCompare(a.created_at);
+  });
+}
+
 export function ChangelogView({ canManage }: { canManage: boolean }) {
   const [entries, setEntries] = useState<ChangelogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +87,10 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ChangelogEntry | null>(null);
   const [deletingId, setDeletingId] = useState("");
+  const [reordering, setReordering] = useState(false);
+  const [draggingId, setDraggingId] = useState("");
+  const dragDayKeyRef = useRef("");
+  const dragOrderRef = useRef<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,7 +112,55 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
     return () => window.clearTimeout(timeout);
   }, [load]);
 
-  const groups = useMemo(() => groupByDay(entries), [entries]);
+  const groups = useMemo(() => groupByDay(sortByDayOrder(entries)), [entries]);
+
+  async function persistDayOrder(dayKey: string, orderedIds: string[]) {
+    setReordering(true);
+    setError("");
+    setNotice("");
+    try {
+      const rows = await api.changelog.reorder(orderedIds);
+      setEntries(rows);
+      setNotice("显示顺序已更新。");
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "调整显示顺序失败",
+      );
+    } finally {
+      setReordering(false);
+      setDraggingId("");
+      dragDayKeyRef.current = "";
+      dragOrderRef.current = [];
+    }
+  }
+
+  function beginDayDrag(dayKey: string, entryId: string, orderedIds: string[]) {
+    if (!canManage || reordering) return;
+    dragDayKeyRef.current = dayKey;
+    dragOrderRef.current = orderedIds;
+    setDraggingId(entryId);
+  }
+
+  function handleDayDrop(dayKey: string, targetId: string) {
+    if (!canManage || reordering) return;
+    if (dragDayKeyRef.current !== dayKey) {
+      setDraggingId("");
+      dragDayKeyRef.current = "";
+      dragOrderRef.current = [];
+      setNotice("仅支持在同一天内拖动排序。");
+      return;
+    }
+    const sourceId = draggingId;
+    const ordered = dragOrderRef.current;
+    if (!sourceId || sourceId === targetId || ordered.length < 2) {
+      setDraggingId("");
+      return;
+    }
+    const next = ordered.filter((id) => id !== sourceId);
+    const targetIndex = next.indexOf(targetId);
+    next.splice(targetIndex < 0 ? next.length : targetIndex, 0, sourceId);
+    void persistDayOrder(dayKey, next);
+  }
 
   async function removeEntry(entry: ChangelogEntry) {
     if (!window.confirm(`确认删除更新日志「${entry.title}」？`)) return;
@@ -144,6 +207,9 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
         </section>
       ) : entries.length ? (
         <div className="changelog-timeline">
+          {canManage ? (
+            <p className="changelog-drag-hint">超级管理员可拖动同一天内的条目调整显示顺序。</p>
+          ) : null}
           {groups.map(([dayKey, dayEntries]) => (
             <section className="changelog-day" key={dayKey}>
               <h2>
@@ -151,9 +217,35 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
               </h2>
               <div className="changelog-day-entries">
                 {dayEntries.map((entry) => entry.category === "release" ? (
-                  <article className="changelog-release" key={entry.id}>
+                  <article
+                    className={`changelog-release${draggingId === entry.id ? " is-dragging" : ""}${canManage ? " is-draggable" : ""}`}
+                    key={entry.id}
+                    draggable={canManage && !reordering}
+                    onDragStart={() =>
+                      beginDayDrag(
+                        dayKey,
+                        entry.id,
+                        dayEntries.map((item) => item.id),
+                      )
+                    }
+                    onDragEnd={() => setDraggingId("")}
+                    onDragOver={(event) => {
+                      if (canManage && dragDayKeyRef.current === dayKey) {
+                        event.preventDefault();
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      handleDayDrop(dayKey, entry.id);
+                    }}
+                  >
                     <div className="changelog-release-divider" role="separator" aria-label={`版本更新 ${entry.title}`}>
-                      <h3>{entry.title}</h3>
+                      <h3>
+                        {canManage ? (
+                          <span className="changelog-drag-handle" title="同一天内可拖动排序" aria-hidden="true">⋮⋮</span>
+                        ) : null}
+                        {entry.title}
+                      </h3>
                     </div>
                     {canManage ? (
                       <div className="changelog-release-actions">
@@ -168,8 +260,32 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
                     ) : null}
                   </article>
                 ) : (
-                  <article className="changelog-entry" key={entry.id}>
+                  <article
+                    className={`changelog-entry${draggingId === entry.id ? " is-dragging" : ""}${canManage ? " is-draggable" : ""}`}
+                    key={entry.id}
+                    draggable={canManage && !reordering}
+                    onDragStart={() =>
+                      beginDayDrag(
+                        dayKey,
+                        entry.id,
+                        dayEntries.map((item) => item.id),
+                      )
+                    }
+                    onDragEnd={() => setDraggingId("")}
+                    onDragOver={(event) => {
+                      if (canManage && dragDayKeyRef.current === dayKey) {
+                        event.preventDefault();
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      handleDayDrop(dayKey, entry.id);
+                    }}
+                  >
                     <div className="changelog-entry-meta">
+                      {canManage ? (
+                        <span className="changelog-drag-handle" title="同一天内可拖动排序" aria-hidden="true">⋮⋮</span>
+                      ) : null}
                       <strong>{shanghaiTimeLabel(entry.occurred_at)}</strong>
                       <span className={`changelog-tag tag-${entry.category}`}>
                         <i aria-hidden="true" />
