@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+# shellcheck source=../lib/diagnostics.sh
+source "${SCRIPT_DIR}/../lib/diagnostics.sh"
+workspace_stage "校验 systemd 模板" "需要 Linux、systemd-analyze、Node.js 和 Python 3；本命令只生成临时文件，不安装服务。" E_UNIT_VERIFY
+for dependency in node python3 systemd-analyze; do
+  command -v "${dependency}" >/dev/null || fail "缺少模板检查工具：${dependency}" E_DEPENDENCY
+done
 temporary_dir="$(mktemp -d)"
-trap 'rm -rf -- "${temporary_dir}"' EXIT
+workspace_cleanup() { rm -rf -- "${temporary_dir}"; }
 
 project_dir="${temporary_dir}/project"
 data_dir="${temporary_dir}/data"
@@ -60,6 +67,7 @@ render \
 cp -- "${SCRIPT_DIR}/solution-workspace.target" "${temporary_dir}/solution-workspace.target"
 cp -- "${SCRIPT_DIR}/solution-workspace-backup.timer" \
   "${temporary_dir}/solution-workspace-backup.timer"
+chmod 0644 "${temporary_dir}"/*.service "${temporary_dir}"/*.timer "${temporary_dir}"/*.target
 
 if grep -R '@@[A-Z_]*@@' "${temporary_dir}"/*.service; then
   printf 'unexpanded systemd template token found\n' >&2

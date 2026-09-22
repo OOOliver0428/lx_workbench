@@ -83,9 +83,9 @@ def test_ops_database_switch_has_backup_validation_and_rollback_guards() -> None
     assert "rollback_switch" in operations
     assert "trap 'switch_error_trap 130' INT" in operations
     assert "trap 'switch_error_trap 143' TERM" in operations
-    assert "systemctl stop solution-workspace-backup.timer || return 1" in operations
+    assert "systemctl stop solution-workspace-backup.timer || stopped=false" in operations
     assert "systemctl start solution-workspace.target || return 1" in operations
-    assert "new database failed service startup or health checks" in operations
+    assert "切换后服务启动或健康检查失败。" in operations
     assert "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" in operations
     assert '"${RUNUSER_BIN}" -u "${APP_USER}"' in operations
     assert '[[ "$#" -eq 0 ]] || fail "usage: solution-workspace backup"' in operations
@@ -130,7 +130,7 @@ def test_update_stages_frontend_before_stopping_the_running_release() -> None:
     assert "validate_staged_frontend" in operations
     assert "tar --no-same-owner --no-same-permissions" in operations
     assert (
-        "candidate frontend install/build failed; the current version is still online"
+        "新版前端依赖安装或构建失败；本次更新尚未停止原服务。"
         in operations
     )
     assert "swap_frontend_runtime" in operations

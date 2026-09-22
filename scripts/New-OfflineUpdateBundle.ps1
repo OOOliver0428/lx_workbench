@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
     [string]$Remote = "origin",
@@ -20,6 +20,17 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$BundleStage = "检查 Git 和打包参数"
+trap {
+    $message = $_.Exception.Message -replace '(https?://)[^/@\s]+:[^/@\s]+@', '$1[REDACTED]@'
+    Write-Host ""
+    Write-Host "生成升级包失败 [E_BUNDLE_BUILD]" -ForegroundColor Red
+    Write-Host "阶段：$BundleStage"
+    Write-Host "原因：$message"
+    Write-Host "当前状态：没有切换本地工作分支，也没有修改项目文件；失败产物不会作为可用包发布。"
+    Write-Host "下一步：核对 -Branch；本地缺少分支时去掉 -SkipFetch 重新同步；缺少基线请使用 -FullHistory；磁盘错误请检查输出目录空间与权限。"
+    exit 1
+}
 
 function Invoke-Git {
     param(
@@ -74,7 +85,7 @@ function Remove-StagingRepository {
 }
 
 if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    throw "Git was not found. Install Git for Windows and try again."
+    throw "没有找到 Git，请安装 Git for Windows 并重新打开终端。"
 }
 
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -84,6 +95,10 @@ $actualRoot = (Resolve-Path -LiteralPath $actualRoot).Path
 if ($actualRoot -ne $repositoryRoot) {
     throw "This script must stay inside the Solution Workspace repository."
 }
+if ($Remote.StartsWith('-') -or $BaseRef.StartsWith('-') -or $Branch.StartsWith('-')) {
+    throw "远程、分支和基线名称不能以短横线开头。"
+}
+Invoke-Git -Repository $repositoryRoot -Arguments @("check-ref-format", "--branch", $Branch)
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repositoryRoot "outputs\offline-updates"
@@ -95,6 +110,7 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
 if (-not $SkipFetch) {
+    $BundleStage = "同步 $Remote/$Branch"
     Write-Host "[1/4] Syncing $Remote/$Branch from GitHub..."
     Invoke-Git -Repository $repositoryRoot -Arguments @(
         "fetch", "--prune", "--tags", $Remote, $Branch
@@ -104,6 +120,7 @@ if (-not $SkipFetch) {
 }
 
 $remoteRef = "refs/remotes/$Remote/$Branch"
+$BundleStage = "检查目标版本与历史基线"
 $targetCommit = Invoke-Git -Repository $repositoryRoot -Arguments @(
     "rev-parse", "--verify", "$remoteRef^{commit}"
 ) -Capture
@@ -123,7 +140,7 @@ if (-not $FullHistory) {
     $bundleRevision = "$baseCommit..refs/heads/$Branch"
     $baseLabel = $BaseRef -replace '[^A-Za-z0-9._-]', '-'
 }
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$timestamp = (Get-Date -Format "yyyyMMdd-HHmmss-fff") + "-" + [guid]::NewGuid().ToString('N').Substring(0, 6)
 $artifactBase = "solution-workspace-update-$timestamp-from-$baseLabel-to-$shortCommit"
 $bundlePath = Join-Path $OutputDirectory "$artifactBase.bundle"
 $checksumPath = "$bundlePath.sha256"
@@ -137,6 +154,7 @@ $stagingRepository = Join-Path $stagingRoot (
 New-Item -ItemType Directory -Path $stagingRepository | Out-Null
 
 try {
+    $BundleStage = "生成 bundle 文件"
     Write-Host "[2/4] Creating the offline Git bundle..."
     Invoke-Git -Repository $stagingRepository -Arguments @("init", "--bare")
     Invoke-Git -Repository $stagingRepository -Arguments @(
@@ -148,6 +166,7 @@ try {
         "bundle", "create", $bundlePath, $bundleRevision
     )
 
+    $BundleStage = "校验生成的文件和目标提交"
     Write-Host "[3/4] Verifying the bundle and calculating SHA-256..."
     Invoke-Git -Repository $repositoryRoot -Arguments @("bundle", "verify", $bundlePath)
     $bundleHead = (& git.exe bundle list-heads $bundlePath | Out-String).Trim()
@@ -185,16 +204,16 @@ Compatibility: $minimumServerText
    $bundleName
    $checksumName
 
-2. On the server, run from /tmp:
-   sha256sum -c $checksumName
-   sudo install -d -m 0700 -o root -g root /var/lib/solution-workspace/releases
-   sudo install -m 0600 -o root -g root $bundleName /var/lib/solution-workspace/releases/solution-workspace-update.bundle
-   sudo git -C /opt/solution-workspace bundle verify /var/lib/solution-workspace/releases/solution-workspace-update.bundle
-   sudo solution-workspace update /var/lib/solution-workspace/releases/solution-workspace-update.bundle $Branch
-   sudo solution-workspace health
-   sudo systemctl is-enabled solution-workspace-backup.timer
-   sudo systemctl is-active solution-workspace-backup.timer
-   sudo git -C /opt/solution-workspace rev-parse HEAD
+2. On a server with the new operations command, run:
+   sudo solution-workspace update --offline /tmp/$bundleName --branch $Branch
+
+   It verifies the companion checksum, imports the bundle, backs up, upgrades,
+   and checks services and the backup timer. Repeating the same version does nothing.
+   Optional read-only deployment check:
+   sudo solution-workspace doctor
+
+   If help does not list --offline, follow the one-time updater bootstrap in
+   docs/UBUNTU_DEPLOYMENT.md first. Both ops.sh and diagnostics.sh are required.
 
 
 The final commit must be:
@@ -210,7 +229,7 @@ a one-time full-history package with:
 "@
     [IO.File]::WriteAllText($guidePath, $guide, [Text.UTF8Encoding]::new($true))
 
-    Write-Host "[4/4] Package completed." -ForegroundColor Green
+    Write-Host "[4/4] 升级包生成并校验完成。" -ForegroundColor Green
     Write-Host "Bundle:   $bundlePath"
     Write-Host "Checksum: $checksumPath"
     Write-Host "Guide:    $guidePath"
@@ -232,5 +251,9 @@ a one-time full-history package with:
     }
     throw
 } finally {
-    Remove-StagingRepository -StagingPath $stagingRepository -StagingRoot $stagingRoot
+    try {
+        Remove-StagingRepository -StagingPath $stagingRepository -StagingRoot $stagingRoot
+    } catch {
+        Write-Warning "临时打包仓库清理失败，可稍后清理 $stagingRepository；原因：$($_.Exception.Message)"
+    }
 }
