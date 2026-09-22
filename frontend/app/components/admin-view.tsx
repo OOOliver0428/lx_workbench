@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
+import {
+  collectAuditActions,
+  collectAuditActors,
+  filterAuditEvents,
+  formatAuditAction,
+  formatAuditActor,
+  formatAuditEntity,
+  hasActiveAuditFilters,
+} from "../audit-labels";
 import { pinyinMatchAny } from "../pinyin";
+import { RECORD_PAGE_SIZE } from "../record-pagination";
 import type {
   AuditEvent,
   AuthContext,
@@ -19,7 +29,7 @@ import type {
 } from "../types";
 import { AIConfigPanel } from "./ai-config-panel";
 import { AvatarImage } from "./avatar";
-import { Dice, Plus, Search } from "./icons";
+import { Dice, Plus, Reload, Search } from "./icons";
 import { EmptyState, InlineNotice, Modal } from "./ui";
 
 type AdminTab = "users" | "departments" | "tags" | "ai" | "audit";
@@ -48,6 +58,12 @@ export function AdminView({ context }: { context: AuthContext }) {
   const [showInactiveDepartments, setShowInactiveDepartments] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditActorFilter, setAuditActorFilter] = useState("");
+  const [auditActionFilter, setAuditActionFilter] = useState("");
+  const [auditFromFilter, setAuditFromFilter] = useState("");
+  const [auditToFilter, setAuditToFilter] = useState("");
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditRefreshing, setAuditRefreshing] = useState(false);
   const [tab, setTab] = useState<AdminTab>(
     showUsers
       ? "users"
@@ -121,6 +137,19 @@ export function AdminView({ context }: { context: AuthContext }) {
     return () => window.clearTimeout(timeout);
   }, [loadDepartments]);
 
+  const auditFilterKey = [
+    auditActorFilter,
+    auditActionFilter,
+    auditFromFilter,
+    auditToFilter,
+  ].join("|");
+  const [appliedAuditFilterKey, setAppliedAuditFilterKey] =
+    useState(auditFilterKey);
+  if (appliedAuditFilterKey !== auditFilterKey) {
+    setAppliedAuditFilterKey(auditFilterKey);
+    setAuditPage(1);
+  }
+
   const userNameById = new Map<string, string>();
   for (const candidate of departmentCandidates) {
     userNameById.set(candidate.id, candidate.display_name);
@@ -144,6 +173,47 @@ export function AdminView({ context }: { context: AuthContext }) {
       userSearch,
     ),
   );
+
+  const auditFilters = {
+    actorId: auditActorFilter,
+    action: auditActionFilter,
+    from: auditFromFilter,
+    to: auditToFilter,
+  };
+  const auditFiltering = hasActiveAuditFilters(auditFilters);
+  const filteredAuditEvents = filterAuditEvents(auditEvents, auditFilters);
+  const auditActorOptions = collectAuditActors(auditEvents);
+  const auditActionOptions = collectAuditActions(auditEvents);
+  const auditPageCount = Math.max(
+    1,
+    Math.ceil(filteredAuditEvents.length / RECORD_PAGE_SIZE),
+  );
+  const currentAuditPage = Math.min(auditPage, auditPageCount);
+  const pagedAuditEvents = filteredAuditEvents.slice(
+    (currentAuditPage - 1) * RECORD_PAGE_SIZE,
+    currentAuditPage * RECORD_PAGE_SIZE,
+  );
+
+  async function refreshAuditEvents() {
+    setAuditRefreshing(true);
+    setError("");
+    try {
+      setAuditEvents(await api.audit.list());
+    } catch (caught) {
+      setError(
+        caught instanceof ApiClientError ? caught.message : "审计记录加载失败",
+      );
+    } finally {
+      setAuditRefreshing(false);
+    }
+  }
+
+  function clearAuditFilters() {
+    setAuditActorFilter("");
+    setAuditActionFilter("");
+    setAuditFromFilter("");
+    setAuditToFilter("");
+  }
 
   async function removeDepartment(department: Department) {
     if (
@@ -239,7 +309,12 @@ export function AdminView({ context }: { context: AuthContext }) {
             className={tab === "audit" ? "active" : ""}
             onClick={() => setTab("audit")}
           >
-            审计记录 <span>{auditEvents.length}</span>
+            审计记录{" "}
+            <span>
+              {auditFiltering
+                ? `${filteredAuditEvents.length}/${auditEvents.length}`
+                : auditEvents.length}
+            </span>
           </button>
         ) : null}
       </div>
@@ -467,35 +542,163 @@ export function AdminView({ context }: { context: AuthContext }) {
       ) : tab === "ai" && canManageAi ? (
         <AIConfigPanel />
       ) : tab === "audit" && canViewAudit ? (
-        auditEvents.length ? (
-          <section className="audit-admin-list">
-            {auditEvents.map((event) => (
-              <article key={event.id}>
-                <div>
-                  <strong>{event.action}</strong>
-                  <span>
-                    {event.entity_type}
-                    {event.entity_id ? ` · ${event.entity_id}` : ""}
-                  </span>
-                </div>
-                <span className={`audit-result audit-result-${event.result}`}>
-                  {event.result}
-                </span>
-                <time dateTime={event.created_at}>
-                  {new Intl.DateTimeFormat("zh-CN", {
-                    dateStyle: "short",
-                    timeStyle: "medium",
-                  }).format(new Date(event.created_at))}
-                </time>
-              </article>
-            ))}
+        <>
+          <section className="toolbar audit-filter-bar">
+            <label className="audit-filter-field">
+              <span>用户</span>
+              <select
+                value={auditActorFilter}
+                onChange={(event) => setAuditActorFilter(event.target.value)}
+                aria-label="按用户筛选"
+              >
+                <option value="">全部用户</option>
+                {auditActorOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="audit-filter-field">
+              <span>操作类型</span>
+              <select
+                value={auditActionFilter}
+                onChange={(event) => setAuditActionFilter(event.target.value)}
+                aria-label="按操作类型筛选"
+              >
+                <option value="">全部操作</option>
+                {auditActionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="audit-filter-field">
+              <span>起始</span>
+              <input
+                type="datetime-local"
+                value={auditFromFilter}
+                onChange={(event) => setAuditFromFilter(event.target.value)}
+                aria-label="起始时间"
+              />
+            </label>
+            <label className="audit-filter-field">
+              <span>截止</span>
+              <input
+                type="datetime-local"
+                value={auditToFilter}
+                onChange={(event) => setAuditToFilter(event.target.value)}
+                aria-label="截止时间"
+              />
+            </label>
+            {auditFiltering ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={clearAuditFilters}
+              >
+                清空筛选
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button compact audit-refresh-button"
+              disabled={auditRefreshing}
+              onClick={() => void refreshAuditEvents()}
+            >
+              <Reload size={14} /> {auditRefreshing ? "刷新中…" : "刷新"}
+            </button>
+            <div className="toolbar-meta">
+              <strong>{filteredAuditEvents.length}</strong>
+              <span>/ {auditEvents.length} 条</span>
+            </div>
           </section>
-        ) : (
-          <EmptyState
-            title="暂无审计记录"
-            description="新的受审计操作会显示在这里。"
-          />
-        )
+          {pagedAuditEvents.length ? (
+            <>
+              <section className="audit-admin-list">
+                {pagedAuditEvents.map((event) => (
+                  <article key={event.id}>
+                    <div>
+                      <strong>{formatAuditAction(event.action)}</strong>
+                      <span>
+                        {formatAuditEntity(event.entity_type, event.entity_id)}
+                      </span>
+                    </div>
+                    <span className="audit-actor">
+                      {formatAuditActor(event.actor_id, event.actor_name)}
+                    </span>
+                    <span
+                      className={`audit-result audit-result-${event.result}`}
+                    >
+                      {event.result}
+                    </span>
+                    <time dateTime={event.created_at}>
+                      {new Intl.DateTimeFormat("zh-CN", {
+                        dateStyle: "short",
+                        timeStyle: "medium",
+                      }).format(new Date(event.created_at))}
+                    </time>
+                  </article>
+                ))}
+              </section>
+              {auditPageCount > 1 ? (
+                <nav className="audit-pagination" aria-label="审计记录分页">
+                  <button
+                    type="button"
+                    className="secondary-button compact"
+                    disabled={currentAuditPage <= 1}
+                    onClick={() => setAuditPage(currentAuditPage - 1)}
+                  >
+                    上一页
+                  </button>
+                  <div className="audit-pagination-pages">
+                    {auditPageNumbers(currentAuditPage, auditPageCount).map(
+                      (page, index) =>
+                        page === null ? (
+                          <span
+                            className="audit-pagination-ellipsis"
+                            key={`ellipsis-${index}`}
+                          >
+                            …
+                          </span>
+                        ) : (
+                          <button
+                            className={page === currentAuditPage ? "active" : ""}
+                            aria-current={
+                              page === currentAuditPage ? "page" : undefined
+                            }
+                            key={page}
+                            type="button"
+                            onClick={() => setAuditPage(page)}
+                          >
+                            {page}
+                          </button>
+                        ),
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button compact"
+                    disabled={currentAuditPage >= auditPageCount}
+                    onClick={() => setAuditPage(currentAuditPage + 1)}
+                  >
+                    下一页
+                  </button>
+                </nav>
+              ) : null}
+            </>
+          ) : (
+            <EmptyState
+              title={auditFiltering ? "没有匹配的审计记录" : "暂无审计记录"}
+              description={
+                auditFiltering
+                  ? "调整用户、操作类型或时间段筛选条件试试。"
+                  : "新的受审计操作会显示在这里。"
+              }
+            />
+          )}
+        </>
       ) : null}
 
       {createUserOpen && canManageUsers ? (
@@ -1688,6 +1891,21 @@ function DepartmentEditModal({
 function optionalText(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function auditPageNumbers(current: number, total: number): Array<number | null> {
+  const wanted = new Set([1, total, current - 1, current, current + 1]);
+  const pages = [...wanted]
+    .filter((page) => page >= 1 && page <= total)
+    .sort((a, b) => a - b);
+  const result: Array<number | null> = [];
+  let previous = 0;
+  for (const page of pages) {
+    if (previous && page - previous > 1) result.push(null);
+    result.push(page);
+    previous = page;
+  }
+  return result;
 }
 
 function roleLabel(role: string) {

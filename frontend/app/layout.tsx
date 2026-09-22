@@ -10,7 +10,7 @@ export const metadata = {
   },
 };
 
-const themeInit = `(function(){try{var m=localStorage.getItem('workbench-theme')||'system';var r=document.documentElement;r.dataset.theme=m;var d=m==='dark'||(m==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);r.dataset.themeResolved=d?'dark':'light';r.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
+const themeInit = `(function(){try{var m=localStorage.getItem('workbench-theme')||'system';var d=m==='dark'||(m!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;r.dataset.theme=d?'dark':'light';r.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
 
 export default function RootLayout({
   children,

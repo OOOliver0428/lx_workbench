@@ -16,7 +16,7 @@ router = APIRouter(prefix="/audit-events", tags=["audit"])
 def list_audit_events(
     entity_type: str | None = None,
     entity_id: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=1000),
     actor: User = Depends(get_current_user),
     db: Session = Depends(get_db, scope="function"),
 ) -> list[AuditEventOut]:
@@ -40,4 +40,16 @@ def list_audit_events(
     if entity_id:
         query = query.where(AuditEvent.entity_id == entity_id)
     rows = db.scalars(query.order_by(AuditEvent.created_at.desc()).limit(limit)).all()
-    return [AuditEventOut.model_validate(row) for row in rows]
+    actor_ids = {row.actor_id for row in rows if row.actor_id is not None}
+    actor_names: dict[str, str] = {}
+    if actor_ids:
+        actor_names = dict(
+            db.execute(select(User.id, User.display_name).where(User.id.in_(actor_ids))).all()
+        )
+    events: list[AuditEventOut] = []
+    for row in rows:
+        event = AuditEventOut.model_validate(row)
+        if row.actor_id is not None:
+            event.actor_name = actor_names.get(row.actor_id)
+        events.append(event)
+    return events

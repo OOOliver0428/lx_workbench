@@ -21,13 +21,12 @@ export function readStoredTheme(): ThemeMode {
 export function applyTheme(mode: ThemeMode) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
-  root.dataset.theme = mode;
   const prefersDark =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches;
   const resolved =
-    mode === "dark" || (mode === "system" && prefersDark) ? "dark" : "light";
-  root.dataset.themeResolved = resolved;
+    mode === "dark" || (mode !== "light" && prefersDark) ? "dark" : "light";
+  root.dataset.theme = resolved;
   root.style.colorScheme = resolved;
 }
 
@@ -139,47 +138,29 @@ export function ProfileSettingsView({
           <h2>{context.user.display_name}</h2>
           <p>@{context.user.login_name}</p>
         </div>
-        <span>{roleLabel(context.user.role)}</span>
+        <div className="profile-identity-actions">
+          <span className="profile-role-pill">
+            {roleLabel(context.user.role)}
+          </span>
+          <button
+            className="identity-action-button"
+            type="button"
+            onClick={openAvatarModal}
+          >
+            更换头像
+          </button>
+          <p className="profile-avatar-hint">
+            当前：{currentOption?.label ?? "姓名首字头像"} ·{" "}
+            {avatarStyles.length || 7} 套风格可选
+          </p>
+        </div>
       </section>
+      {avatarError ? (
+        <InlineNotice tone="error">{avatarError}</InlineNotice>
+      ) : null}
+      {avatarMessage ? <InlineNotice>{avatarMessage}</InlineNotice> : null}
 
       <div className="profile-settings-grid">
-        <section className="settings-card avatar-settings-card">
-          <header>
-            <div>
-              <p className="eyebrow">AVATAR</p>
-              <h2>个人头像</h2>
-              <p>当前头像会用于侧栏和人员目录，可随时更换。</p>
-            </div>
-            <AvatarImage
-              avatarKey={context.user.avatar_key}
-              displayName={context.user.display_name}
-              className="settings-avatar-preview"
-            />
-          </header>
-          <div className="avatar-setting-summary">
-            <div>
-              <strong>{currentOption?.label ?? "姓名首字头像"}</strong>
-              <p>
-                系统提供 {avatarStyles.length || 7} 套风格、
-                {avatarOptions.length || 56} 张预置头像，不支持上传和外部图片。
-              </p>
-            </div>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={openAvatarModal}
-            >
-              更换头像
-            </button>
-          </div>
-          {avatarError ? (
-            <InlineNotice tone="error">{avatarError}</InlineNotice>
-          ) : null}
-          {avatarMessage ? <InlineNotice>{avatarMessage}</InlineNotice> : null}
-        </section>
-
-        <PasswordSettingsCard onContextChange={onContextChange} />
-
         <section className="settings-card theme-settings-card">
           <header>
             <div>
@@ -210,6 +191,8 @@ export function ProfileSettingsView({
             ))}
           </div>
         </section>
+
+        <PasswordSettingsCard onContextChange={onContextChange} />
       </div>
 
       {avatarModalOpen ? (

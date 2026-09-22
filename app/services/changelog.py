@@ -69,6 +69,11 @@ def list_changelog_entries(db: Session, *, limit: int = 200) -> list[ChangelogEn
     return list(db.scalars(query).all())
 
 
+def get_latest_changelog_entry(db: Session) -> ChangelogEntry | None:
+    entries = list_changelog_entries(db, limit=1)
+    return entries[0] if entries else None
+
+
 def _shanghai_time(value: datetime) -> datetime:
     return (value if value.tzinfo else value.replace(tzinfo=UTC)).astimezone(SHANGHAI)
 

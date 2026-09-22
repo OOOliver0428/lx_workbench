@@ -44,9 +44,9 @@ const PRIORITY_LABELS: Record<Task["priority"], string> = {
 };
 
 const PRIORITY_COLORS: Record<Task["priority"], string> = {
-  p0: "#b44e43",
-  p1: "#1677ff",
-  p2: "#8ca1b2",
+  p0: "var(--priority-p0)",
+  p1: "var(--priority-p1)",
+  p2: "var(--priority-p2)",
 };
 
 const PRIORITY_RANK: Record<Task["priority"], number> = { p0: 0, p1: 1, p2: 2 };
@@ -91,13 +91,13 @@ function compareTasks(a: Task, b: Task, key: SortKey) {
 
 function groupAccent(value: string) {
   const colors = [
-    "#1677ff",
-    "#6b5cff",
-    "#16b987",
-    "#e98a32",
-    "#e94f9b",
-    "#16a5d9",
-    "#13a8a8",
+    "var(--group-1)",
+    "var(--group-2)",
+    "var(--group-3)",
+    "var(--group-4)",
+    "var(--group-5)",
+    "var(--group-6)",
+    "var(--group-7)",
   ];
   const hash = [...value].reduce(
     (sum, character) => sum + character.charCodeAt(0),
@@ -1017,7 +1017,7 @@ export function TaskDetailModal({
                     className="tf-dot"
                     style={{
                       background: TERMINAL_STATUSES.has(child.status)
-                        ? "#16b987"
+                        ? "var(--success)"
                         : PRIORITY_COLORS[child.priority],
                     }}
                   />

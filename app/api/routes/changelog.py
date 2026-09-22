@@ -10,6 +10,7 @@ from app.schemas import (
     ChangelogEntryCreate,
     ChangelogEntryOut,
     ChangelogEntryUpdate,
+    ChangelogLatestOut,
     ChangelogReorderRequest,
 )
 from app.services import changelog as changelog_service
@@ -52,6 +53,22 @@ def list_changelog_entries(
         _entry_out(entry, db)
         for entry in changelog_service.list_changelog_entries(db, limit=limit)
     ]
+
+
+@router.get("/latest", response_model=ChangelogLatestOut | None)
+def get_latest_changelog_entry(
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+) -> ChangelogLatestOut | None:
+    _ = actor
+    entry = changelog_service.get_latest_changelog_entry(db)
+    if entry is None:
+        return None
+    return ChangelogLatestOut(
+        id=entry.id,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+    )
 
 
 @router.post("", response_model=ChangelogEntryOut, status_code=201)
