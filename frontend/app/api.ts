@@ -31,6 +31,7 @@ import type {
   PermissionKey,
   WeeklyReport,
   WorkRecord,
+  WorkRecordStats,
   WorkRecordQuickCreateResult,
   UserPermissions,
   TimeBlock,
@@ -533,6 +534,8 @@ export const api = {
       }),
   },
   records: {
+    stats: (params: URLSearchParams) =>
+      request<WorkRecordStats>(`/api/v1/work-records/stats?${params.toString()}`),
     list: (params?: URLSearchParams) =>
       request<WorkRecord[]>(
         `/api/v1/work-records${params?.size ? `?${params}` : ""}`,

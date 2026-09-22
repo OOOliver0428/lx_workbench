@@ -76,8 +76,18 @@ def require_manage_opportunity(actor: User, opportunity: Opportunity) -> None:
         raise PermissionDeniedError("只有商机负责人、团队负责人或管理员可以修改商机")
 
 
-def can_delete_opportunity(actor: User, opportunity: Opportunity) -> bool:
-    return is_privileged(actor) or opportunity.owner_id == actor.id
+def can_delete_opportunity(db: Session, actor: User, opportunity: Opportunity) -> bool:
+    linked_project = (
+        db.get(Project, opportunity.linked_project_id) if opportunity.linked_project_id else None
+    )
+    return (
+        can_manage_opportunity(actor, opportunity)
+        and permission_service.has_permission(
+            db, actor, PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS
+        )
+        and opportunity.deleted_at is None
+        and not (linked_project and not linked_project.deleted_at)
+    )
 
 
 def delete_opportunity(
@@ -88,7 +98,8 @@ def delete_opportunity(
     actor: User,
     reason: str | None = None,
 ) -> None:
-    if not can_delete_opportunity(actor, opportunity):
+    permission_service.assert_permission(db, actor, PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS)
+    if not can_manage_opportunity(actor, opportunity):
         raise PermissionDeniedError("只有商机负责人或管理员可以删除商机")
     project_service.assert_revision(
         opportunity,
@@ -127,8 +138,7 @@ def can_convert_opportunity(actor: User, opportunity: Opportunity) -> bool:
     return (
         can_manage_opportunity(actor, opportunity)
         and opportunity.linked_project_id is None
-        and opportunity.status
-        in {OpportunityStatus.ACTIVE.value, OpportunityStatus.WON.value}
+        and opportunity.status in {OpportunityStatus.ACTIVE.value, OpportunityStatus.WON.value}
         and opportunity.business_stage in CONVERTIBLE_STAGES
     )
 
@@ -137,11 +147,7 @@ def _active_users(db: Session, user_ids: set[str]) -> dict[str, User]:
     if not user_ids:
         return {}
     users = list(db.scalars(select(User).where(User.id.in_(user_ids))).all())
-    valid = {
-        user.id: user
-        for user in users
-        if user.is_active and user.role != "super_admin"
-    }
+    valid = {user.id: user for user in users if user.is_active and user.role != "super_admin"}
     if len(valid) != len(user_ids):
         raise AppError("INVALID_OPPORTUNITY_MEMBER", "商机负责人或成员不存在或已停用")
     return valid
@@ -168,10 +174,11 @@ def opportunity_out(
     payload.owner_display_name = owner.display_name if owner else "未知用户"
     payload.owner_avatar_key = owner.avatar_key if owner else None
     member_ids = _member_ids(db, opportunity.id)
-    members = {
-        user.id: user
-        for user in db.scalars(select(User).where(User.id.in_(member_ids))).all()
-    } if member_ids else {}
+    members = (
+        {user.id: user for user in db.scalars(select(User).where(User.id.in_(member_ids))).all()}
+        if member_ids
+        else {}
+    )
     payload.members = [
         OpportunityMemberOut(
             id=user_id,
@@ -182,30 +189,18 @@ def opportunity_out(
         if user_id in members
     ]
     linked_project = (
-        db.get(Project, opportunity.linked_project_id)
-        if opportunity.linked_project_id
-        else None
+        db.get(Project, opportunity.linked_project_id) if opportunity.linked_project_id else None
     )
     if linked_project and not linked_project.deleted_at:
         payload.linked_project_code = linked_project.code
         payload.linked_project_name = linked_project.name
         payload.linked_project_status = linked_project.status
-    payload.can_manage = (
-        permission_service.has_permission(
-            db,
-            actor,
-            PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS,
-        )
-        and can_manage_opportunity(actor, opportunity)
-    )
-    linked_active = bool(
-        linked_project and not linked_project.deleted_at
-    )
-    payload.can_delete = (
-        can_delete_opportunity(actor, opportunity)
-        and not linked_active
-        and opportunity.deleted_at is None
-    )
+    payload.can_manage = permission_service.has_permission(
+        db,
+        actor,
+        PermissionKey.DASHBOARD_OPPORTUNITY_PROGRESS,
+    ) and can_manage_opportunity(actor, opportunity)
+    payload.can_delete = can_delete_opportunity(db, actor, opportunity)
     payload.can_convert = (
         payload.can_manage
         and permission_service.has_permission(
@@ -243,9 +238,7 @@ def create_opportunity(
         code=new_opportunity_code(),
         name=payload.name.strip(),
         normalized_name=normalize_name(payload.name),
-        customer_name=(
-            payload.customer_name.strip() if payload.customer_name else None
-        ),
+        customer_name=(payload.customer_name.strip() if payload.customer_name else None),
         description=payload.description.strip() if payload.description else None,
         owner_id=owner.id,
         created_by=actor.id,
@@ -295,9 +288,7 @@ def record_progress(
         attention_status=payload.attention_status.value,
         progress_percent=payload.progress_percent,
         summary=payload.summary.strip(),
-        output_summary=(
-            payload.output_summary.strip() if payload.output_summary else None
-        ),
+        output_summary=(payload.output_summary.strip() if payload.output_summary else None),
         created_by=actor.id,
     )
     db.add(progress)
@@ -362,9 +353,7 @@ def convert_to_project(
     existing_project_members = {project.owner_id} | {
         user_id
         for user_id in db.scalars(
-            select(ProjectMember.user_id).where(
-                ProjectMember.project_id == project.id
-            )
+            select(ProjectMember.user_id).where(ProjectMember.project_id == project.id)
         ).all()
     }
     for user_id in _member_ids(db, opportunity.id):

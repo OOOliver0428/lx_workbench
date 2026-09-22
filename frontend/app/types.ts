@@ -324,6 +324,12 @@ export interface TimeBlock {
   end: number;
 }
 
+export interface WorkRecordStats {
+  count: number;
+  total_minutes: number;
+  week_minutes: number;
+}
+
 export interface WorkRecord {
   id: string;
   author_id: string;
@@ -591,7 +597,7 @@ export interface DashboardOpportunity {
   owner_avatar_key: string | null;
   can_manage: boolean;
   can_convert: boolean;
-  can_delete?: boolean;
+  can_delete: boolean;
   status: OpportunityStatus;
   business_stage: BusinessStage;
   attention_status: AttentionStatus;

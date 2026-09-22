@@ -15,6 +15,7 @@ from app.schemas import (
     WorkRecordOut,
     WorkRecordQuickCreate,
     WorkRecordQuickCreateOut,
+    WorkRecordStatsOut,
     WorkRecordUpdate,
 )
 from app.serializers import work_record_out
@@ -51,6 +52,30 @@ def list_work_records(
         before_id=before_id,
     )
     return [work_record_out(db, row) for row in rows]
+
+
+@router.get("/stats", response_model=WorkRecordStatsOut)
+def work_record_stats(
+    author_id: str | None = None,
+    project_id: str | None = None,
+    department_work_id: str | None = None,
+    unassigned_only: bool = False,
+    current_week_only: bool = False,
+    actor: User = Depends(get_current_user),
+    db: Session = Depends(get_db, scope="function"),
+) -> WorkRecordStatsOut:
+    permission_service.assert_permission(db, actor, PermissionKey.WORK_RECORDS_VIEW)
+    return WorkRecordStatsOut(
+        **record_service.work_record_stats(
+            db,
+            actor,
+            author_id=author_id,
+            project_id=project_id,
+            department_work_id=department_work_id,
+            unassigned_only=unassigned_only,
+            current_week_only=current_week_only,
+        )
+    )
 
 
 @router.get("/occupancy", response_model=WorkRecordOccupancyOut)

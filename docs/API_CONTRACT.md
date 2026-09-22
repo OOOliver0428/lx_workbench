@@ -106,6 +106,12 @@ API 地址或直接读取 CSRF。
 
 ## 工作记录权限
 
+- `GET /api/v1/work-records` 默认每页 50 条、最多 200 条，按 `(work_date, id)` 倒序。
+  下一页携带末条记录的 `before_date`、`before_id`，并保留原筛选条件；本周模式同样分页。
+- `GET /api/v1/work-records/stats` 接受与列表相同的作者、来源、未关联和本周筛选，返回
+  `count`、`total_minutes`、`week_minutes`。统计覆盖全部匹配记录，不受分页游标影响，
+  权限和作者隔离规则与列表一致。
+
 - 调用工作记录接口首先需要 `work_records.view` 或 `work_records.manage`；拥有菜单可见性
   并不会绕过后端权限校验。
 - 团队成员、团队负责人和系统管理员仍只能查看、修改或删除自己的原始工作记录。
@@ -241,7 +247,12 @@ API 地址或直接读取 CSRF。
   `GET /api/v1/ai/chat/history` 恢复显示，通过 `DELETE /api/v1/ai/chat/history` 清空。
 - 周报自然周固定为周一至周日，时区按 `Asia/Shanghai` 计算。
 - `POST /api/v1/weekly-reports/current/generate` 只读取当前用户本周的工作记录；项目只有在本周至少存在一条该用户工作记录时才会进入模型上下文。未关联项目的工作记录会单独提供给模型。
-- 每个用户每个自然周只有一条周报记录，以 `(author_id, week_start)` 唯一约束保证。AI 生成结果立即保存为草稿。
+- 每个用户每个自然周只有一条周报记录，以 `(author_id, week_start)` 唯一约束保证。旧 `/current/generate` 接口仍直接保存草稿。
+- AI 助手使用 `POST /api/v1/weekly-reports/current/generate-preview`，可传入最多 4000 字的
+  `guidance`，仅返回预览正文、模型和用量，不创建或更新周报。
+- 首次保存预览调用 `POST /api/v1/weekly-reports/current/draft`；本周草稿已存在则返回 409
+  `WEEKLY_REPORT_ALREADY_EXISTS`，不会覆盖已有内容。编辑已有草稿使用带 `revision` 的
+  `PATCH /api/v1/weekly-reports/{id}/draft`，过期版本返回 409。
 - 每位生成负责人每个自然周只有一条团队周报，以 `(generated_by, week_start)` 唯一约束保证；
   同一负责人再次生成时更新原记录并增加 revision，不创建重复历史行。
 - `GET /api/v1/weekly-reports` 只返回当前用户自己的周报，并按周目倒序排列；不存在负责人
@@ -266,3 +277,12 @@ API 地址或直接读取 CSRF。
 ### 冻结账号登录
 
 `POST /api/v1/auth/login` 对冻结账号验证密码；密码正确返回 HTTP 401、错误码 `ACCOUNT_FROZEN`，提示“该账号已冻结，请联系系统管理员”，不创建会话。密码错误或账号不存在仍返回 `INVALID_CREDENTIALS`；限流及失败审计继续生效。
+
+## 商机删除与更新日志排序
+
+- 商机详情及看板商机均返回 `can_delete`。删除需要商机进展权限及对象管理权，已关联有效项目
+  的商机不可删除。`DELETE /api/v1/opportunities/{id}` 接收 `revision` 和可选 `reason`，
+  执行软删除并保留审计；失效版本返回 409，无权限返回 403。
+- `POST /api/v1/changelog/reorder` 仅系统维护账号可调用，`entry_ids` 按期望显示顺序排列。
+  条目须属于同一个上海自然日且不可重复。列表在截取数量前按上海日期、手动顺序、创建时间
+  降序排列；新建及移动日期后的条目排在目标日期前面。

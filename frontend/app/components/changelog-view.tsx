@@ -68,17 +68,6 @@ function groupByDay(entries: ChangelogEntry[]) {
   return [...groups.entries()];
 }
 
-function sortByDayOrder(entries: ChangelogEntry[]) {
-  return [...entries].sort((a, b) => {
-    const dayDelta = b.occurred_at.localeCompare(a.occurred_at);
-    if (dayDelta !== 0 && shanghaiDayKey(a.occurred_at) !== shanghaiDayKey(b.occurred_at)) {
-      return dayDelta;
-    }
-    if (a.sort_order !== b.sort_order) return b.sort_order - a.sort_order;
-    return b.created_at.localeCompare(a.created_at);
-  });
-}
-
 export function ChangelogView({ canManage }: { canManage: boolean }) {
   const [entries, setEntries] = useState<ChangelogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,7 +101,7 @@ export function ChangelogView({ canManage }: { canManage: boolean }) {
     return () => window.clearTimeout(timeout);
   }, [load]);
 
-  const groups = useMemo(() => groupByDay(sortByDayOrder(entries)), [entries]);
+  const groups = useMemo(() => groupByDay(entries), [entries]);
 
   async function persistDayOrder(dayKey: string, orderedIds: string[]) {
     setReordering(true);

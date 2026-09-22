@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
@@ -235,8 +235,7 @@ def create_work_record(
     return record
 
 
-def list_work_records(
-    db: Session,
+def _work_record_query(
     actor: User,
     *,
     author_id: str | None = None,
@@ -244,10 +243,7 @@ def list_work_records(
     department_work_id: str | None = None,
     unassigned_only: bool = False,
     current_week_only: bool = False,
-    limit: int = 50,
-    before_date: date | None = None,
-    before_id: str | None = None,
-) -> list[WorkRecord]:
+):
     query = select(WorkRecord).where(WorkRecord.deleted_at.is_(None))
     if not is_super_admin(actor):
         query = query.where(WorkRecord.author_id == actor.id)
@@ -269,8 +265,32 @@ def list_work_records(
             WorkRecord.work_date >= week_start,
             WorkRecord.work_date <= week_start + timedelta(days=6),
         )
+    return query
+
+
+def list_work_records(
+    db: Session,
+    actor: User,
+    *,
+    author_id: str | None = None,
+    project_id: str | None = None,
+    department_work_id: str | None = None,
+    unassigned_only: bool = False,
+    current_week_only: bool = False,
+    limit: int = 50,
+    before_date: date | None = None,
+    before_id: str | None = None,
+) -> list[WorkRecord]:
+    query = _work_record_query(
+        actor,
+        author_id=author_id,
+        project_id=project_id,
+        department_work_id=department_work_id,
+        unassigned_only=unassigned_only,
+        current_week_only=current_week_only,
+    )
     if before_date is not None:
-        # Cursor pagination: older than (work_date, created_at/id).
+        # Cursor pagination: older than (work_date, id).
         if before_id:
             query = query.where(
                 or_(
@@ -293,6 +313,45 @@ def list_work_records(
     )
 
 
+def work_record_stats(
+    db: Session,
+    actor: User,
+    *,
+    author_id: str | None = None,
+    project_id: str | None = None,
+    department_work_id: str | None = None,
+    unassigned_only: bool = False,
+    current_week_only: bool = False,
+) -> dict[str, int]:
+    rows = _work_record_query(
+        actor,
+        author_id=author_id,
+        project_id=project_id,
+        department_work_id=department_work_id,
+        unassigned_only=unassigned_only,
+        current_week_only=current_week_only,
+    ).subquery()
+    today = datetime.now(SHANGHAI).date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    count, total, week = db.execute(
+        select(
+            func.count(),
+            func.coalesce(func.sum(rows.c.minutes), 0),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (rows.c.work_date.between(week_start, week_end), rows.c.minutes),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+        ).select_from(rows)
+    ).one()
+    return {"count": count, "total_minutes": total, "week_minutes": week}
+
+
 def list_own_day_occupancy(
     db: Session,
     actor: User,
@@ -308,9 +367,7 @@ def list_own_day_occupancy(
     )
     if exclude_record_id:
         query = query.where(WorkRecord.id != exclude_record_id)
-    return list(
-        db.scalars(query.order_by(WorkRecord.created_at.asc())).all()
-    )
+    return list(db.scalars(query.order_by(WorkRecord.created_at.asc())).all())
 
 
 def update_work_record(
@@ -334,9 +391,7 @@ def update_work_record(
     task_id = payload.task_id if "task_id" in fields else record.task_id
     project_id = payload.project_id if "project_id" in fields else record.project_id
     department_work_id = (
-        payload.department_work_id
-        if "department_work_id" in fields
-        else record.department_work_id
+        payload.department_work_id if "department_work_id" in fields else record.department_work_id
     )
     if "task_id" in fields and task_id:
         if "project_id" not in fields:

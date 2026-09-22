@@ -481,8 +481,8 @@ function AIDrawer({
 
   async function generateWeeklyReport() {
     if (
-      weeklyReport &&
-      reportContent !== weeklyReport.content &&
+      reportContent.trim() &&
+      reportContent !== (weeklyReport?.content ?? "") &&
       !window.confirm("当前有尚未保存的编辑内容，重新生成会丢弃这些内容。是否继续？")
     ) {
       return;
@@ -530,8 +530,7 @@ function AIDrawer({
     if (!version) return;
     if (
       reportContent !== version.content &&
-      weeklyReport &&
-      reportContent !== weeklyReport.content &&
+      reportContent !== (weeklyReport?.content ?? "") &&
       !window.confirm("当前编辑内容尚未保存，回撤会丢弃这些内容。是否继续？")
     ) {
       return;
@@ -703,6 +702,7 @@ function AIDrawer({
                   {guidanceOpen ? (
                     <textarea
                       className="weekly-guidance-input"
+                      maxLength={4000}
                       value={reportGuidance}
                       onChange={(event) => setReportGuidance(event.target.value)}
                       rows={3}
@@ -803,6 +803,7 @@ function AIDrawer({
                   {guidanceOpen ? (
                     <textarea
                       className="weekly-guidance-input"
+                      maxLength={4000}
                       value={reportGuidance}
                       onChange={(event) => setReportGuidance(event.target.value)}
                       rows={3}

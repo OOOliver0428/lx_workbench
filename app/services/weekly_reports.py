@@ -145,17 +145,17 @@ def create_current_draft(
         raise AppError("WEEKLY_REPORT_CONTENT_REQUIRED", "周报内容不能为空")
     report = get_current_report(db, actor)
     if report:
-        report.content = cleaned
-        report.revision += 1
-        report.updated_at = utc_now()
-    else:
-        report = WeeklyReport(
-            author_id=actor.id,
-            week_start=week_start,
-            week_end=week_end,
-            content=cleaned,
+        raise ConflictError(
+            "WEEKLY_REPORT_ALREADY_EXISTS",
+            "本周草稿已在其他页面保存，请先复制当前预览，再刷新页面查看最新草稿",
         )
-        db.add(report)
+    report = WeeklyReport(
+        author_id=actor.id,
+        week_start=week_start,
+        week_end=week_end,
+        content=cleaned,
+    )
+    db.add(report)
     db.flush()
     record_audit(
         db,

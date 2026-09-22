@@ -808,6 +808,12 @@ class WorkRecordUpdate(BaseModel):
         return self
 
 
+class WorkRecordStatsOut(BaseModel):
+    count: int
+    total_minutes: int
+    week_minutes: int
+
+
 class WorkRecordOut(ORMModel):
     id: str
     author_id: str
@@ -1069,6 +1075,7 @@ class DashboardOpportunityOut(BaseModel):
     owner_avatar_key: str | None
     can_manage: bool
     can_convert: bool
+    can_delete: bool
     status: str
     business_stage: str
     attention_status: str

@@ -257,7 +257,7 @@ test("keeps the API contract and AI secret boundary explicit", async () => {
   assert.match(tasksView, /api\.tasks\.reassign\(task\.id/);
   assert.match(tasksView, /请填写转派原因/);
   assert.match(tasksView, /task\.collaborator_ids\.includes\(user\.id\)/);
-  assert.match(recordsView, /current_week_only/);
+  // Week and source query behavior is covered by record-pagination.test.mjs.
   assert.match(recordsView, /仅显示本周记录/);
   assert.match(recordsView, /TimeBlockPicker/);
   assert.match(recordsView, /form\.get\("time_hours"\)/);

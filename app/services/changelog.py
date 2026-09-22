@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.audit import record_audit
@@ -12,6 +12,8 @@ from app.errors import AppError, NotFoundError, PermissionDeniedError
 from app.models import ChangelogEntry, User, utc_now
 from app.schemas import ChangelogEntryCreate, ChangelogEntryUpdate
 from app.services.projects import assert_revision
+
+SHANGHAI = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 SNAPSHOT_FIELDS = (
     "occurred_at",
@@ -48,28 +50,38 @@ def get_changelog_entry(db: Session, entry_id: str) -> ChangelogEntry:
 
 
 def list_changelog_entries(db: Session, *, limit: int = 200) -> list[ChangelogEntry]:
+    day = (
+        func.date(ChangelogEntry.occurred_at, "+8 hours")
+        if db.get_bind().dialect.name == "sqlite"
+        else cast(func.timezone("Asia/Shanghai", ChangelogEntry.occurred_at), Date)
+    )
     query = (
         select(ChangelogEntry)
         .where(ChangelogEntry.deleted_at.is_(None))
         .order_by(
-            ChangelogEntry.occurred_at.desc(),
+            day.desc(),
             ChangelogEntry.sort_order.desc(),
             ChangelogEntry.created_at.desc(),
+            ChangelogEntry.id.desc(),
         )
         .limit(max(1, min(limit, 500)))
     )
     return list(db.scalars(query).all())
 
 
+def _shanghai_time(value: datetime) -> datetime:
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).astimezone(SHANGHAI)
+
+
 def _next_day_sort_order(db: Session, occurred_at: datetime) -> int:
-    day_start = occurred_at.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start.replace(hour=23, minute=59, second=59, microsecond=999999)
+    day_start = _shanghai_time(occurred_at).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
     current = db.scalar(
         select(ChangelogEntry.sort_order)
         .where(
             ChangelogEntry.deleted_at.is_(None),
             ChangelogEntry.occurred_at >= day_start,
-            ChangelogEntry.occurred_at <= day_end,
+            ChangelogEntry.occurred_at < day_end,
         )
         .order_by(ChangelogEntry.sort_order.desc())
         .limit(1)
@@ -134,6 +146,8 @@ def update_changelog_entry(
         for field in SNAPSHOT_FIELDS
     }
     if payload.occurred_at is not None:
+        if _shanghai_time(payload.occurred_at).date() != _shanghai_time(entry.occurred_at).date():
+            entry.sort_order = _next_day_sort_order(db, payload.occurred_at)
         entry.occurred_at = payload.occurred_at
     entry.category = category
     entry.title = title
@@ -190,6 +204,8 @@ def reorder_changelog_entries(
     require_super_admin(actor)
     if not entry_ids:
         return list_changelog_entries(db)
+    if len(entry_ids) != len(set(entry_ids)):
+        raise AppError("CHANGELOG_REORDER_DUPLICATE", "排序条目不可重复", status_code=422)
     entries = list(
         db.scalars(
             select(ChangelogEntry).where(
@@ -200,10 +216,7 @@ def reorder_changelog_entries(
     )
     if len(entries) != len(set(entry_ids)):
         raise NotFoundError("CHANGELOG_ENTRY_NOT_FOUND", "更新日志条目不存在")
-    days = {
-        (entry.occurred_at.date().isoformat())
-        for entry in entries
-    }
+    days = {_shanghai_time(entry.occurred_at).date() for entry in entries}
     if len(days) != 1:
         raise AppError(
             "CHANGELOG_REORDER_SAME_DAY_ONLY",

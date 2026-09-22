@@ -827,6 +827,7 @@ def _dashboard_opportunities(
                 owner_display_name=owner.display_name if owner else "未知用户",
                 owner_avatar_key=owner.avatar_key if owner else None,
                 can_manage=can_manage,
+                can_delete=opportunity_service.can_delete_opportunity(db, actor, opportunity),
                 can_convert=(
                     can_manage
                     and can_create_project

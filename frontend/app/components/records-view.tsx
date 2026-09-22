@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiClientError } from "../api";
+import { RECORD_PAGE_SIZE, recordListParams } from "../record-pagination";
 import { createClientMessageId } from "../client-id";
 import { localDateInputValue } from "../date-utils";
 import type {
@@ -15,6 +16,7 @@ import type {
   UserCandidate,
   UserRole,
   WorkRecord,
+  WorkRecordStats,
 } from "../types";
 import { AvatarImage } from "./avatar";
 import { ArrowUpRight, Plus } from "./icons";
@@ -59,7 +61,12 @@ export function RecordsView({
   const [permissions, setPermissions] = useState<PermissionKey[]>([]);
   const [extraRecords, setExtraRecords] = useState<WorkRecord[]>([]);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
-  const PAGE_SIZE = 50;
+  const requestVersion = useRef(0);
+  const moreRequest = useRef<number | null>(null);
+  const [stats, setStats] = useState<WorkRecordStats | null>(null);
+  const filters = useMemo(() => ({
+    projectId, departmentWorkId, unassignedOnly, currentWeekOnly,
+  }), [projectId, departmentWorkId, unassignedOnly, currentWeekOnly]);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,20 +101,21 @@ export function RecordsView({
   const canCreateTasks = permissions.includes("tasks.create");
 
   const load = useCallback(async () => {
+    const version = ++requestVersion.current;
+    moreRequest.current = null;
+    setLoadingMore(false);
+    setStats(null);
+    setRecords([]);
     setLoading(true);
     setError("");
     setExtraRecords([]);
     setHasMore(false);
     try {
-      const params = new URLSearchParams();
-      if (projectId) params.set("project_id", projectId);
-      if (departmentWorkId) params.set("department_work_id", departmentWorkId);
-      if (unassignedOnly) params.set("unassigned_only", "true");
-      if (currentWeekOnly) params.set("current_week_only", "true");
-      params.set("limit", String(PAGE_SIZE));
-      const [recordRows, projectRows, departmentWorkRows, taskRows] =
+      const params = recordListParams(filters);
+      const [recordRows, totals, projectRows, departmentWorkRows, taskRows] =
         await Promise.all([
           api.records.list(params),
+          api.records.stats(params),
           canViewProjects ? api.projects.list() : Promise.resolve([]),
           canViewDepartmentWorks
             ? api.departmentWorks.list()
@@ -118,8 +126,10 @@ export function RecordsView({
               )
             : Promise.resolve([]),
         ]);
+      if (version !== requestVersion.current) return;
       setRecords(recordRows);
-      setHasMore(recordRows.length >= PAGE_SIZE);
+      setStats(totals);
+      setHasMore(recordRows.length >= RECORD_PAGE_SIZE);
       setProjects(projectRows);
       setDepartmentWorks(departmentWorkRows);
       setTasks(taskRows);
@@ -131,71 +141,70 @@ export function RecordsView({
             ? api.departments.list().catch(() => [])
             : Promise.resolve([]),
         ]);
+        if (version !== requestVersion.current) return;
         setUsers(userRows);
         setDepartments(departmentRows.filter((item) => item.is_active));
       }
     } catch (caught) {
+      if (version !== requestVersion.current) return;
       setError(
         caught instanceof ApiClientError ? caught.message : "工作记录加载失败",
       );
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [
     canManage,
     canViewDepartmentWorks,
     canViewProjects,
     canViewTasks,
-    currentWeekOnly,
-    departmentWorkId,
-    projectId,
-    unassignedOnly,
+    filters,
   ]);
 
   const loadMore = useCallback(async () => {
-    if (loading || loadingMore || !hasMore) return;
+    if (loading || loadingMore || !hasMore || moreRequest.current !== null) return;
     const merged = [...records, ...extraRecords];
     const last = merged.at(-1);
     if (!last) return;
+    const version = requestVersion.current;
+    moreRequest.current = version;
     setLoadingMore(true);
     setError("");
     try {
-      const params = new URLSearchParams();
-      if (projectId) params.set("project_id", projectId);
-      if (departmentWorkId) params.set("department_work_id", departmentWorkId);
-      if (unassignedOnly) params.set("unassigned_only", "true");
-      params.set("limit", String(PAGE_SIZE));
-      params.set("before_date", last.work_date);
-      params.set("before_id", last.id);
-      const rows = await api.records.list(params);
+      const rows = await api.records.list(recordListParams(filters, last));
+      if (version !== requestVersion.current) return;
       setExtraRecords((current) => [...current, ...rows]);
-      setHasMore(rows.length >= PAGE_SIZE);
+      setHasMore(rows.length >= RECORD_PAGE_SIZE);
     } catch (caught) {
+      if (version !== requestVersion.current) return;
       setError(
         caught instanceof ApiClientError ? caught.message : "历史记录加载失败",
       );
     } finally {
-      setLoadingMore(false);
+      if (moreRequest.current === version) moreRequest.current = null;
+      if (version === requestVersion.current) setLoadingMore(false);
     }
   }, [
     extraRecords,
     hasMore,
     loading,
     loadingMore,
-    departmentWorkId,
-    projectId,
+    filters,
     records,
-    unassignedOnly,
   ]);
 
   useEffect(() => {
     const timeout = window.setTimeout(load, 0);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      requestVersion.current += 1;
+      moreRequest.current = null;
+    };
   }, [load]);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;
-    if (!sentinel || currentWeekOnly) return;
+    if (!sentinel || error) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -206,7 +215,7 @@ export function RecordsView({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [currentWeekOnly, loadMore]);
+  }, [error, loadMore]);
 
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
@@ -220,16 +229,8 @@ export function RecordsView({
     () => new Map(tasks.map((task) => [task.id, task.title])),
     [tasks],
   );
-  const totalMinutes = useMemo(() => {
-    const merged = [...records, ...extraRecords];
-    return merged.reduce((sum, record) => sum + record.minutes, 0);
-  }, [records, extraRecords]);
-  const weekMinutes = useMemo(() => {
-    const { start, end } = currentWeekRange();
-    return [...records, ...extraRecords]
-      .filter((record) => record.work_date >= start && record.work_date <= end)
-      .reduce((sum, record) => sum + record.minutes, 0);
-  }, [records, extraRecords]);
+  const totalMinutes = stats?.total_minutes ?? 0;
+  const weekMinutes = stats?.week_minutes ?? 0;
   const visibleRecords = useMemo(() => {
     const seen = new Set<string>();
     const merged: WorkRecord[] = [];
@@ -343,11 +344,11 @@ export function RecordsView({
           </div>
         ) : null}
         <div className="toolbar-meta">
-          <strong>{formatHours(totalMinutes)}</strong>
+          <strong>{stats ? formatHours(totalMinutes) : "—"}</strong>
           <span>累计工时</span>
         </div>
         <div className="toolbar-meta">
-          <strong>{formatHours(weekMinutes)}</strong>
+          <strong>{stats ? formatHours(weekMinutes) : "—"}</strong>
           <span>本周工时</span>
         </div>
       </section>
@@ -486,7 +487,6 @@ export function RecordsView({
               </div>
             </div>
           ))}
-            {!currentWeekOnly ? (
               <div className="record-load-more" ref={loadMoreRef}>
                 {hasMore ? (
                   <button
@@ -495,13 +495,12 @@ export function RecordsView({
                     disabled={loadingMore}
                     onClick={() => void loadMore()}
                   >
-                    {loadingMore ? "正在加载更早记录…" : "加载更早工作记录"}
+                    {loadingMore ? "正在加载更早记录…" : "加载更多工作记录"}
                   </button>
                 ) : (
-                  <p>已显示全部工作记录</p>
+                  <p>已显示全部匹配记录</p>
                 )}
               </div>
-            ) : null}
           </>
         ) : (
           <EmptyState
@@ -1630,21 +1629,6 @@ function withHistoricalTask(tasks: Task[], taskId: string | null, title: string 
     collaborator_ids: [],
   };
   return [...tasks, stub];
-}
-
-/** 当前自然周（周一至周日，Asia/Shanghai）的 YYYY-MM-DD 起止。 */
-function currentWeekRange() {
-  const shanghaiNow = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }),
-  );
-  const weekday = shanghaiNow.getDay() || 7;
-  const monday = new Date(shanghaiNow);
-  monday.setDate(shanghaiNow.getDate() - (weekday - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const format = (value: Date) =>
-    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-  return { start: format(monday), end: format(sunday) };
 }
 
 function optional(value: FormDataEntryValue | null) {
