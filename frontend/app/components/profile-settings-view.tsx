@@ -47,7 +47,7 @@ export function ProfileSettingsView({
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [activeStyle, setActiveStyle] = useState("");
-  const [theme, setTheme] = useState<ThemeMode>("system");
+  const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
 
   useEffect(() => {
     api.profile
@@ -69,10 +69,6 @@ export function ProfileSettingsView({
         ),
       );
   }, [context.user.avatar_key]);
-
-  useEffect(() => {
-    setTheme(readStoredTheme());
-  }, []);
 
   function changeTheme(next: ThemeMode) {
     setTheme(next);
