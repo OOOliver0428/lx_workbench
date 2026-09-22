@@ -250,6 +250,9 @@ API 地址或直接读取 CSRF。
 - 每个用户每个自然周只有一条周报记录，以 `(author_id, week_start)` 唯一约束保证。旧 `/current/generate` 接口仍直接保存草稿。
 - AI 助手使用 `POST /api/v1/weekly-reports/current/generate-preview`，可传入最多 4000 字的
   `guidance`，仅返回预览正文、模型和用量，不创建或更新周报。
+- AI 助手打开期间，生成版本保留在会话内；重新生成和回退版本不要求先保存。
+  离开手动编辑的内容前自动保留编辑快照，打开时已有的数据库草稿也可回退。
+  生成失败不改变当前内容和版本列表；保存草稿不清空版本，关闭助手才结束该会话。
 - 首次保存预览调用 `POST /api/v1/weekly-reports/current/draft`；本周草稿已存在则返回 409
   `WEEKLY_REPORT_ALREADY_EXISTS`，不会覆盖已有内容。编辑已有草稿使用带 `revision` 的
   `PATCH /api/v1/weekly-reports/{id}/draft`，过期版本返回 409。

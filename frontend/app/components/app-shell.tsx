@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { api, ApiClientError } from "../api";
 import type {
@@ -11,6 +11,7 @@ import type {
   WeeklyReport,
 } from "../types";
 import { createClientMessageId } from "../client-id";
+import { createWeeklyPreviewState, weeklyPreviewReducer } from "../weekly-preview";
 import { InlineNotice } from "./ui";
 import { AvatarImage } from "./avatar";
 import {
@@ -363,20 +364,14 @@ function AIDrawer({
   const [weekStart, setWeekStart] = useState("");
   const [weekEnd, setWeekEnd] = useState("");
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
-  const [reportContent, setReportContent] = useState("");
+  const [previewState, dispatchPreview] = useReducer(
+    weeklyPreviewReducer, undefined, () => createWeeklyPreviewState(),
+  );
+  const { content: reportContent, versions: previewVersions, activeVersionId: activePreviewId } = previewState;
   const [reportBusy, setReportBusy] = useState(false);
   const [reportMessage, setReportMessage] = useState("");
   const [reportGuidance, setReportGuidance] = useState("");
   const [guidanceOpen, setGuidanceOpen] = useState(false);
-  const [previewVersions, setPreviewVersions] = useState<
-    Array<{
-      id: string;
-      content: string;
-      guidance: string;
-      createdAt: string;
-    }>
-  >([]);
-  const [activePreviewId, setActivePreviewId] = useState("");
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -392,7 +387,7 @@ function AIDrawer({
           setWeekStart(current.week_start);
           setWeekEnd(current.week_end);
           setWeeklyReport(current.report);
-          setReportContent(current.report?.content ?? "");
+          dispatchPreview({ type: "load", content: current.report?.content ?? "" });
         }
       })
       .catch(() => setError("无法读取 AI 服务或本周周报状态"));
@@ -479,46 +474,34 @@ function AIDrawer({
     }
   }
 
+  function versionStamp() {
+    return {
+      id: createClientMessageId(),
+      createdAt: new Date().toLocaleTimeString("zh-CN", {
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+      }),
+    };
+  }
+
   async function generateWeeklyReport() {
-    if (
-      reportContent.trim() &&
-      reportContent !== (weeklyReport?.content ?? "") &&
-      !window.confirm("当前有尚未保存的编辑内容，重新生成会丢弃这些内容。是否继续？")
-    ) {
-      return;
-    }
+    if (reportBusy) return;
     setReportBusy(true);
     setReportMessage("");
     setError("");
     try {
       const guidance = reportGuidance.trim();
-      const preview = await api.weeklyReports.generatePreview(
-        guidance || undefined,
-      );
-      const versionId = `preview-${Date.now()}`;
-      setPreviewVersions((current) => [
-        {
-          id: versionId,
-          content: preview.content,
-          guidance,
-          createdAt: new Date().toLocaleTimeString("zh-CN", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-        },
-        ...current,
-      ]);
-      setActivePreviewId(versionId);
-      setReportContent(preview.content);
+      const preview = await api.weeklyReports.generatePreview(guidance || undefined);
+      dispatchPreview({
+        type: "generated", ...versionStamp(), content: preview.content, guidance,
+      });
       setReportMessage(
-        "已生成预览版本（尚未保存）。可继续编辑、回撤历史版本，或点「保存草稿」落库。",
+        "已生成新版本，本次会话的历史草稿均可回退。点击「保存草稿」后才会保存到周报。",
       );
     } catch (caught) {
       setError(
         caught instanceof ApiClientError
           ? caught.message
-          : "本周周报生成失败",
+          : "本周周报生成失败，当前草稿和历史版本已保留",
       );
     } finally {
       setReportBusy(false);
@@ -526,18 +509,9 @@ function AIDrawer({
   }
 
   function restorePreviewVersion(versionId: string) {
-    const version = previewVersions.find((item) => item.id === versionId);
-    if (!version) return;
-    if (
-      reportContent !== version.content &&
-      reportContent !== (weeklyReport?.content ?? "") &&
-      !window.confirm("当前编辑内容尚未保存，回撤会丢弃这些内容。是否继续？")
-    ) {
-      return;
-    }
-    setActivePreviewId(versionId);
-    setReportContent(version.content);
-    setReportMessage("已回撤到该次 AI 生成版本（尚未保存）。");
+    if (reportBusy) return;
+    dispatchPreview({ type: "restore", versionId, ...versionStamp() });
+    setReportMessage("已切换草稿版本；本次会话中的其他版本和编辑内容仍可回退。");
   }
 
   async function saveWeeklyDraft() {
@@ -550,13 +524,13 @@ function AIDrawer({
         content,
       );
       setWeeklyReport(saved);
-      setReportContent(saved.content);
+      dispatchPreview({ type: "saved", content: saved.content });
       setReportMessage("草稿已保存，Leader 暂时不可见。");
       return saved;
     }
     const created = await api.weeklyReports.createCurrentDraft(content);
     setWeeklyReport(created);
-    setReportContent(created.content);
+    dispatchPreview({ type: "saved", content: created.content });
     setReportMessage("草稿已保存，Leader 暂时不可见。");
     return created;
   }
@@ -602,7 +576,7 @@ function AIDrawer({
         isOverwrite,
       );
       setWeeklyReport(submittedReport);
-      setReportContent(submittedReport.content);
+      dispatchPreview({ type: "saved", content: submittedReport.content });
       setReportMessage(
         isOverwrite
           ? "本周周报已重新提交，Leader 看到的版本已更新。"
@@ -688,56 +662,62 @@ function AIDrawer({
                 <span className="weekly-status">草稿</span>
               ) : null}
             </header>
-            {weeklyReport ? (
+            <div className="weekly-guidance-block">
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setGuidanceOpen((open) => !open)}
+                aria-expanded={guidanceOpen}
+              >
+                {guidanceOpen ? "收起生成引导" : "添加生成引导（可选）"}
+              </button>
+              {guidanceOpen ? (
+                <textarea
+                  className="weekly-guidance-input"
+                  maxLength={4000}
+                  value={reportGuidance}
+                  onChange={(event) => setReportGuidance(event.target.value)}
+                  disabled={reportBusy}
+                  rows={3}
+                  placeholder="例如：突出售前方案风险；下周计划写得具体一点；语气更精炼"
+                  aria-label="生成引导提示词"
+                />
+              ) : null}
+            </div>
+            {weeklyReport || reportContent || previewVersions.length ? (
               <>
-                <div className="weekly-guidance-block">
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => setGuidanceOpen((open) => !open)}
-                    aria-expanded={guidanceOpen}
-                  >
-                    {guidanceOpen ? "收起生成引导" : "添加生成引导（可选）"}
-                  </button>
-                  {guidanceOpen ? (
-                    <textarea
-                      className="weekly-guidance-input"
-                      maxLength={4000}
-                      value={reportGuidance}
-                      onChange={(event) => setReportGuidance(event.target.value)}
-                      rows={3}
-                      placeholder="例如：突出售前方案风险；下周计划写得具体一点；语气更精炼"
-                      aria-label="生成引导提示词"
-                    />
-                  ) : null}
-                </div>
                 <textarea
                   className="weekly-report-editor"
                   value={reportContent}
                   onChange={(event) => {
-                    setReportContent(event.target.value);
+                    dispatchPreview({ type: "edit", content: event.target.value });
                     setReportMessage("");
                   }}
+                  disabled={reportBusy}
                   rows={16}
-                  aria-label="本周周报草稿"
+                  aria-label={weeklyReport ? "本周周报草稿" : "本周周报预览"}
                 />
                 {previewVersions.length ? (
-                  <div className="weekly-preview-versions" aria-label="本次生成版本">
+                  <div className="weekly-preview-versions" aria-label="本次会话草稿版本">
                     <header>
-                      <span>本次 AI 生成版本</span>
-                      <small>仅限本次打开后生成的版本，可回撤</small>
+                      <span>本次会话草稿版本</span>
+                      <small>生成版本和编辑快照均可回退，关闭助手后清除</small>
                     </header>
                     <ul>
-                      {previewVersions.map((version, index) => (
+                      {previewVersions.map((version) => (
                         <li key={version.id}>
                           <button
                             type="button"
+                            disabled={reportBusy}
                             className={
-                              activePreviewId === version.id ? "active" : ""
+                              activePreviewId === version.id && reportContent === version.content
+                                ? "active" : ""
                             }
                             onClick={() => restorePreviewVersion(version.id)}
                           >
-                            V{previewVersions.length - index}
+                            {version.kind === "generated"
+                              ? `V${version.generation}`
+                              : version.kind === "saved" ? "打开时草稿" : "编辑快照"}
                             <span>{version.createdAt}</span>
                             <small>
                               {version.guidance
@@ -750,7 +730,7 @@ function AIDrawer({
                     </ul>
                   </div>
                 ) : null}
-                {weeklyReport.submitted_content &&
+                {weeklyReport?.submitted_content &&
                 reportContent !== weeklyReport.submitted_content ? (
                   <InlineNotice tone="warning">
                     当前草稿与已提交版本不同；保存草稿不会影响 Leader，重新提交后才会覆盖。
@@ -761,12 +741,7 @@ function AIDrawer({
                   <button
                     type="button"
                     className="secondary-button compact"
-                    disabled={
-                      reportBusy ||
-                      (weeklyReport
-                        ? reportContent === weeklyReport.content
-                        : !reportContent.trim())
-                    }
+                    disabled={reportBusy || !reportContent.trim() || reportContent === weeklyReport?.content}
                     onClick={handleSaveWeeklyDraft}
                   >
                     保存草稿
@@ -777,124 +752,34 @@ function AIDrawer({
                     disabled={reportBusy || !status?.configured}
                     onClick={generateWeeklyReport}
                   >
-                    重新生成
+                    {reportBusy ? "正在处理…" : "重新生成"}
                   </button>
-                  <button
-                    type="button"
-                    className="primary-button compact"
-                    disabled={reportBusy || !reportContent.trim()}
-                    onClick={submitWeeklyReport}
-                  >
-                    {weeklyReport.submitted_at ? "重新提交" : "提交给 Leader"}
-                  </button>
+                  {weeklyReport ? (
+                    <button
+                      type="button"
+                      className="primary-button compact"
+                      disabled={reportBusy || !reportContent.trim()}
+                      onClick={submitWeeklyReport}
+                    >
+                      {weeklyReport.submitted_at ? "重新提交" : "提交给 Leader"}
+                    </button>
+                  ) : null}
                 </div>
               </>
             ) : (
               <>
-                <div className="weekly-guidance-block">
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => setGuidanceOpen((open) => !open)}
-                    aria-expanded={guidanceOpen}
-                  >
-                    {guidanceOpen ? "收起生成引导" : "添加生成引导（可选）"}
-                  </button>
-                  {guidanceOpen ? (
-                    <textarea
-                      className="weekly-guidance-input"
-                      maxLength={4000}
-                      value={reportGuidance}
-                      onChange={(event) => setReportGuidance(event.target.value)}
-                      rows={3}
-                      placeholder="例如：突出售前方案风险；下周计划写得具体一点"
-                      aria-label="生成引导提示词"
-                    />
-                  ) : null}
-                </div>
-                {reportContent || previewVersions.length ? (
-                  <>
-                    <textarea
-                      className="weekly-report-editor"
-                      value={reportContent}
-                      onChange={(event) => {
-                        setReportContent(event.target.value);
-                        setReportMessage("");
-                      }}
-                      rows={16}
-                      aria-label="本周周报预览"
-                    />
-                    {previewVersions.length ? (
-                      <div className="weekly-preview-versions" aria-label="本次生成版本">
-                        <header>
-                          <span>本次 AI 生成版本</span>
-                          <small>仅限本次打开后生成的版本，可回撤</small>
-                        </header>
-                        <ul>
-                          {previewVersions.map((version, index) => (
-                            <li key={version.id}>
-                              <button
-                                type="button"
-                                className={
-                                  activePreviewId === version.id ? "active" : ""
-                                }
-                                onClick={() => restorePreviewVersion(version.id)}
-                              >
-                                V{previewVersions.length - index}
-                                <span>{version.createdAt}</span>
-                                <small>
-                                  {version.guidance
-                                    ? `引导：${version.guidance.slice(0, 24)}${version.guidance.length > 24 ? "…" : ""}`
-                                    : "无引导"}
-                                </small>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {reportMessage ? <InlineNotice>{reportMessage}</InlineNotice> : null}
-                    <div className="weekly-report-actions">
-                      <button
-                        type="button"
-                        className="secondary-button compact"
-                        disabled={reportBusy || !reportContent.trim()}
-                        onClick={handleSaveWeeklyDraft}
-                      >
-                        保存草稿
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button compact"
-                        disabled={reportBusy || !status?.configured}
-                        onClick={generateWeeklyReport}
-                      >
-                        重新生成
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="weekly-report-explainer">
-                      AI 只读取你本周的工作记录；没有本周工作记录的项目不会进入生成上下文。
-                      生成结果仅预览，点击「保存草稿」才会写入周报模块。
-                    </p>
-                    <button
-                      type="button"
-                      className="weekly-generate-button"
-                      disabled={reportBusy || !status?.configured}
-                      onClick={generateWeeklyReport}
-                    >
-                      {reportBusy ? (
-                        "正在生成…"
-                      ) : (
-                        <>
-                          <Sparkle size={14} /> 生成本周周报
-                        </>
-                      )}
-                    </button>
-                  </>
-                )}
+                <p className="weekly-report-explainer">
+                  AI 只读取你本周的工作记录；没有本周工作记录的项目不会进入生成上下文。
+                  生成结果仅预览，点击「保存草稿」才会写入周报模块。
+                </p>
+                <button
+                  type="button"
+                  className="weekly-generate-button"
+                  disabled={reportBusy || !status?.configured}
+                  onClick={generateWeeklyReport}
+                >
+                  {reportBusy ? "正在生成…" : <><Sparkle size={14} /> 生成本周周报</>}
+                </button>
               </>
             )}
           </section>
