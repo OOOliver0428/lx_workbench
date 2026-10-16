@@ -444,6 +444,13 @@ workspace_run uv python install 3.12
   workspace_run uv sync --frozen --no-dev --python 3.12
 )
 
+workspace_stage "同步并检查运行配置" "仅补齐缺项，保留已有密钥和开关；启用模块须配置完整，备份位于配置文件旁。" E_CONFIG
+(
+  cd "${PROJECT_DIR}"
+  workspace_run "${PROJECT_DIR}/.venv/bin/python" -m app.deployment_config \
+    --file "${ENV_FILE}" --template "${PROJECT_DIR}/deploy/ubuntu/app.env.example"
+)
+
 workspace_stage "安装前端依赖并构建" "检查 npm 软件源、构建报错与磁盘空间；修复原因后使用 --repair-stopped-install 恢复未完成的安装。" E_FRONTEND_BUILD
 [[ "$(git -C "${PROJECT_DIR}" cat-file -t "${source_commit}:frontend")" == "tree" ]] || {
   fail "源码提交缺少 frontend 目录，请核对发布包。"

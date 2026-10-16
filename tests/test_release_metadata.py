@@ -15,6 +15,8 @@ def test_release_versions_are_synchronized() -> None:
     )
 
     version = pyproject["project"]["version"]
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    assert next(p for p in lock["package"] if p["name"] == "team-project-mvp")["version"] == version
     assert package["version"] == version
     assert package_lock["version"] == version
     assert package_lock["packages"][""]["version"] == version

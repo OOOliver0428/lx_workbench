@@ -562,6 +562,7 @@ def test_avatar_read_burst_queues_with_only_four_cloud_workers(avatar_api):
 
 
 def test_invalid_optional_configuration_does_not_break_core(api, monkeypatch):
+    api["app"].state.avatar_service.settings = None
     monkeypatch.setenv("MVP_CUSTOM_AVATAR_ENABLED", "definitely-not-a-boolean")
     login(api["client"], "member")
     assert api["client"].get(BASE + "/status").json()["availability"] == "unavailable"

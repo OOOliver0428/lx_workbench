@@ -111,6 +111,14 @@ install -d -m 0750 -o "${BACKEND_USER}" -g "${BACKEND_GROUP}" \
 chown root:"${BACKEND_GROUP}" "${ENV_FILE}"
 chmod 0640 "${ENV_FILE}"
 
+# Also runs when an older updater invokes this new low-level installer.
+workspace_stage "检查新版运行配置" "保留已有值并补齐缺项；检查启用模块参数，原配置备份在同目录。" E_CONFIG
+(
+  cd "${PROJECT_DIR}"
+  workspace_run "${PROJECT_DIR}/.venv/bin/python" -m app.deployment_config \
+    --file "${ENV_FILE}" --template "${PROJECT_DIR}/deploy/ubuntu/app.env.example"
+)
+
 escape_sed_replacement() {
   printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }

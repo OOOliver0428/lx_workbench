@@ -22,9 +22,40 @@ export function remainingSeconds(deadline: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((deadline - now) / 1000));
 }
 
+export function captchaWarmupRemaining(startedAt: number, now = Date.now()): number {
+  return Math.max(0, 2100 - Math.max(0, now - startedAt));
+}
+
 export interface CaptchaInstance {
   hide?: () => void;
   destroyCaptcha?: () => void;
+}
+
+export function createCaptchaLifecycle(onReady: (value: CaptchaInstance) => void) {
+  let disposed = false;
+  let current: CaptchaInstance | null = null;
+  const destroyed = new WeakSet<CaptchaInstance>();
+  function destroy(value: CaptchaInstance) {
+    if (destroyed.has(value)) return;
+    destroyed.add(value);
+    value.hide?.();
+    value.destroyCaptcha?.();
+  }
+  return {
+    getInstance(value?: CaptchaInstance | null) {
+      // The SDK calls back without an instance when destroyCaptcha completes.
+      if (!value) return;
+      if (disposed) { destroy(value); return; }
+      current = value;
+      onReady(value);
+    },
+    dispose() {
+      disposed = true;
+      const value = current;
+      current = null;
+      if (value) destroy(value);
+    },
+  };
 }
 
 type CaptchaWindow = Window & {

@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.custom_avatars.config import AvatarSettings
 from app.main import create_app
 from app.models import (
     Base,
@@ -17,6 +18,7 @@ from app.models import (
     UserPermission,
     UserRole,
 )
+from app.phone.config import PhoneSettings
 from app.security import hash_password
 
 TEST_PASSWORD = "Mvp-Test-Password-2026"
@@ -36,6 +38,10 @@ def api(tmp_path: Path) -> Iterator[dict[str, Any]]:
     )
     app = create_app(settings)
     with TestClient(app) as client:
+        # These optional runtimes are created by the application lifespan.
+        # Never inherit real cloud credentials or switches from the local .env.
+        app.state.phone_service.settings = PhoneSettings(_env_file=None, enabled=False)
+        app.state.avatar_service.settings = AvatarSettings(_env_file=None, enabled=False)
         Base.metadata.create_all(app.state.engine)
         with app.state.session_factory.begin() as db:
             users = {

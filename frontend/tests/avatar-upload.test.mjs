@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import nextConfig from "../next.config.ts";
 import {
   avatarSource, avatarCropGeometry, validateAvatarFile, avatarRequestLimit,
   MAX_AVATAR_FILE_BYTES, MAX_AVATAR_REQUEST_BYTES,
 } from "../app/avatar-upload.ts";
+
+test("framework multipart ceiling allows the advertised avatar limit", () => {
+  assert.equal(nextConfig.experimental.serverActions.bodySizeLimit, MAX_AVATAR_REQUEST_BYTES);
+});
 
 test("custom avatars use authenticated system URLs and presets remain local", () => {
   assert.equal(avatarSource("custom-" + "a".repeat(32)), "/api/v1/avatars/" + "a".repeat(32));

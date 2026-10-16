@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { ApiClientError, request } from "../api";
 import type { AuthContext } from "../types";
 import {
-  captchaWindow, loadCaptcha, remainingSeconds, validPhone,
+  captchaWindow, captchaWarmupRemaining, createCaptchaLifecycle, loadCaptcha, remainingSeconds, validPhone,
 } from "../phone-verification";
-import type { CaptchaInstance, PhoneChallenge, PhoneStatus } from "../phone-verification";
+import type { PhoneChallenge, PhoneStatus } from "../phone-verification";
 import { InlineNotice, Modal } from "./ui";
 
 const PHONE_URL = "/api/v1/profile/phone";
@@ -27,6 +27,10 @@ export function PhoneSettingsCard({ context, onContextChange }: {
     let alive = true;
     request<PhoneStatus>(PHONE_URL).then((result) => {
       if (alive) setStatus(result);
+      if (alive && result.availability === "ready" && result.captcha) {
+        // Warm the shared SDK while the user reads settings; opening retries failures.
+        void loadCaptcha({ region: result.captcha.region, prefix: result.captcha.prefix }).catch(() => {});
+      }
     }).catch(() => { if (alive) setError("手机号服务暂不可用，其他功能可继续使用。"); });
     return () => { alive = false; };
   }, [context.user.id]);
@@ -83,7 +87,6 @@ function PhoneBindingDialog({ initial, onClose, onSaved }: {
   const submittedPhone = useRef("");
   const alive = useRef(true);
   const inFlight = useRef(false);
-  const instance = useRef<CaptchaInstance | null>(null);
   const cooling = remainingSeconds(deadline, now);
   const expired = challenge ? Date.parse(challenge.expires_at) <= now : false;
 
@@ -98,20 +101,22 @@ function PhoneBindingDialog({ initial, onClose, onSaved }: {
     let readyTimer: number | undefined;
     const config = initial.captcha;
     if (!config) return;
+    let initializedAt = 0;
+    const lifecycle = createCaptchaLifecycle(() => {
+      window.clearTimeout(readyTimer);
+      // Allow the SDK to collect initialization data before verification.
+      readyTimer = window.setTimeout(() => { if (!disposed) setSdkReady(true); }, captchaWarmupRemaining(initializedAt));
+    });
     function release() {
       if (!disposed && alive.current) { setBusy(false); inFlight.current = false; }
     }
     loadCaptcha({ region: config.region, prefix: config.prefix }).then(() => {
       if (disposed) return;
+      initializedAt = Date.now();
       captchaWindow().initAliyunCaptcha?.({
         SceneId: config.scene_id, mode: "popup", element: "#phone-captcha-element",
         button: "#phone-captcha-button", slideStyle: { width: 320, height: 40 },
-        getInstance: (value: CaptchaInstance) => {
-          if (disposed) { value.hide?.(); value.destroyCaptcha?.(); return; }
-          instance.current = value;
-          // Official SDK recommends allowing at least two seconds for initialization.
-          readyTimer = window.setTimeout(() => { if (!disposed) setSdkReady(true); }, 2100);
-        },
+        getInstance: lifecycle.getInstance,
         onClose: (reason: string) => { if (reason === "userDismiss") release(); },
         onError: () => { if (!disposed) { setError("图形验证加载失败，请稍后重试"); release(); } },
         success: async (token: string) => {
@@ -144,9 +149,7 @@ function PhoneBindingDialog({ initial, onClose, onSaved }: {
     return () => {
       disposed = true;
       window.clearTimeout(readyTimer);
-      instance.current?.hide?.();
-      instance.current?.destroyCaptcha?.();
-      instance.current = null;
+      lifecycle.dispose();
     };
   }, [initial.captcha, cycle]);
 

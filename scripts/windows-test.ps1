@@ -341,6 +341,10 @@ function Start-Backend {
     Write-Host "Applying database migrations..."
     Push-Location $ProjectRoot
     try {
+        & $python -m app.deployment_config --file (Join-Path $ProjectRoot ".env")
+        if ($LASTEXITCODE -ne 0) {
+            throw "运行配置检查失败，请检查已开启的手机号和头像模块配置。"
+        }
         & $python -m alembic upgrade head
         if ($LASTEXITCODE -ne 0) {
             throw "Database migration failed with exit code $LASTEXITCODE."

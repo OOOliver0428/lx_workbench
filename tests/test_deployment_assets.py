@@ -9,6 +9,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_all_deployment_entries_check_optional_configuration():
+    for path in ("deploy/ubuntu/install.sh", "deploy/ubuntu/ops.sh", "deploy/systemd/install.sh"):
+        source = (ROOT / path).read_text(encoding="utf-8")
+        assert "-m app.deployment_config" in source
+        assert '--file "${ENV_FILE}"' in source
+        assert '--template "${PROJECT_DIR}/deploy/ubuntu/app.env.example"' in source
+    local = (ROOT / "scripts/windows-test.ps1").read_text(encoding="utf-8")
+    assert local.index("-m app.deployment_config") < local.index("-m alembic upgrade head")
+
+
 def read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
