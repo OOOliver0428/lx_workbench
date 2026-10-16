@@ -7,6 +7,9 @@ import type { AuthContext, AvatarOption, ThemeMode } from "../types";
 import { AvatarImage, AvatarOptionPreview } from "./avatar";
 import { Shield } from "./icons";
 import { InlineNotice, Modal } from "./ui";
+import { PhoneSettingsCard } from "./phone-settings-card";
+import { CustomAvatarUpload } from "./custom-avatar-upload";
+import type { AvatarStatus } from "../avatar-upload";
 
 const THEME_STORAGE_KEY = "workbench-theme";
 
@@ -46,7 +49,20 @@ export function ProfileSettingsView({
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [activeStyle, setActiveStyle] = useState("");
+  const [avatarTab, setAvatarTab] = useState<"preset" | "custom">("preset");
+  const [avatarStatus, setAvatarStatus] = useState<AvatarStatus | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
+
+  useEffect(() => {
+    let alive = true;
+    api.profile.avatarStatus().then((status) => {
+      if (alive) setAvatarStatus(status);
+    }).catch(() => {
+      if (alive) setAvatarStatus({ availability: "unavailable", phone_bound: false, can_upload: false,
+        max_file_bytes: 5 * 1024 * 1024, output_size: 512, formats: [] });
+    });
+    return () => { alive = false; };
+  }, [context.user.id, context.user.revision]);
 
   useEffect(() => {
     api.profile
@@ -114,6 +130,7 @@ export function ProfileSettingsView({
       currentOption?.style ?? avatarOptions[0]?.style ?? "",
     );
     setAvatarError("");
+    setAvatarTab("preset");
     setAvatarModalOpen(true);
   }
 
@@ -123,7 +140,7 @@ export function ProfileSettingsView({
         <div>
           <p className="eyebrow">PERSONAL SETTINGS</p>
           <h1>个人设置</h1>
-          <p>管理自己的登录密码与系统头像，不影响角色和汇报关系。</p>
+          <p>管理自己的头像、登录密码与手机号，不影响角色和汇报关系。</p>
         </div>
       </header>
 
@@ -150,7 +167,7 @@ export function ProfileSettingsView({
             更换头像
           </button>
           <p className="profile-avatar-hint">
-            当前：{currentOption?.label ?? "姓名首字头像"} ·{" "}
+            当前：{context.user.avatar_key?.startsWith("custom-") ? "自定义头像" : currentOption?.label ?? "姓名首字头像"} ·{" "}
             {avatarStyles.length || 7} 套风格可选
           </p>
         </div>
@@ -193,16 +210,28 @@ export function ProfileSettingsView({
         </section>
 
         <PasswordSettingsCard onContextChange={onContextChange} />
+        <PhoneSettingsCard context={context} onContextChange={onContextChange} />
       </div>
 
       {avatarModalOpen ? (
         <Modal
-          title="选择系统头像"
+          title="更换头像"
           eyebrow="AVATAR LIBRARY"
           wide
-          onClose={() => setAvatarModalOpen(false)}
+          onClose={() => { if (!avatarBusy) setAvatarModalOpen(false); }}
         >
           <div className="avatar-modal-body">
+            <nav className="avatar-upload-tabs" aria-label="头像类型">
+              <button type="button" disabled={avatarBusy} aria-pressed={avatarTab === "preset"}
+                className={avatarTab === "preset" ? "active" : ""} onClick={() => setAvatarTab("preset")}>预设头像</button>
+              <button type="button" disabled={avatarBusy} aria-pressed={avatarTab === "custom"}
+                className={avatarTab === "custom" ? "active" : ""} onClick={() => setAvatarTab("custom")}>自定义上传</button>
+            </nav>
+            {avatarTab === "custom" ? <CustomAvatarUpload context={context} status={avatarStatus}
+              onBusyChange={setAvatarBusy} onCancel={() => setAvatarModalOpen(false)}
+              onSaved={(next) => {
+                onContextChange(next); setAvatarMessage("自定义头像已更新。"); setAvatarModalOpen(false);
+              }} /> : <>
             <section className="avatar-modal-summary">
               <AvatarImage
                 avatarKey={selectedAvatar}
@@ -210,7 +239,7 @@ export function ProfileSettingsView({
                 className="avatar-modal-preview"
               />
               <div>
-                <strong>{selectedOption?.label ?? "姓名首字头像"}</strong>
+                <strong>{selectedAvatar?.startsWith("custom-") ? "当前自定义头像" : selectedOption?.label ?? "姓名首字头像"}</strong>
                 <p>头像均经过统一尺寸和压缩处理，并针对圆形显示保留安全区域。</p>
               </div>
               <button
@@ -266,6 +295,7 @@ export function ProfileSettingsView({
               <button
                 type="button"
                 className="secondary-button"
+                disabled={avatarBusy}
                 onClick={() => setAvatarModalOpen(false)}
               >
                 取消
@@ -281,6 +311,7 @@ export function ProfileSettingsView({
                 {avatarBusy ? "正在保存…" : "使用这个头像"}
               </button>
             </footer>
+            </>}
           </div>
         </Modal>
       ) : null}

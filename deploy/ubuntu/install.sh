@@ -393,6 +393,15 @@ MVP_MINIMAX_BASE_URL=https://api.minimaxi.com/v1
 MVP_MINIMAX_MODEL=MiniMax-M2.7
 MVP_MINIMAX_ACCESS_MODE=auto
 MVP_MINIMAX_TIMEOUT_SECONDS=60
+# Optional phone module: configure keys/provider per docs/PHONE_VERIFICATION.md.
+MVP_PHONE_VERIFICATION_ENABLED=false
+# Optional private avatars: configure COS per docs/CUSTOM_AVATARS.md.
+MVP_CUSTOM_AVATAR_ENABLED=false
+MVP_AVATAR_COS_SECRET_ID=
+MVP_AVATAR_COS_SECRET_KEY=
+MVP_AVATAR_COS_BUCKET=
+MVP_AVATAR_COS_REGION=
+MVP_AVATAR_COS_PREFIX=avatars/
 EOF
   install -m 0640 -o root -g "${BACKEND_GROUP}" "${temporary_env}" "${ENV_FILE}"
   rm -f -- "${temporary_env}"

@@ -208,10 +208,41 @@ class SoftDeleteMixin:
     deleted_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
 
 
+class PhoneCryptoKeyCheck(Base):
+    __tablename__ = "phone_crypto_key_checks"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    check_value: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class PhoneChallenge(Base):
+    __tablename__ = "phone_challenges"
+    __table_args__ = (
+        Index("ix_phone_challenges_user_created", "user_id", "created_at"),
+        Index("ix_phone_challenges_hash_created", "phone_lookup_hash", "created_at"),
+        Index("ix_phone_challenges_created", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    # Keep quota history even when an authentication session is removed.
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    phone_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    phone_key_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    phone_lookup_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_phone_hash: Mapped[str | None] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False)
+    operation_until: Mapped[datetime] = mapped_column(DateTime(), nullable=False)
+
+
 class User(Base, TimestampMixin, RevisionMixin):
     __tablename__ = "users"
     __table_args__ = (
         Index("uq_users_display_name_key", "display_name_key", unique=True),
+        Index("uq_users_phone_lookup_hash", "phone_lookup_hash", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -236,6 +267,10 @@ class User(Base, TimestampMixin, RevisionMixin):
         index=True,
     )
     avatar_key: Mapped[str | None] = mapped_column(String(40))
+    phone_ciphertext: Mapped[str | None] = mapped_column(Text)
+    phone_key_id: Mapped[str | None] = mapped_column(String(40))
+    phone_lookup_hash: Mapped[str | None] = mapped_column(String(64))
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -251,6 +286,31 @@ def _normalize_user_identity(
     user.login_name = normalize_user_identifier(user.login_name)
     user.display_name = user.display_name.strip()
     user.display_name_key = normalize_user_identifier(user.display_name)
+
+
+class AvatarAsset(Base, TimestampMixin):
+    __tablename__ = "avatar_assets"
+    __table_args__ = (
+        Index("ix_avatar_assets_user_created", "user_id", "created_at"),
+        Index("ix_avatar_assets_cleanup_after", "cleanup_after"),
+        CheckConstraint(
+            "state IN ('pending', 'active', 'retired', 'deleting')",
+            name="ck_avatar_assets_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    bucket: Mapped[str] = mapped_column(String(128), nullable=False)
+    region: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(256), nullable=False, unique=True)
+    version_id: Mapped[str | None] = mapped_column(String(256))
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    cleanup_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class UserPermission(Base, TimestampMixin):
@@ -1192,10 +1252,13 @@ class ChangelogEntry(Base, TimestampMixin, RevisionMixin, SoftDeleteMixin):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id"), nullable=False, index=True
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     updated_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id"), nullable=False
+        String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    deleted_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="RESTRICT")
     )
 
     __table_args__ = (

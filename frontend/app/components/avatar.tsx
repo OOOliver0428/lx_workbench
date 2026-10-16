@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState } from "react";
+import { avatarSource } from "../avatar-upload";
 
 export function AvatarImage({
   avatarKey,
@@ -19,14 +20,14 @@ export function AvatarImage({
 
   const classes = ["avatar", className].filter(Boolean).join(" ");
   const fallback = displayName.trim().slice(0, 1) || "用";
-  const source = avatarKey ? `/avatars/${avatarKey}.webp` : "";
+  const source = avatarSource(avatarKey);
   return (
     <span
       className={classes}
       aria-label={decorative ? undefined : `${displayName}的头像`}
       aria-hidden={decorative || undefined}
     >
-      {avatarKey && failedSource !== source ? (
+      {source && failedSource !== source ? (
         <img
           src={source}
           alt=""

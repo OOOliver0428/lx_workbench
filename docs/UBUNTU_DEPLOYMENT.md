@@ -155,7 +155,8 @@ sudo solution-workspace health
 | `MVP_ALLOWED_HOSTS_CSV` | 浏览器实际使用的 IP/域名、`127.0.0.1`、`localhost` |
 | `MVP_COOKIE_SECURE` | HTTP 试运行用 `false`；HTTPS 上线后必须为 `true` |
 | `MVP_SESSION_TTL_HOURS` | 登录会话有效期，默认 12 小时 |
-| `MVP_API_MAX_BODY_BYTES` | 后端请求体硬上限，默认 `262144`；须与前端 systemd 的 `MVP_MAX_REQUEST_BODY_BYTES` 一致 |
+| `MVP_API_MAX_BODY_BYTES` | 默认请求体硬上限 `262144`，与前端 `MVP_MAX_REQUEST_BODY_BYTES` 一致；头像上传路径单独允许 `5308416` |
+| `MVP_CUSTOM_AVATAR_ENABLED` / `MVP_AVATAR_COS_*` | 可选私有 COS 头像上传；默认关闭，配置见 [自定义头像部署说明](CUSTOM_AVATARS.md) |
 | `MVP_LOGIN_*` | 登录密码校验频率、并发、状态容量及失败审计保留参数；扩容前先做压测和安全评审 |
 | `MVP_LLM_CONFIG_SECRET` | 数据库中 AI Provider 密钥的加密主密钥，必须长期保管且禁止随数据库切换而变化 |
 | `MVP_LLM_MAX_*` / `MVP_LLM_USER_*` / `MVP_LLM_GLOBAL_*` | AI 并发、每小时请求、每日 token 和状态容量预算；按模型成本与可用性调整 |
@@ -785,3 +786,7 @@ sudo solution-workspace logs backup 200
 - [ ] 切库前后记录数、关键样本、周报和审计事件完成对账。
 - [ ] 回滚窗口、责任人、RPO/RTO 和备份保留期已确认。
 - [ ] 更新后前端 5174、后端 8787 健康检查均通过，备份 timer 为 `enabled`/`active`。
+
+## 可选手机号认证
+
+默认关闭。v0.5.1 手机号认证的迁移、环境密钥、阿里云配置、网络要求与回滚说明见 [手机号认证部署说明](PHONE_VERIFICATION.md)。升级现有环境不会自动开启或生成密钥。

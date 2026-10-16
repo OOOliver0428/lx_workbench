@@ -85,8 +85,20 @@ API 地址或直接读取 CSRF。
   用户不可见的系统维护账号账号，但错误响应不会暴露冲突账号的信息。
 - 所有已完成首次密码修改的用户都可读取 `GET /api/v1/profile/avatars` 并调用
   `PATCH /api/v1/profile/avatar` 修改自己的头像。
-- 头像接口只接受服务端白名单中的固定 `avatar_key` 或 `null`，不接受上传、文件路径或外部 URL；
+- 预设头像修改接口只接受服务端白名单中的固定 `avatar_key` 或 `null`，不接受文件路径或外部 URL；
   修改必须携带本人当前 `revision` 并进入审计日志。
+- `GET /api/v1/profile/avatar/status` 返回自定义上传状态（`ready/disabled/unavailable`）、
+  本地已验证的手机号绑定资格、`can_upload` 和图片限制；不解密或返回手机号。
+- `POST /api/v1/profile/avatar/upload` 使用 multipart：`file` 原图、`revision`、
+  `crop` JSON（`x/y` 相对于方向校正后的整图宽高，`size` 相对于较短边）。
+  仅已绑定手机号用户可上传；要求登录及 CSRF。只接受不超过 5 MiB、2000 万像素的
+  JPG、PNG、静态 WebP，服务器独立校验并保存为无元数据的 512×512 WebP。
+  成功返回新的 `UserOut`，其 `avatar_key` 为 `custom-<32位小写十六进制ID>`；
+  客户端不能通过预设头像修改接口重新激活自定义键。
+- `GET /api/v1/avatars/{asset_id}` 为登录用户返回当前头像的 `image/webp` 数据；
+  资源 ID 不存在、已被更换或不是当前头像时返回 404。图片仍执行会话鉴权，COS 保持私有。
+  COS 错误返回 `503 AVATAR_STORAGE_UNAVAILABLE`；未绑定返回 `403 AVATAR_PHONE_REQUIRED`；
+  每用户每小时最多 10 次处理尝试，超过返回 `429 AVATAR_RATE_LIMITED`。
 - 所有用户都可调用 `POST /api/v1/auth/change-password` 修改自己的密码；修改成功后除当前会话外，
   本人的其他登录会话全部失效。
 
@@ -105,7 +117,9 @@ API 地址或直接读取 CSRF。
 
 前端以 `code` 决定业务分支，以 `message` 展示提示；`request_id` 用于问题排查，不作为业务值。
 
-- 请求体超过 `MVP_API_MAX_BODY_BYTES` 时返回 `413 REQUEST_BODY_TOO_LARGE`。前端同源代理使用
+- 请求体超过 `MVP_API_MAX_BODY_BYTES` 时返回 `413 REQUEST_BODY_TOO_LARGE`。头像上传路径
+  `/api/v1/profile/avatar/upload` 单独允许 5 MiB + 64 KiB，文件本身仍最多 5 MiB；
+  前后端代理均按实际接收字节限制。前端同源代理使用
   `MVP_MAX_REQUEST_BODY_BYTES` 执行同样的流式上限检查，生产配置必须让两处保持一致。
 - 登录密码校验受到来源、全局频率和并发预算保护；超限返回 `429`，不会在校验密码前按登录名
   锁定账号。失败审计采用限量采样和保留期清理。

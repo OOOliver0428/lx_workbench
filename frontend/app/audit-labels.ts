@@ -12,6 +12,8 @@ export const ACTION_LABELS: Record<string, string> = {
   "user.permissions.replace": "配置用户权限",
   "user.department.assign": "分配用户部门",
   "profile.avatar.update": "更新个人头像",
+  "profile.phone.bind": "绑定手机号",
+  "profile.phone.change": "更换手机号",
   "department.create": "创建部门",
   "department.update": "更新部门",
   "department.delete": "删除部门",

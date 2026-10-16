@@ -1305,6 +1305,78 @@ a {
   padding: 0 28px 28px;
 }
 
+.avatar-upload-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.avatar-upload-tabs button {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  padding: 10px 16px;
+}
+
+.avatar-upload-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.custom-avatar-upload > p,
+.avatar-crop-controls p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.avatar-file-label,
+.avatar-crop-controls label {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  margin: 18px 0;
+}
+
+.avatar-crop-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: center;
+}
+
+.avatar-crop-preview {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.avatar-crop-preview canvas {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  width: 240px;
+  max-width: 100%;
+  height: auto;
+}
+
+.avatar-crop-preview small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.avatar-crop-controls {
+  flex: 1;
+  min-width: 180px;
+}
+
+.avatar-crop-controls input[type="range"] {
+  accent-color: var(--accent);
+  width: 100%;
+}
+
 .avatar-modal-summary {
   align-items: center;
   background: var(--surface-sunken);
@@ -8397,4 +8469,21 @@ a {
   color: var(--ink-soft);
   line-height: 1.7;
   margin: 0;
+}
+
+/* Optional phone binding stays within the existing settings layout. */
+.phone-binding-form {
+  display: grid;
+  gap: 16px;
+}
+.phone-binding-form label {
+  display: grid;
+  gap: 8px;
+}
+.phone-binding-form input {
+  width: 100%;
+  min-width: 0;
+}
+.phone-settings-card > p {
+  overflow-wrap: anywhere;
 }

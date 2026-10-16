@@ -38,6 +38,7 @@ import type {
   ChangelogEntry,
   ChangelogLatest,
 } from "./types";
+import type { AvatarCrop, AvatarStatus } from "./avatar-upload";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
   /\/+$/,
@@ -104,13 +105,13 @@ export function setSessionInvalidatedHandler(
   sessionInvalidatedHandler = handler;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) {
@@ -299,6 +300,14 @@ export const api = {
   },
   profile: {
     avatars: () => request<AvatarOption[]>("/api/v1/profile/avatars"),
+    avatarStatus: () => request<AvatarStatus>("/api/v1/profile/avatar/status"),
+    uploadAvatar: (revision: number, file: File, crop: AvatarCrop) => {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("revision", String(revision));
+      body.append("crop", JSON.stringify(crop));
+      return request<User>("/api/v1/profile/avatar/upload", { method: "POST", body });
+    },
     updateAvatar: (revision: number, avatarKey: string | null) =>
       request<User>("/api/v1/profile/avatar", {
         method: "PATCH",

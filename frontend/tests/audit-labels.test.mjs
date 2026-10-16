@@ -40,12 +40,14 @@ function localTime(hour, minute = 0, second = 0) {
 }
 
 test("action labels cover every audited action and unknown actions fall back", () => {
-  assert.equal(Object.keys(ACTION_LABELS).length, 59);
+  assert.equal(Object.keys(ACTION_LABELS).length, 61);
   for (const key of Object.keys(ACTION_LABELS)) {
     assert.match(key, /^[a-z][a-z0-9_.]*$/);
   }
   assert.equal(formatAuditAction("work_record.update"), "更新工作记录");
   assert.equal(formatAuditAction("auth.login"), "登录系统");
+  assert.equal(formatAuditAction("profile.phone.bind"), "绑定手机号");
+  assert.equal(formatAuditAction("profile.phone.change"), "更换手机号");
   assert.equal(formatAuditAction("ai.chat.clear"), "清空 AI 对话记录");
   assert.equal(formatAuditAction("team_weekly_summary.regenerate"), "重新生成团队周报汇总");
   assert.equal(formatAuditAction("some.unknown.action"), "some.unknown.action");
