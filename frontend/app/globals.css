@@ -1149,12 +1149,18 @@ a {
 .profile-settings-grid {
   display: grid;
   gap: 18px;
-  grid-template-areas: "theme password";
+  grid-template-areas:
+    "theme password"
+    "phone phone";
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .password-settings-card {
   grid-area: password;
+}
+
+.phone-settings-card {
+  grid-area: phone;
 }
 
 .theme-settings-card {
@@ -4167,7 +4173,8 @@ a {
   .profile-settings-grid {
     grid-template-areas:
       "theme"
-      "password";
+      "password"
+      "phone";
     grid-template-columns: 1fr;
   }
 
@@ -8472,18 +8479,330 @@ a {
 }
 
 /* Optional phone binding stays within the existing settings layout. */
-.phone-binding-form {
+.phone-settings-body {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+  padding: 22px 26px;
 }
-.phone-binding-form label {
-  display: grid;
-  gap: 8px;
-}
-.phone-binding-form input {
-  width: 100%;
+
+.phone-settings-summary {
+  align-items: center;
+  display: flex;
+  gap: 14px;
   min-width: 0;
 }
-.phone-settings-card > p {
+
+.phone-status-icon {
+  align-items: center;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: var(--muted);
+  display: flex;
+  flex: none;
+  height: 46px;
+  justify-content: center;
+  width: 46px;
+}
+
+.phone-status-icon.is-bound {
+  background: var(--success-pale);
+  border-color: var(--success-border);
+  color: var(--teal);
+}
+
+.phone-status-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.phone-status-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.phone-status-heading strong {
+  font-size: 15px;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
+}
+
+.phone-status-badge {
+  align-items: center;
+  background: var(--track);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 750;
+  gap: 4px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.phone-status-badge.is-bound {
+  background: var(--success-pale);
+  border-color: var(--success-border);
+  color: var(--teal);
+}
+
+.phone-status-copy p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+  margin: 6px 0 0;
+}
+
+.phone-settings-body > .inline-notice,
+.phone-binding-form > .inline-notice,
+.phone-binding-step-panel > .inline-notice {
+  margin: 0;
+}
+
+.phone-settings-actions .primary-button {
+  flex: none;
+}
+
+.phone-binding-form {
+  display: grid;
+  gap: 18px;
+}
+
+.phone-binding-form .field {
+  margin-bottom: 0;
+}
+
+.phone-binding-form .field-hint {
+  margin-top: 0;
+}
+
+.phone-binding-form input {
+  min-width: 0;
+  width: 100%;
+}
+
+.phone-binding-intro {
+  align-items: flex-start;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+}
+
+.phone-binding-intro > span {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--accent);
+  display: flex;
+  flex: none;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.phone-binding-intro strong {
+  display: block;
+  font-size: 12px;
+  margin: 1px 0 5px;
+}
+
+.phone-binding-intro p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.phone-binding-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.phone-binding-steps li {
+  align-items: center;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.phone-binding-steps li > span {
+  align-items: center;
+  background: var(--track);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  display: flex;
+  flex: none;
+  font-size: 10px;
+  font-weight: 800;
+  height: 25px;
+  justify-content: center;
+  width: 25px;
+}
+
+.phone-binding-steps li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.phone-binding-steps strong {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.phone-binding-steps small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.phone-binding-steps li.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.phone-binding-steps li.is-active > span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.phone-binding-steps li.is-active strong {
+  color: var(--accent-deep);
+}
+
+.phone-binding-steps li.is-complete {
+  background: var(--success-pale);
+  border-color: var(--success-border);
+}
+
+.phone-binding-steps li.is-complete > span {
+  background: var(--success-border);
+  border-color: var(--success-border);
+  color: var(--teal);
+}
+
+.phone-binding-steps li.is-complete strong {
+  color: var(--teal);
+}
+
+.phone-binding-step-panel {
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.phone-binding-step-panel .field input {
+  background: var(--surface);
+}
+
+.phone-number-input {
+  align-items: stretch;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.phone-number-input > span {
+  align-items: center;
+  background: var(--track);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px 0 0 10px;
+  border-right: 0;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 0 12px;
+  transition: border 0.18s ease;
+}
+
+.phone-number-input input {
+  border-radius: 0 10px 10px 0;
+}
+
+.phone-number-input:focus-within > span {
+  border-color: var(--accent);
+}
+
+.phone-captcha-element:empty {
+  display: none;
+}
+
+.phone-send-code-button {
+  width: 100%;
+}
+
+.phone-retry-button {
+  justify-self: center;
+}
+
+.phone-verification-panel {
+  border-color: var(--accent-border);
+}
+
+.phone-sms-code-field input {
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: 4px;
+  text-align: center;
+}
+
+.phone-sms-code-field input::placeholder {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.phone-binding-form .modal-actions {
+  margin-top: 0;
+}
+
+@media (max-width: 620px) {
+  .phone-settings-body {
+    padding: 20px 18px;
+  }
+
+  .phone-settings-summary {
+    align-items: flex-start;
+  }
+
+  .phone-settings-actions .primary-button {
+    width: 100%;
+  }
+
+  .phone-binding-steps li {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .phone-binding-steps small {
+    display: none;
+  }
+
+  .phone-binding-step-panel {
+    padding: 14px;
+  }
+
+  .phone-binding-form .modal-actions > button {
+    flex: 1;
+  }
 }
