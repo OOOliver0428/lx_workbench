@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import record_audit
 from app.avatars import AVATAR_KEYS, AVATAR_OPTIONS
+from app.custom_avatars.service import retire_avatar
 from app.dependencies import get_current_user, get_db, require_csrf
 from app.errors import AppError, ConflictError
 from app.models import User, utc_now
@@ -40,6 +41,7 @@ def update_my_avatar(
         return UserOut.model_validate(actor)
 
     actor.avatar_key = payload.avatar_key
+    retire_avatar(db, previous_avatar_key)
     actor.revision += 1
     actor.updated_at = utc_now()
     record_audit(

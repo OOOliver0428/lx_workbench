@@ -1,3 +1,5 @@
+import { avatarRequestLimit } from "../../avatar-upload.ts";
+
 const REQUEST_HEADERS = [
   "accept",
   "accept-language",
@@ -45,7 +47,7 @@ async function readBodyWithLimit(request: Request): Promise<ArrayBuffer | null> 
     return null;
   }
 
-  const limit = maxRequestBodyBytes();
+  const limit = avatarRequestLimit(new URL(request.url).pathname, maxRequestBodyBytes());
   const declaredLength = request.headers.get("content-length");
   if (declaredLength && Number(declaredLength) > limit) {
     throw new RangeError("request body exceeds configured limit");
@@ -117,7 +119,7 @@ async function proxy(request: Request, context: RouteContext) {
         code: "REQUEST_BODY_TOO_LARGE",
         message: "请求内容过大",
         request_id: request.headers.get("x-request-id"),
-        details: { max_bytes: maxRequestBodyBytes() },
+        details: { max_bytes: avatarRequestLimit(requestUrl.pathname, maxRequestBodyBytes()) },
       },
       { status: 413, headers: secureResponseHeaders() },
     );

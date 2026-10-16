@@ -179,7 +179,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     engine.dispose()
     assert [item[0] for item in tags] == ["商机", "改造"]
     assert tags[0][1]
-    assert revision == "f8a1b2c3d4e5"
+    assert revision == "b1c2d3e4f5a6"
     assert "leader_id" in user_columns
     assert "avatar_key" in user_columns
     assert "display_name_key" in user_columns
@@ -244,6 +244,7 @@ def test_initial_migration_creates_schema_and_seed_tags(tmp_path: Path, monkeypa
     assert foreign_key_violations == []
     assert foreign_keys == 1
     assert journal_mode == "wal"
+    command.check(Config("alembic.ini"))
     get_settings.cache_clear()
 
 
@@ -272,7 +273,7 @@ def test_time_block_migration_can_downgrade_and_upgrade(
         ).fetchone() == ("work_record_time_blocks",)
         assert db.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("f8a1b2c3d4e5",)
+        ).fetchone() == ("b1c2d3e4f5a6",)
     get_settings.cache_clear()
 
 
@@ -991,7 +992,7 @@ def test_populated_previous_revision_upgrades_without_data_loss(
             """
         ).fetchall()
 
-    assert revision == "f8a1b2c3d4e5"
+    assert revision == "b1c2d3e4f5a6"
     assert user == ("historic-user", "历史升级用户", "历史升级用户")
     assert integrity == "ok"
     assert migrated_opportunity == (
@@ -1042,7 +1043,7 @@ def test_online_backup_is_integrity_checked_and_manifested(tmp_path: Path, monke
         ).fetchone()[0]
     assert integrity == "ok"
     assert display_name == "备份验证用户"
-    assert manifest["schemaRevision"] == "f8a1b2c3d4e5"
+    assert manifest["schemaRevision"] == "b1c2d3e4f5a6"
     assert manifest["sha256"]
     assert manifest["sizeBytes"] == backup_path.stat().st_size
 

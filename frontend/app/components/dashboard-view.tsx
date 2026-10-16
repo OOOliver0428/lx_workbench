@@ -242,9 +242,7 @@ export function DashboardView({
   return (
     <main className="war-room">
       <header className="war-room-topbar">
-        <div className="war-room-title-lockup">
-          <strong>解决方案部门作战台</strong>
-        </div>
+        <div className="war-room-title-lockup" />
         <nav className="war-room-tabs" aria-label="作战台视图">
           {dashboard.accessible_pages.map((pageId) => (
             <button

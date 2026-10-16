@@ -102,7 +102,12 @@ fi
         virtualenv.mkdir(parents=True)
         self.exe_at(
             virtualenv / "python",
-            """echo backup >> "$FIX/events"
+            """if [[ "${2:-}" == app.deployment_config ]]; then
+ echo config-sync >> "$FIX/events"
+ [[ ! -e "$FIX/fail-config" ]] || exit 1
+ exit 0
+fi
+echo backup >> "$FIX/events"
 [[ ! -e "$FIX/fail-backup" ]] || exit 1
 while [[ "${1:-}" != --output-dir ]]; do shift; done
 printf 'snapshot' > "$2/mvp-test.db"
@@ -216,6 +221,8 @@ printf 'snapshot' > "$2/mvp-test.db"
         events = self.events.read_text()
         self.assertLess(events.index("npm"), events.index("systemctl stop"))
         self.assertLess(events.index("backup\n"), events.index("alembic upgrade"))
+        self.assertLess(events.index("backup\n"), events.index("config-sync"))
+        self.assertLess(events.index("config-sync"), events.index("alembic upgrade"))
         self.assertTrue(list(self.backups.glob("updates/*/app.env.before")))
         self.events.write_text("")
         result = self.run_ops("update", "--offline", self.package)
@@ -335,6 +342,16 @@ printf 'snapshot' > "$2/mvp-test.db"
         self.assertIn("不要重复更新", result.stderr)
         self.assertEqual((self.root / "state").read_text().strip(), "inactive")
         self.assertTrue(list(self.backups.glob("updates/*/mvp-test.db")))
+
+    def test_config_failure_keeps_backup_and_does_not_migrate(self):
+        self.bundle()
+        (self.root / "fail-config").touch()
+        result = self.run_ops("update", "--offline", self.package)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("E_CONFIG", result.stderr)
+        self.assertNotIn("alembic upgrade", self.events.read_text())
+        self.assertEqual((self.root / "state").read_text().strip(), "inactive")
+        self.assertTrue(list(self.backups.glob("updates/*/app.env.before")))
 
     def test_lock_failure(self):
         self.bundle()

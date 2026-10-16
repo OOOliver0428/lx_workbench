@@ -9,9 +9,12 @@ ASGISend = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class RequestBodyLimitMiddleware:
-    def __init__(self, app: Any, *, max_body_bytes: int) -> None:
+    def __init__(
+        self, app: Any, *, max_body_bytes: int, path_limits: dict[str, int] | None = None
+    ) -> None:
         self.app = app
         self.max_body_bytes = max_body_bytes
+        self.path_limits = path_limits or {}
 
     async def __call__(
         self,
@@ -23,9 +26,10 @@ class RequestBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        limit = self.path_limits.get(scope.get("path", ""), self.max_body_bytes)
         content_length = self._content_length(scope)
-        if content_length is not None and content_length > self.max_body_bytes:
-            await self._reject(scope, send)
+        if content_length is not None and content_length > limit:
+            await self._reject(scope, send, limit)
             return
 
         body = bytearray()
@@ -34,8 +38,8 @@ class RequestBodyLimitMiddleware:
             if message["type"] == "http.disconnect":
                 return
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > self.max_body_bytes:
-                await self._reject(scope, send)
+            if len(body) + len(chunk) > limit:
+                await self._reject(scope, send, limit)
                 return
             body.extend(chunk)
             if not message.get("more_body", False):
@@ -64,7 +68,7 @@ class RequestBodyLimitMiddleware:
             return parsed if parsed >= 0 else None
         return None
 
-    async def _reject(self, scope: dict[str, Any], send: ASGISend) -> None:
+    async def _reject(self, scope: dict[str, Any], send: ASGISend, limit: int) -> None:
         request_id = None
         for name, value in scope.get("headers", []):
             if name.lower() == b"x-request-id":
@@ -75,7 +79,7 @@ class RequestBodyLimitMiddleware:
                 "code": "REQUEST_BODY_TOO_LARGE",
                 "message": "Request body is too large",
                 "request_id": request_id,
-                "details": {"max_bytes": self.max_body_bytes},
+                "details": {"max_bytes": limit},
             },
             separators=(",", ":"),
         ).encode("utf-8")

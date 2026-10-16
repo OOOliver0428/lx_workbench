@@ -201,6 +201,15 @@ export function Shield(props: IconProps) {
   );
 }
 
+export function Smartphone(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M11 18h2" />
+    </Svg>
+  );
+}
+
 export function Expand(props: IconProps) {
   return (
     <Svg {...props}>

@@ -7,11 +7,12 @@ const securityHeaders = [
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      "img-src 'self' data: blob:",
+      "img-src 'self' data: blob: https://*.alicdn.com https://static-captcha.aliyuncs.com",
       "font-src 'self' data:",
-      "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline'",
-      "connect-src 'self'",
+      "style-src 'self' 'unsafe-inline' https://g.alicdn.com/captcha-frontend/ https://x.alicdn.com/captcha-frontend/",
+      "script-src 'self' 'unsafe-inline' https://o.alicdn.com https://g.alicdn.com https://x.alicdn.com https://static-captcha.aliyuncs.com",
+      // The SDK fetches embedded image data as well as its device verification endpoint.
+      "connect-src 'self' data: https://*.captcha-open.aliyuncs.com https://*.captcha-open-b.aliyuncs.com https://cloudauth-device.aliyuncs.com https://cloudauth-device-dualstack.cn-shanghai.aliyuncs.com https://cn-shanghai.device.saf.aliyuncs.com https://o.alicdn.com https://g.alicdn.com https://x.alicdn.com https://static-captcha.aliyuncs.com",
       "worker-src 'self' blob:",
     ].join("; "),
   },
@@ -25,6 +26,9 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  // vinext checks multipart POSTs before dispatching API routes. The proxy still
+  // enforces 256 KiB elsewhere and 5 MiB + multipart overhead only for avatars.
+  experimental: { serverActions: { bodySizeLimit: 5 * 1024 * 1024 + 64 * 1024 } },
   async headers() {
     return [
       {

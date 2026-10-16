@@ -15,9 +15,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.router import api_router
 from app.body_limit import RequestBodyLimitMiddleware
 from app.config import Settings, get_settings
+from app.custom_avatars.config import MAX_REQUEST_BYTES, UPLOAD_PATH
+from app.custom_avatars.service import AvatarService
 from app.database import create_database_engine, create_session_factory
 from app.errors import AppError
 from app.llm_guard import LLMGuard
+from app.phone.service import PhoneService
 from app.schemas import ErrorResponse
 from app.throttle import LoginThrottle
 
@@ -30,12 +33,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine = create_database_engine(settings)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
-        yield
-        engine.dispose()
+        app.state.phone_service = PhoneService(app.state.session_factory)
+        app.state.avatar_service = AvatarService(app.state.session_factory)
+        app.state.avatar_service.start()
+        try:
+            yield
+        finally:
+            app.state.phone_service.close()
+            app.state.avatar_service.close()
+            engine.dispose()
 
     app = FastAPI(
         title="团队项目管理 MVP API",
-        version="0.5.0",
+        version="0.5.1",
         lifespan=lifespan,
         responses={
             status_code: {"model": ErrorResponse}
@@ -66,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_body_bytes=settings.api_max_body_bytes,
+        path_limits={UPLOAD_PATH: MAX_REQUEST_BYTES},
     )
 
     if settings.allowed_hosts:
@@ -127,7 +138,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         message = "请求参数不符合要求"
         for item in error.errors():
             sanitized = dict(item)
-            if any(str(part) in sensitive_fields for part in item.get("loc", ())):
+            if request.url.path == UPLOAD_PATH or request.url.path.startswith(
+                "/api/v1/profile/phone"
+            ) or any(
+                str(part) in sensitive_fields for part in item.get("loc", ())
+            ):
                 sanitized["input"] = "[REDACTED]"
             if context := sanitized.get("ctx"):
                 sanitized["ctx"] = {

@@ -1085,6 +1085,12 @@ EOF
       cd "${PROJECT_DIR}"
       workspace_run uv sync --frozen --no-dev --python 3.12
     )
+    workspace_stage "同步并检查运行配置" "已有配置值不变；检查已开启模块参数，升级前配置保存在回滚目录。" E_CONFIG
+    (
+      cd "${PROJECT_DIR}"
+      workspace_run "${PYTHON_BIN}" -m app.deployment_config \
+        --file "${ENV_FILE}" --template "${PROJECT_DIR}/deploy/ubuntu/app.env.example"
+    )
     set_frontend_runtime_state in_progress
     swap_frontend_runtime
     set_frontend_runtime_state true

@@ -5,11 +5,13 @@ from app.api.routes import (
     audit,
     auth,
     changelog,
+    custom_avatars,
     dashboard,
     department_works,
     departments,
     health,
     opportunities,
+    phone,
     profile,
     project_tags,
     projects,
@@ -24,6 +26,8 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(profile.router)
+api_router.include_router(custom_avatars.router)
+api_router.include_router(phone.router)
 api_router.include_router(users.router)
 api_router.include_router(departments.router)
 api_router.include_router(department_works.router)

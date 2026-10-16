@@ -17,7 +17,7 @@ sudo solution-workspace backup
 需要转移的内容：
 
 - 一致性数据库备份及同名 .manifest.json，文件名保持一致。
-- /etc/solution-workspace/app.env，必须保留原 MVP_LLM_CONFIG_SECRET，否则数据库中保存的大模型凭据无法解密。
+- /etc/solution-workspace/app.env，必须保留原 MVP_LLM_CONFIG_SECRET，否则数据库中保存的大模型凭据无法解密。v0.5.1 启用手机号后，还必须保留完整 MVP_PHONE_ENCRYPTION_KEYS、活动密钥 ID 和 MVP_PHONE_LOOKUP_KEY；头像需保留 COS 配置及对应对象备份。
 - 确切代码提交、所需依赖或可访问的软件源，以及定制的反向代理、HTTPS、域名和防火墙配置。
 - deploy.conf 作为参考记录；新服务器使用安装器重新生成，不直接覆盖新环境的部署路径。
 
